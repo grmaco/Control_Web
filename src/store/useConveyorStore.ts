@@ -2,6 +2,11 @@ import { v4 as uuidv4 } from 'uuid'
 import { create } from 'zustand'
 import { DEFAULT_GRID_SIZE } from '../constants/grid'
 import { storage } from '../storage'
+import {
+  APPLICATION_UNIT_ID,
+  GLOBAL_LINE_ID,
+  type ApplicationLogInput,
+} from '../utils/applicationLog'
 import type {
   AppSettings,
   ConveyorLine,
@@ -26,6 +31,7 @@ interface ConveyorState {
   createLine: (name: string) => Promise<ConveyorLine>
   fetchHistory: (filter?: HistoryFilter) => Promise<void>
   addHistory: (record: Omit<HistoryRecord, 'id' | 'timestamp'>) => Promise<void>
+  logApplication: (input: ApplicationLogInput) => Promise<void>
   updateSettings: (settings: AppSettings) => Promise<void>
 }
 
@@ -110,6 +116,7 @@ export const useConveyorStore = create<ConveyorState>((set, get) => ({
       name,
       gridSize: { ...DEFAULT_GRID_SIZE },
       units: [],
+      baseUnitId: null,
       createdAt: now,
       updatedAt: now,
     }
@@ -131,6 +138,16 @@ export const useConveyorStore = create<ConveyorState>((set, get) => ({
     }
     await storage.addHistory(fullRecord)
     await get().fetchHistory()
+  },
+
+  logApplication: async ({ title, comment, lineId }) => {
+    await get().addHistory({
+      unitId: APPLICATION_UNIT_ID,
+      lineId: lineId ?? get().selectedLineId ?? GLOBAL_LINE_ID,
+      eventType: 'application',
+      logTitle: title,
+      message: comment,
+    })
   },
 
   updateSettings: async (settings) => {

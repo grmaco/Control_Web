@@ -15,6 +15,7 @@ export type HistoryEventType =
   | 'error'
   | 'maintenance'
   | 'statusChange'
+  | 'application'
 
 export interface ConveyorUnit {
   id: string
@@ -35,6 +36,8 @@ export interface ConveyorLine {
   name: string
   gridSize: { cols: number; rows: number }
   units: ConveyorUnit[]
+  /** CV-01 순번 부여 시작점 유닛 ID */
+  baseUnitId?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -45,6 +48,7 @@ export interface HistoryRecord {
   lineId: string
   eventType: HistoryEventType
   message: string
+  logTitle?: string
   prevStatus?: string
   nextStatus?: string
   timestamp: string

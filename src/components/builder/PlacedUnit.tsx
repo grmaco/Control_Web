@@ -8,10 +8,17 @@ interface PlacedUnitProps {
   unit: ConveyorUnit
   selected: boolean
   isBase: boolean
+  showLabels?: boolean
   onSelect: () => void
 }
 
-export function PlacedUnit({ unit, selected, isBase, onSelect }: PlacedUnitProps) {
+export function PlacedUnit({
+  unit,
+  selected,
+  isBase,
+  showLabels = true,
+  onSelect,
+}: PlacedUnitProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: unitDragId(unit.id),
     data: { source: 'grid', unitId: unit.id } satisfies GridDragData,
@@ -32,20 +39,24 @@ export function PlacedUnit({ unit, selected, isBase, onSelect }: PlacedUnitProps
       className={`absolute inset-0 flex h-full w-full cursor-grab flex-col items-center justify-center border p-0.5 text-[10px] leading-tight active:cursor-grabbing ${
         colors.bg
       } ${colors.border} ${selected ? 'ring-2 ring-inset ring-white' : ''} ${
-        isBase ? 'ring-2 ring-inset ring-amber-400' : ''
+        isBase ? 'ring-2 ring-inset ring-violet-400' : ''
       } ${isDragging ? 'opacity-30' : 'hover:brightness-110'}`}
       title={isBase ? `${unitTitle(unit)} · 기준` : unitTitle(unit)}
     >
-      {isBase && (
-        <span className="absolute top-0.5 left-0.5 rounded bg-amber-500 px-0.5 text-[8px] font-bold text-slate-900">
+      {isBase && showLabels && (
+        <span className="absolute top-0.5 left-0.5 rounded bg-violet-600 px-0.5 text-[8px] font-bold text-white">
           기준
         </span>
       )}
-      <span className="font-semibold text-white">{unit.name}</span>
-      <span className="text-white/70">{typeLabel(unit.type)}</span>
-      {showsRotation(unit.type) && (
-        <span className="text-white/60">{unit.rotation}°</span>
-      )}
+      {showLabels ? (
+        <>
+          <span className="font-semibold text-white">{unit.name}</span>
+          <span className="text-white/70">{typeLabel(unit.type)}</span>
+          {showsRotation(unit.type) && (
+            <span className="text-white/60">{unit.rotation}°</span>
+          )}
+        </>
+      ) : null}
     </button>
   )
 }

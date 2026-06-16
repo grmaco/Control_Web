@@ -24,7 +24,8 @@ export function BuilderPage() {
         <div>
           <h2 className="text-xl font-semibold">라인 빌더</h2>
           <p className="mt-1 text-sm text-slate-400">
-            16×8 그리드 · 최대 {MAX_UNITS}개 유닛 · 드래그로 배치 · R키 회전
+            배치 영역 중심 작업 화면 · 저장 맵 128×128 · 최대{' '}
+            {MAX_UNITS.toLocaleString()}개 유닛 · 드래그 배치 · R키 회전
           </p>
         </div>
         <LineSelectorPanel />

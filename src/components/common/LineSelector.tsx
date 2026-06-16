@@ -6,12 +6,20 @@ export function LineSelector() {
   const selectedLineId = useConveyorStore((s) => s.selectedLineId)
   const selectLine = useConveyorStore((s) => s.selectLine)
   const createLine = useConveyorStore((s) => s.createLine)
+  const logApplication = useConveyorStore((s) => s.logApplication)
 
   if (lines.length === 0) {
     return (
       <button
         type="button"
-        onClick={() => createLine('새 라인')}
+        onClick={async () => {
+          const line = await createLine('새 라인')
+          void logApplication({
+            title: 'Button Click',
+            comment: `Line Create: ${line.name}`,
+            lineId: line.id,
+          })
+        }}
         className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500"
       >
         첫 라인 만들기
@@ -22,7 +30,18 @@ export function LineSelector() {
   return (
     <select
       value={selectedLineId ?? ''}
-      onChange={(e) => selectLine(e.target.value || null)}
+      onChange={(e) => {
+        const lineId = e.target.value || null
+        void selectLine(lineId)
+        if (lineId) {
+          const line = lines.find((item) => item.id === lineId)
+          void logApplication({
+            title: 'Button Click',
+            comment: `Line Select: ${line?.name ?? lineId}`,
+            lineId,
+          })
+        }
+      }}
       className="rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-100"
     >
       {lines.map((line) => (
@@ -43,6 +62,7 @@ export function LineSelectorPanel({ onCreateLine }: LineSelectorPanelProps) {
   const selectedLineId = useConveyorStore((s) => s.selectedLineId)
   const createLine = useConveyorStore((s) => s.createLine)
   const renameLine = useConveyorStore((s) => s.renameLine)
+  const logApplication = useConveyorStore((s) => s.logApplication)
 
   const selectedLine = lines.find((line) => line.id === selectedLineId) ?? null
   const [draftName, setDraftName] = useState(selectedLine?.name ?? '')
@@ -60,7 +80,14 @@ export function LineSelectorPanel({ onCreateLine }: LineSelectorPanelProps) {
       return
     }
 
-    await renameLine(selectedLineId, trimmed)
+    if (trimmed !== selectedLine?.name) {
+      await renameLine(selectedLineId, trimmed)
+      void logApplication({
+        title: 'Button Click',
+        comment: `Line Rename: ${trimmed}`,
+        lineId: selectedLineId,
+      })
+    }
   }
 
   return (
@@ -89,7 +116,12 @@ export function LineSelectorPanel({ onCreateLine }: LineSelectorPanelProps) {
       <button
         type="button"
         onClick={async () => {
-          await createLine(`라인 ${Date.now().toString().slice(-4)}`)
+          const line = await createLine(`라인 ${Date.now().toString().slice(-4)}`)
+          void logApplication({
+            title: 'Button Click',
+            comment: `Line Create: ${line.name}`,
+            lineId: line.id,
+          })
           onCreateLine?.()
         }}
         className="rounded-md border border-slate-700 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-800"

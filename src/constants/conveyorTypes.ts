@@ -1,4 +1,5 @@
 import type { ConveyorType, ConveyorUnit, InterfaceUnitType, LegacyConveyorType } from '../types/conveyor'
+import { DEFAULT_GRID_SIZE } from './grid'
 
 export const CONVEYOR_TYPES: ConveyorType[] = ['straight', 'turn', 'junction', 'lift']
 
@@ -64,10 +65,24 @@ export function normalizeUnit(
   return { ...unit, type, interfaceUnit }
 }
 
-export function normalizeLine<T extends { units: ConveyorUnit[] }>(line: T): T {
+export function normalizeLine<
+  T extends {
+    units: ConveyorUnit[]
+    gridSize?: { cols: number; rows: number }
+    baseUnitId?: string | null
+  },
+>(line: T): T {
+  const units = line.units.map((unit) => normalizeUnit(unit))
+  const baseUnitId =
+    line.baseUnitId && units.some((unit) => unit.id === line.baseUnitId)
+      ? line.baseUnitId
+      : null
+
   return {
     ...line,
-    units: line.units.map((unit) => normalizeUnit(unit)),
+    gridSize: { ...DEFAULT_GRID_SIZE },
+    units,
+    baseUnitId,
   }
 }
 

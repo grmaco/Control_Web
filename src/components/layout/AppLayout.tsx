@@ -1,7 +1,21 @@
+import { useEffect, useRef } from 'react'
 import { Outlet } from 'react-router-dom'
+import { useConveyorStore } from '../../store/useConveyorStore'
 import { Navigation } from './Navigation'
 
 export function AppLayout() {
+  const logApplication = useConveyorStore((s) => s.logApplication)
+  const hasLoggedStart = useRef(false)
+
+  useEffect(() => {
+    if (hasLoggedStart.current) return
+    hasLoggedStart.current = true
+    void logApplication({
+      title: 'Application Start',
+      comment: 'C/V Control System initialized',
+    })
+  }, [logApplication])
+
   return (
     <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
       <header className="border-b border-slate-800 bg-slate-900">

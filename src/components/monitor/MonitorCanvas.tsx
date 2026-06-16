@@ -3,12 +3,31 @@ import {
   TransformWrapper,
   type ReactZoomPanPinchRef,
 } from 'react-zoom-pan-pinch'
-import { useRef } from 'react'
-import { showsRotation, typeLabel, unitTitle } from '../../constants/conveyorTypes'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, MONITOR_CELL_SIZE } from '../../constants/grid'
+import { useConveyorStore } from '../../store/useConveyorStore'
 import type { ConveyorLine } from '../../types/conveyor'
-import { STATUS_COLORS } from '../../constants/statusColors'
+import { fitFullMapInView, focusLineInView } from '../../utils/monitorView'
+import { LineStatusGrid } from './LineStatusGrid'
 
-const CELL_SIZE = 48
+const CELL_SIZE = MONITOR_CELL_SIZE
+/** 화면상 셀 크기가 이 값(px) 이상이면 이름·타입 표시 */
+const LABELS_MIN_EFFECTIVE_CELL = 32
+
+const ZOOM_CONFIG = {
+  initialScale: 1,
+  minScale: 0.1,
+  maxScale: 10,
+  smooth: true,
+  wheel: { step: 0.004 },
+  zoomAnimation: {
+    disabled: false,
+    animationTime: 320,
+    animationType: 'easeOut' as const,
+  },
+  panning: { velocityDisabled: true },
+  doubleClick: { disabled: true },
+}
 
 interface MonitorCanvasProps {
   line: ConveyorLine
@@ -16,81 +35,111 @@ interface MonitorCanvasProps {
 
 export function MonitorCanvas({ line }: MonitorCanvasProps) {
   const transformRef = useRef<ReactZoomPanPinchRef>(null)
+  const [scale, setScale] = useState(1)
+  const lastFocusedAt = useRef<string | null>(null)
+  const logApplication = useConveyorStore((s) => s.logApplication)
+
+  const logButton = (comment: string) => {
+    void logApplication({
+      title: 'Button Click',
+      comment: `Monitor: ${comment}`,
+      lineId: line.id,
+    })
+  }
+
+  const effectiveCellSize = CELL_SIZE * scale
+  const showLabels = effectiveCellSize >= LABELS_MIN_EFFECTIVE_CELL
+
+  const applyLineFocus = useCallback(
+    (animationTime = 0) => {
+      const ref = transformRef.current
+      if (ref) focusLineInView(ref, line, CELL_SIZE, animationTime)
+    },
+    [line],
+  )
+
+  const handleInit = useCallback(
+    (ref: ReactZoomPanPinchRef) => {
+      lastFocusedAt.current = line.updatedAt
+      focusLineInView(ref, line, CELL_SIZE)
+    },
+    [line],
+  )
+
+  useEffect(() => {
+    lastFocusedAt.current = null
+  }, [line.id])
+
+  useEffect(() => {
+    if (lastFocusedAt.current === line.updatedAt) return
+    lastFocusedAt.current = line.updatedAt
+    applyLineFocus(200)
+  }, [line.updatedAt, applyLineFocus])
 
   return (
     <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900">
       <div className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
         <p className="text-sm text-slate-400">
-          {line.name} · 유닛 {line.units.length}개
+          {line.name} · {DEFAULT_GRID_COLS}×{DEFAULT_GRID_ROWS} · 유닛 {line.units.length}개
         </p>
         <div className="flex items-center gap-1">
-          <ZoomButton label="−" onClick={() => transformRef.current?.zoomOut()} />
-          <ZoomButton label="+" onClick={() => transformRef.current?.zoomIn()} />
           <ZoomButton
-            label="전체보기"
-            onClick={() => transformRef.current?.resetTransform()}
+            label="−"
+            onClick={() => {
+              transformRef.current?.zoomOut(0.35, 280, 'easeOut')
+              logButton('Zoom Out')
+            }}
+          />
+          <ZoomButton
+            label="+"
+            onClick={() => {
+              transformRef.current?.zoomIn(0.35, 280, 'easeOut')
+              logButton('Zoom In')
+            }}
+          />
+          <ZoomButton
+            label="라인 맞춤"
+            onClick={() => {
+              applyLineFocus(320)
+              logButton('Line Fit')
+            }}
+            wide
+          />
+          <ZoomButton
+            label="전체 맵"
+            onClick={() => {
+              if (transformRef.current) {
+                fitFullMapInView(transformRef.current, line, CELL_SIZE, 320)
+              }
+              logButton('Full Map')
+            }}
             wide
           />
         </div>
       </div>
 
       <TransformWrapper
+        key={line.id}
         ref={transformRef}
-        initialScale={1}
-        minScale={0.4}
-        maxScale={3}
-        centerOnInit
-        wheel={{ step: 0.08 }}
-        panning={{ velocityDisabled: true }}
-        doubleClick={{ disabled: true }}
+        onInit={handleInit}
+        onTransform={(_, state) => setScale(state.scale)}
+        {...ZOOM_CONFIG}
       >
         <TransformComponent
           wrapperClass="!h-[520px] !w-full cursor-grab active:cursor-grabbing"
-          contentClass="!w-full !h-full flex items-center justify-center p-8"
         >
-          <div
-            className="grid gap-0 border border-dashed border-slate-700 bg-slate-950/50"
-            style={{
-              gridTemplateColumns: `repeat(${line.gridSize.cols}, ${CELL_SIZE}px)`,
-            }}
-          >
-            {Array.from({
-              length: line.gridSize.cols * line.gridSize.rows,
-            }).map((_, index) => {
-              const x = index % line.gridSize.cols
-              const y = Math.floor(index / line.gridSize.cols)
-              const unit = line.units.find((u) => u.gridX === x && u.gridY === y)
-              const colors = unit ? STATUS_COLORS[unit.status] : null
-
-              return (
-                <div
-                  key={`${x}-${y}`}
-                  style={{ width: CELL_SIZE, height: CELL_SIZE }}
-                  className={`flex h-full w-full flex-col items-center justify-center border p-0.5 text-[10px] leading-tight ${
-                    unit
-                      ? `${colors!.bg} ${colors!.border} text-white`
-                      : 'border-slate-800 bg-slate-900/60 text-slate-600'
-                  }`}
-                  title={unit ? unitTitle(unit) : undefined}
-                >
-                  {unit ? (
-                    <>
-                      <span className="font-semibold">{unit.name}</span>
-                      <span className="text-white/70">{typeLabel(unit.type)}</span>
-                      {showsRotation(unit.type) && (
-                        <span className="text-white/60">{unit.rotation}°</span>
-                      )}
-                    </>
-                  ) : null}
-                </div>
-              )
-            })}
-          </div>
+          <LineStatusGrid
+            line={line}
+            cellSize={CELL_SIZE}
+            scale={scale}
+            showLabels={showLabels}
+            className="pointer-events-none select-none"
+          />
         </TransformComponent>
       </TransformWrapper>
 
       <p className="border-t border-slate-800 px-4 py-2 text-xs text-slate-500">
-        마우스 휠: 줌 · 드래그: 이동 · +/- 버튼 또는 전체보기로 리셋
+        마우스 휠: 줌 · 드래그: 이동 · 줌인 시 모듈 정보 표시 · 라인 맞춤 / 전체 맵
       </p>
     </div>
   )

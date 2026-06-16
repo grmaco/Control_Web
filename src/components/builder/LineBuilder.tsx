@@ -1,19 +1,22 @@
 import {
   DndContext,
   DragOverlay,
+  MeasuringStrategy,
   PointerSensor,
+  pointerWithin,
   useSensor,
   useSensors,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CONVEYOR_TYPES,
   typeDescription,
   typeLabel,
 } from '../../constants/conveyorTypes'
+import { BUILDER_CELL_SIZE } from '../../constants/grid'
 import type { ConveyorLine, ConveyorUnit } from '../../types/conveyor'
 import {
   addUnitToLine,
@@ -29,7 +32,10 @@ import {
   parseCellId,
   type PaletteDragData,
 } from './dnd'
+import type { LineViewport } from '../../utils/lineViewport'
 import { assignSequentialNamesFromBase } from '../../utils/sequentialNaming'
+import { findUnitAt, getBuilderViewport } from '../../utils/lineViewport'
+import { useConveyorStore } from '../../store/useConveyorStore'
 import { GridCell } from './GridCell'
 import { PaletteItem } from './PaletteItem'
 import { PlacementToolbar } from './PlacementToolbar'
@@ -50,29 +56,33 @@ interface LineBuilderProps {
 export function LineBuilder({ line, onSave }: LineBuilderProps) {
   const [draft, setDraft] = useState(line)
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null)
-  const [baseUnitId, setBaseUnitId] = useState<string | null>(null)
   const [completionMessage, setCompletionMessage] = useState<string | null>(null)
   const [activeDrag, setActiveDrag] = useState<BuilderDragData | null>(null)
   const [overCellId, setOverCellId] = useState<string | null>(null)
+  const [frozenViewport, setFrozenViewport] = useState<LineViewport | null>(null)
+  const logApplication = useConveyorStore((s) => s.logApplication)
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+
+  const baseUnitId = draft.baseUnitId ?? null
 
   useEffect(() => {
     setDraft(line)
     setSelectedUnitId(null)
-    setBaseUnitId(null)
     setCompletionMessage(null)
   }, [line.id])
 
   useEffect(() => {
     setDraft((current) =>
-      current.id === line.id ? { ...current, name: line.name } : current,
+      current.id === line.id
+        ? {
+            ...current,
+            name: line.name,
+            baseUnitId: line.baseUnitId ?? null,
+          }
+        : current,
     )
-  }, [line.id, line.name])
-
-  useEffect(() => {
-    if (baseUnitId && !draft.units.some((unit) => unit.id === baseUnitId)) {
-      setBaseUnitId(null)
-    }
-  }, [baseUnitId, draft.units])
+  }, [line.id, line.name, line.baseUnitId])
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -106,27 +116,40 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveDrag(event.active.data.current as BuilderDragData)
+    setFrozenViewport(getBuilderViewport(draftRef.current))
   }
 
   const handleDragOver = (event: DragOverEvent) => {
     setOverCellId(event.over?.id ? String(event.over.id) : null)
   }
 
+  const resolveDropCell = (over: DragEndEvent['over']) => {
+    if (!over) return null
+
+    const data = over.data.current as { gridX?: number; gridY?: number } | undefined
+    if (data?.gridX !== undefined && data?.gridY !== undefined) {
+      return { gridX: data.gridX, gridY: data.gridY }
+    }
+
+    return parseCellId(String(over.id))
+  }
+
   const handleDragEnd = async (event: DragEndEvent) => {
     const dragData = event.active.data.current as BuilderDragData | undefined
-    const overId = event.over?.id ? String(event.over.id) : null
     setActiveDrag(null)
     setOverCellId(null)
+    setFrozenViewport(null)
 
-    if (!dragData || !overId) return
+    if (!dragData) return
 
-    const cell = parseCellId(overId)
+    const cell = resolveDropCell(event.over)
     if (!cell) return
 
     const { gridX, gridY } = cell
+    const currentDraft = draftRef.current
 
     if (dragData.source === 'palette') {
-      const next = addUnitToLine(draft, dragData.type, gridX, gridY)
+      const next = addUnitToLine(currentDraft, dragData.type, gridX, gridY)
       if (!next) return
       await persist(next)
       const placed = next.units.find((u) => u.gridX === gridX && u.gridY === gridY)
@@ -134,7 +157,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
       return
     }
 
-    const next = moveUnitInLine(draft, dragData.unitId, gridX, gridY)
+    const next = moveUnitInLine(currentDraft, dragData.unitId, gridX, gridY)
     if (!next) return
     await persist(next)
     setSelectedUnitId(dragData.unitId)
@@ -143,6 +166,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   const handleDragCancel = () => {
     setActiveDrag(null)
     setOverCellId(null)
+    setFrozenViewport(null)
   }
 
   const handleRotate = useCallback(
@@ -160,17 +184,33 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   const handleDelete = useCallback(
     async (unitId: string) => {
       const next = removeUnitFromLine(draft, unitId)
-      await persist(next)
+      await persist({
+        ...next,
+        baseUnitId: draft.baseUnitId === unitId ? null : (draft.baseUnitId ?? null),
+        updatedAt: new Date().toISOString(),
+      })
       setSelectedUnitId(null)
-      if (baseUnitId === unitId) setBaseUnitId(null)
     },
-    [draft, persist, baseUnitId],
+    [draft, persist],
   )
 
-  const handleSetBase = useCallback((unitId: string) => {
-    setBaseUnitId(unitId)
-    setCompletionMessage(null)
-  }, [])
+  const handleSetBase = useCallback(
+    async (unitId: string) => {
+      setCompletionMessage(null)
+      const unit = draft.units.find((item) => item.id === unitId)
+      await persist({
+        ...draft,
+        baseUnitId: unitId,
+        updatedAt: new Date().toISOString(),
+      })
+      void logApplication({
+        title: 'Button Click',
+        comment: `Builder: Set Base Unit ${unit?.name ?? unitId}`,
+        lineId: draft.id,
+      })
+    },
+    [draft, persist, logApplication],
+  )
 
   const handleCompletePlacement = useCallback(async () => {
     if (!baseUnitId) return
@@ -178,6 +218,12 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     try {
       const result = assignSequentialNamesFromBase(draft, baseUnitId)
       await persist(result.line)
+
+      void logApplication({
+        title: 'Button Click',
+        comment: `Builder: Placement Complete (${result.orderedUnitIds.length} units)`,
+        lineId: draft.id,
+      })
 
       const summary =
         result.disconnectedUnitIds.length > 0
@@ -190,7 +236,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
         error instanceof Error ? error.message : '순번 부여에 실패했습니다.',
       )
     }
-  }, [baseUnitId, draft, persist])
+  }, [baseUnitId, draft, persist, logApplication])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -212,9 +258,16 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
       ? (draft.units.find((u) => u.id === activeDrag.unitId) ?? null)
       : null
 
+  const computedViewport = useMemo(() => getBuilderViewport(draft), [draft])
+  const viewport = frozenViewport ?? computedViewport
+
   return (
     <DndContext
       sensors={sensors}
+      collisionDetection={pointerWithin}
+      measuring={{
+        droppable: { strategy: MeasuringStrategy.Always },
+      }}
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
@@ -242,10 +295,11 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
         </aside>
 
         <section className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-          <div className="mb-3 flex items-center justify-between text-sm">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="text-slate-300">{draft.name}</span>
             <span className="text-slate-500">
-              {draft.units.length} / {draft.gridSize.cols * draft.gridSize.rows} 유닛
+              작업 영역 {viewport.cols}×{viewport.rows} · {draft.units.length} /{' '}
+              {draft.gridSize.cols * draft.gridSize.rows} 유닛
             </span>
           </div>
 
@@ -258,22 +312,22 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
             onComplete={handleCompletePlacement}
           />
 
-          <div
-            className="grid gap-0 select-none border border-slate-800"
-            style={{
-              gridTemplateColumns: `repeat(${draft.gridSize.cols}, minmax(0, 1fr))`,
-            }}
-            onClick={() => setSelectedUnitId(null)}
-          >
-            {Array.from({
-              length: draft.gridSize.cols * draft.gridSize.rows,
-            }).map((_, index) => {
-              const gridX = index % draft.gridSize.cols
-              const gridY = Math.floor(index / draft.gridSize.cols)
+          <div className="max-h-[520px] overflow-auto rounded border border-slate-800">
+            <div
+              className="inline-grid gap-0 select-none"
+              style={{
+                gridTemplateColumns: `repeat(${viewport.cols}, ${BUILDER_CELL_SIZE}px)`,
+                gridTemplateRows: `repeat(${viewport.rows}, ${BUILDER_CELL_SIZE}px)`,
+              }}
+              onClick={() => setSelectedUnitId(null)}
+            >
+            {Array.from({ length: viewport.cols * viewport.rows }).map((_, index) => {
+              const localX = index % viewport.cols
+              const localY = Math.floor(index / viewport.cols)
+              const gridX = viewport.minX + localX
+              const gridY = viewport.minY + localY
               const cellKey = `cell-${gridX}-${gridY}`
-              const unit = draft.units.find(
-                (u) => u.gridX === gridX && u.gridY === gridY,
-              )
+              const unit = findUnitAt(draft.units, gridX, gridY)
               const dropState = getDropState(gridX, gridY, cellKey)
 
               return (
@@ -281,6 +335,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                   key={cellKey}
                   gridX={gridX}
                   gridY={gridY}
+                  cellSize={BUILDER_CELL_SIZE}
                   occupied={Boolean(unit)}
                   {...dropState}
                 >
@@ -289,13 +344,19 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                       unit={unit}
                       selected={selectedUnitId === unit.id}
                       isBase={baseUnitId === unit.id}
+                      showLabels
                       onSelect={() => setSelectedUnitId(unit.id)}
                     />
                   ) : null}
                 </GridCell>
               )
             })}
+            </div>
           </div>
+          <p className="mt-2 text-xs text-slate-500">
+            배치된 영역 중심 작업 화면 · 저장 맵 {draft.gridSize.cols}×
+            {draft.gridSize.rows} · 드래그 시 가장자리로 작업 영역 확장
+          </p>
         </section>
 
         <aside className="rounded-lg border border-slate-800 bg-slate-900 p-4">
