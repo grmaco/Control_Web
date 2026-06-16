@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(where nuget *)",
+      "Bash(where dotnet *)",
+      "Bash(powershell -Command \"Test-Path 'C:\\\\Users\\\\170509\\\\Documents\\\\Semi_Conv_V3\\\\V3\\\\packages'\")"
+    ]
+  }
+}

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>WebSocket Jog 테스트</title>
+<style>
+  body { font-family: sans-serif; padding: 24px; background: #1e1e1e; color: #eee; }
+  input { padding: 6px; width: 80px; }
+  button { padding: 10px 20px; font-size: 16px; margin: 4px; cursor: pointer; }
+  #jogForward { background: #2e7d32; color: white; }
+  #jogBackward { background: #1565c0; color: white; }
+  #stop { background: #c62828; color: white; }
+  #log { margin-top: 16px; padding: 8px; background: #111; height: 240px; overflow-y: auto; font-family: monospace; font-size: 13px; white-space: pre-wrap; }
+  .ok { color: #4caf50; } .err { color: #f44336; } .info { color: #90caf9; }
+</style>
+</head>
+<body>
+  <h2>컨베이어 WebSocket Jog 테스트</h2>
+
+  <div>
+    <label>WS 주소: <input id="wsUrl" value="ws://localhost:8181" style="width:220px;" /></label>
+    <button id="connect">연결</button>
+    <span id="status">미연결</span>
+  </div>
+
+  <div style="margin-top:16px;">
+    <label>속도(velocity): <input id="velocity" type="number" value="50" /></label>
+  </div>
+
+  <div style="margin-top:8px;">
+    <!-- 누르고 있는 동안 전진, 떼면 정지 (실제 Jog 버튼과 동일한 방식) -->
+    <button id="jogBackward">◀ Jog 후진</button>
+    <button id="jogForward">Jog 전진 ▶</button>
+    <button id="stop">정지</button>
+  </div>
+
+  <div id="log"></div>
+
+<script>
+let ws = null;
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+
+function log(msg, cls) {
+  const line = document.createElement('div');
+  line.className = cls || '';
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+document.getElementById('connect').addEventListener('click', () => {
+  const url = document.getElementById('wsUrl').value;
+  ws = new WebSocket(url);
+
+  ws.onopen = () => { statusEl.textContent = '연결됨'; log('WebSocket 연결됨: ' + url, 'ok'); };
+  ws.onclose = () => { statusEl.textContent = '연결 종료'; log('WebSocket 연결 종료', 'err'); };
+  ws.onerror = (e) => { log('WebSocket 오류', 'err'); };
+  ws.onmessage = (e) => { log('수신: ' + e.data, 'info'); };
+});
+
+function send(obj) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    log('WebSocket이 연결되어 있지 않습니다.', 'err');
+    return;
+  }
+  const msg = JSON.stringify(obj);
+  ws.send(msg);
+  log('송신: ' + msg);
+}
+
+function jog(direction) {
+  const velocity = parseFloat(document.getElementById('velocity').value) || 0;
+  send({ cmd: 'jog', direction, velocity });
+}
+function stop() {
+  send({ cmd: 'stop' });
+}
+
+const btnForward = document.getElementById('jogForward');
+const btnBackward = document.getElementById('jogBackward');
+
+// 마우스를 누르고 있는 동안 Jog, 떼거나 영역을 벗어나면 정지
+['mousedown', 'touchstart'].forEach(evt => {
+  btnForward.addEventListener(evt, () => jog('forward'));
+  btnBackward.addEventListener(evt, () => jog('backward'));
+});
+['mouseup', 'mouseleave', 'touchend'].forEach(evt => {
+  btnForward.addEventListener(evt, stop);
+  btnBackward.addEventListener(evt, stop);
+});
+
+document.getElementById('stop').addEventListener('click', stop);
+</script>
+</body>
+</html>
