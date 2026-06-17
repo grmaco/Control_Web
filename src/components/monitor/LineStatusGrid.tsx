@@ -3,6 +3,7 @@ import type { ConveyorLine } from '../../types/conveyor'
 import { STATUS_COLORS } from '../../constants/statusColors'
 import type { LineViewport } from '../../utils/lineViewport'
 import { findUnitAt } from '../../utils/lineViewport'
+import { getUnitFootprint, isUnitAnchor } from '../../utils/unitFootprint'
 import { buildUnitLabelLines, LABEL_LINE_HEIGHT } from '../../utils/monitorLabel'
 
 interface LineStatusGridProps {
@@ -43,26 +44,50 @@ export function LineStatusGrid({
         const gridY = minY + localY
         const unit = findUnitAt(line.units, gridX, gridY)
         const colors = unit ? STATUS_COLORS[unit.status] : null
-        const label =
-          unit && showLabels
-            ? buildUnitLabelLines(unit, cellSize, scale)
-            : null
+        const isAnchor = unit ? isUnitAnchor(unit, gridX, gridY) : false
+        const footprint = unit ? getUnitFootprint(unit) : null
+        const isMultiCell = footprint !== null && (footprint.cols > 1 || footprint.rows > 1)
+        const isMultiCellAnchor = isAnchor && isMultiCell
+        const showUnitLabel = unit && showLabels && isAnchor
+        const label = showUnitLabel
+          ? buildUnitLabelLines(
+              unit,
+              cellSize,
+              scale,
+              footprint?.cols ?? 1,
+              footprint?.rows ?? 1,
+            )
+          : null
+        const spanWidth = footprint ? footprint.cols * cellSize : cellSize
+        const spanHeight = footprint ? footprint.rows * cellSize : cellSize
 
         return (
           <div
             key={`${gridX}-${gridY}`}
             style={{ width: cellSize, height: cellSize }}
-            className={`flex h-full w-full min-w-0 flex-col items-center justify-center overflow-hidden border p-0.5 ${
+            className={`flex h-full w-full min-w-0 flex-col items-center justify-center border p-0.5 ${
+              isMultiCellAnchor
+                ? 'relative z-10 overflow-visible'
+                : isMultiCell && unit
+                  ? 'relative z-0 overflow-hidden'
+                  : 'overflow-hidden'
+            } ${
               unit
                 ? `${colors!.bg} ${colors!.border} text-white`
                 : 'border-slate-800 bg-slate-900/60 text-slate-600'
             }`}
-            title={unit ? unitTitle(unit) : undefined}
+            title={isAnchor && unit ? unitTitle(unit) : undefined}
           >
             {label && label.lines.length > 0 ? (
               <div
-                className="flex w-full min-h-0 min-w-0 max-w-full flex-col items-center justify-center overflow-hidden"
+                className={`flex flex-col items-center justify-center overflow-hidden ${
+                  isMultiCellAnchor
+                    ? 'absolute top-0 left-0 z-10'
+                    : 'h-full w-full min-h-0 min-w-0 max-w-full'
+                }`}
                 style={{
+                  width: isMultiCellAnchor ? spanWidth : undefined,
+                  height: isMultiCellAnchor ? spanHeight : undefined,
                   fontSize: label.fontSize,
                   lineHeight: LABEL_LINE_HEIGHT,
                 }}

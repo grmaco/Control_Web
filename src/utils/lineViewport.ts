@@ -4,6 +4,9 @@ import {
   BUILDER_DEFAULT_VIEWPORT_ROWS,
   BUILDER_VIEWPORT_PADDING,
 } from '../constants/grid'
+import { findUnitAtCell, getUnitFootprint } from './unitFootprint'
+
+export { findUnitAtCell } from './unitFootprint'
 
 export interface LineViewport {
   minX: number
@@ -48,9 +51,14 @@ export function getBuilderViewport(
   let maxY = BUILDER_DEFAULT_VIEWPORT_ROWS - 1
 
   if (line.units.length > 0) {
-    const bounds = getLineViewport(line, 0)!
-    maxX = Math.max(maxX, bounds.maxX + padding)
-    maxY = Math.max(maxY, bounds.maxY + padding)
+    const unitMaxX = Math.max(
+      ...line.units.map((u) => u.gridX + getUnitFootprint(u).cols - 1),
+    )
+    const unitMaxY = Math.max(
+      ...line.units.map((u) => u.gridY + getUnitFootprint(u).rows - 1),
+    )
+    maxX = Math.max(maxX, unitMaxX + padding)
+    maxY = Math.max(maxY, unitMaxY + padding)
   }
 
   return clampViewportToGrid(0, 0, maxX, maxY, gridCols, gridRows)
@@ -63,9 +71,13 @@ export function getLineViewport(
   if (line.units.length === 0) return null
 
   const minX = Math.min(...line.units.map((u) => u.gridX))
-  const maxX = Math.max(...line.units.map((u) => u.gridX))
   const minY = Math.min(...line.units.map((u) => u.gridY))
-  const maxY = Math.max(...line.units.map((u) => u.gridY))
+  const maxX = Math.max(
+    ...line.units.map((u) => u.gridX + getUnitFootprint(u).cols - 1),
+  )
+  const maxY = Math.max(
+    ...line.units.map((u) => u.gridY + getUnitFootprint(u).rows - 1),
+  )
 
   const paddedMinX = Math.max(0, minX - padding)
   const paddedMinY = Math.max(0, minY - padding)
@@ -87,7 +99,7 @@ export function findUnitAt(
   gridX: number,
   gridY: number,
 ): ConveyorUnit | undefined {
-  return units.find((u) => u.gridX === gridX && u.gridY === gridY)
+  return findUnitAtCell(units, gridX, gridY)
 }
 
 export function fitCellSize(

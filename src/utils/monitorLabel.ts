@@ -1,4 +1,4 @@
-import { showsRotation, typeLabel } from '../constants/conveyorTypes'
+import { isPortUnit, isStorageUnit, showsRotation, showsTypeLabelInCell, formatRotationDisplay, typeLabel } from '../constants/conveyorTypes'
 import type { ConveyorUnit } from '../types/conveyor'
 
 export const LABEL_LINE_HEIGHT = 1.12
@@ -38,12 +38,26 @@ export function buildUnitLabelLines(
   unit: ConveyorUnit,
   cellSize: number,
   scale: number,
+  spanCols = 1,
+  spanRows = 1,
 ): UnitLabelLines {
-  const effectiveInner = Math.max(8, (cellSize - CELL_INSET) * scale)
+  const spanWidth = cellSize * spanCols
+  const spanHeight = cellSize * spanRows
+  const effectiveInner = Math.max(
+    8,
+    Math.min(spanWidth, spanHeight) - CELL_INSET,
+  ) * scale
 
-  const candidates: string[] = [unit.name, typeLabel(unit.type)]
-  if (showsRotation(unit.type)) {
-    candidates.push(`${unit.rotation}°`)
+  const candidates: string[] = [unit.name]
+  if (isPortUnit(unit)) {
+    candidates.push(unit.portDirection ?? 'IN')
+  } else if (!isStorageUnit(unit)) {
+    if (showsTypeLabelInCell(unit.type)) {
+      candidates.push(typeLabel(unit.type))
+    }
+    if (showsRotation(unit.type)) {
+      candidates.push(formatRotationDisplay(unit))
+    }
   }
 
   let lines = [candidates[0]]

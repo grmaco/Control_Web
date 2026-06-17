@@ -44,26 +44,38 @@ export function AlarmHistoryPanel({ line }: { line: ConveyorLine }) {
             표시할 알람이 없습니다.
           </p>
         ) : (
-          <table className="w-full text-left text-xs">
-            <thead className="sticky top-0 bg-slate-900 text-slate-400">
+          <table className="w-full table-fixed text-center text-xs">
+            <colgroup>
+              <col className="w-8" />
+              <col className="w-[92px]" />
+              <col className="w-12" />
+              <col />
+              <col className="w-12" />
+            </colgroup>
+            <thead className="sticky top-0 bg-slate-900 text-center text-slate-400">
               <tr>
-                <th className="pb-2 pr-2 font-semibold">No.</th>
-                <th className="pb-2 pr-2 font-semibold">Date</th>
-                <th className="pb-2 pr-2 font-semibold">Alarm ID</th>
-                <th className="pb-2 pr-2 font-semibold">Alarm Text</th>
+                <th className="pb-2 pr-1 font-semibold">No.</th>
+                <th className="pb-2 pr-1 font-semibold">Date</th>
+                <th className="pb-2 pr-1 font-semibold">Code</th>
+                <th className="pb-2 pr-1 font-semibold">Alarm Text</th>
                 <th className="pb-2 font-semibold">Level</th>
               </tr>
             </thead>
-            <tbody className="text-slate-300">
+            <tbody className="text-center text-slate-300">
               {alarms.map((alarm, index) => (
                 <tr key={alarm.id} className="border-t border-slate-800/80">
-                  <td className="py-2 pr-2 text-slate-500">{index + 1}</td>
-                  <td className="whitespace-nowrap py-2 pr-2 text-slate-400">
+                  <td className="py-2 pr-1 text-slate-500">{index + 1}</td>
+                  <td className="whitespace-nowrap py-2 pr-1 text-slate-400">
                     {formatAlarmDate(alarm.timestamp)}
                   </td>
-                  <td className="py-2 pr-2">{alarm.alarmId}</td>
-                  <td className="py-2 pr-2">{alarm.alarmText}</td>
-                  <td className={`py-2 font-medium ${alarmLevelClass(alarm.level)}`}>
+                  <td className="whitespace-nowrap py-2 pr-1">{alarm.alarmId}</td>
+                  <td
+                    className="truncate py-2 pr-1"
+                    title={alarm.alarmText}
+                  >
+                    {alarm.alarmText}
+                  </td>
+                  <td className={`whitespace-nowrap py-2 font-medium ${alarmLevelClass(alarm.level)}`}>
                     {alarm.level}
                   </td>
                 </tr>

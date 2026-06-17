@@ -4,6 +4,65 @@ export function formatConveyorName(index: number): string {
   return `CV-${String(index).padStart(2, '0')}`
 }
 
+export interface ParsedUnitName {
+  prefix: string
+  number: number
+  padWidth: number
+}
+
+/** 이름 끝의 숫자를 접두어·순번으로 분리 (예: "CV-05" → prefix "CV-", number 5) */
+export function parseTrailingNumber(name: string): ParsedUnitName | null {
+  const match = /^(.*?)(\d+)$/.exec(name.trim())
+  if (!match) return null
+
+  const [, prefix, digits] = match
+  return {
+    prefix,
+    number: Number(digits),
+    padWidth: digits.length,
+  }
+}
+
+export function formatSequentialName(
+  template: Pick<ParsedUnitName, 'prefix' | 'padWidth'>,
+  number: number,
+): string {
+  return `${template.prefix}${String(number).padStart(template.padWidth, '0')}`
+}
+
+function isConveyorForNaming(unit: ConveyorUnit): boolean {
+  return unit.type !== 'port' && unit.type !== 'storage'
+}
+
+/** 기준 유닛·기존 이름에서 순번 시작값과 접두어를 결정 */
+export function resolveNamingTemplate(
+  baseUnit: ConveyorUnit,
+  units: ConveyorUnit[],
+): ParsedUnitName {
+  const fromBase = parseTrailingNumber(baseUnit.name)
+  if (fromBase) return fromBase
+
+  let best: ParsedUnitName | null = null
+  for (const unit of units) {
+    if (!isConveyorForNaming(unit)) continue
+    const parsed = parseTrailingNumber(unit.name)
+    if (!parsed) continue
+    if (!best || parsed.number > best.number) {
+      best = parsed
+    }
+  }
+
+  if (best) {
+    return {
+      prefix: best.prefix,
+      number: best.number + 1,
+      padWidth: best.padWidth,
+    }
+  }
+
+  return { prefix: 'CV-', number: 1, padWidth: 2 }
+}
+
 function sortNeighborsForFlow(
   neighbors: ConveyorUnit[],
   from: ConveyorUnit,
@@ -39,7 +98,8 @@ export function assignSequentialNamesFromBase(
   baseUnitId: string,
 ): SequentialNamingResult {
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
-  if (!unitMap.has(baseUnitId)) {
+  const baseUnit = unitMap.get(baseUnitId)
+  if (!baseUnit) {
     throw new Error('기준 컨베이어를 찾을 수 없습니다.')
   }
 
@@ -74,14 +134,23 @@ export function assignSequentialNamesFromBase(
 
   orderedUnitIds.push(...disconnectedUnitIds)
 
-  const now = new Date().toISOString()
-  const nameById = new Map(
-    orderedUnitIds.map((id, index) => [id, formatConveyorName(index + 1)]),
-  )
+  const template = resolveNamingTemplate(baseUnit, line.units)
+  let nextNumber = template.number
+  const nameById = new Map<string, string>()
 
+  for (const id of orderedUnitIds) {
+    const unit = unitMap.get(id)!
+    if (!isConveyorForNaming(unit)) continue
+    nameById.set(id, formatSequentialName(template, nextNumber))
+    nextNumber += 1
+  }
+
+  const now = new Date().toISOString()
   const units = line.units.map((unit) => ({
     ...unit,
-    name: nameById.get(unit.id) ?? unit.name,
+    name: isConveyorForNaming(unit)
+      ? (nameById.get(unit.id) ?? unit.name)
+      : unit.name,
     updatedAt: now,
   }))
 

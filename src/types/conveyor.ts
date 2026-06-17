@@ -1,6 +1,20 @@
 export type InterfaceUnitType = 'OHT' | 'AGV' | 'ROBOT' | 'AMR' | 'EQ'
 
-export type ConveyorType = 'straight' | 'turn' | 'junction' | 'lift'
+export type PortDirection = 'IN' | 'OUT'
+export type PortRecipe = '2BP1ST' | '2BPCV'
+export type PortLinkedUnit = 'OHT' | 'STK' | 'AGV'
+
+export type StorageShape = 'flat' | 'vertical'
+export type StorageRobotCount = '01' | '02'
+export type StorageMaintenanceArea = 'HP' | 'OP' | 'ALL'
+
+export type ConveyorType =
+  | 'straight'
+  | 'turn'
+  | 'junction'
+  | 'lift'
+  | 'port'
+  | 'storage'
 
 /** @deprecated localStorage 마이그레이션용 */
 export type LegacyConveyorType = ConveyorType | 'curve'
@@ -27,6 +41,14 @@ export interface ConveyorUnit {
   connections: string[]
   status: ConveyorStatus
   interfaceUnit: InterfaceUnitType | null
+  /** type === 'port' 일 때만 사용 */
+  portDirection: PortDirection | null
+  portRecipe: PortRecipe | null
+  portLinkedUnit: PortLinkedUnit | null
+  /** type === 'storage' 일 때만 사용 */
+  storageShape: StorageShape | null
+  storageRobotCount: StorageRobotCount | null
+  storageMaintenanceArea: StorageMaintenanceArea | null
   createdAt: string
   updatedAt: string
 }

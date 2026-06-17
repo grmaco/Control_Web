@@ -9,6 +9,7 @@ interface GridCellProps {
   occupied: boolean
   isValidDrop: boolean
   isInvalidDrop: boolean
+  overflowVisible?: boolean
   children?: ReactNode
 }
 
@@ -19,6 +20,7 @@ export function GridCell({
   occupied,
   isValidDrop,
   isInvalidDrop,
+  overflowVisible = false,
   children,
 }: GridCellProps) {
   const { setNodeRef, isOver } = useDroppable({
@@ -34,7 +36,7 @@ export function GridCell({
           ? { width: cellSize, height: cellSize }
           : undefined
       }
-      className={`relative overflow-hidden ${
+      className={`relative ${overflowVisible ? 'overflow-visible z-10' : 'overflow-hidden'} ${
         cellSize ? '' : 'aspect-square'
       } ${
         isOver && isValidDrop

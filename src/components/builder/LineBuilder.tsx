@@ -12,7 +12,7 @@ import {
 } from '@dnd-kit/core'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  CONVEYOR_TYPES,
+  BUILDER_PALETTE_TYPES,
   typeDescription,
   typeLabel,
 } from '../../constants/conveyorTypes'
@@ -20,7 +20,11 @@ import { BUILDER_CELL_SIZE } from '../../constants/grid'
 import type { ConveyorLine, ConveyorUnit } from '../../types/conveyor'
 import {
   addUnitToLine,
-  isCellOccupied,
+  canPlaceAt,
+  findUnitAtCell,
+  getFootprintCells,
+  getUnitFootprint,
+  isUnitAnchor,
   moveUnitInLine,
   removeUnitFromLine,
   rotateUnit,
@@ -34,7 +38,7 @@ import {
 } from './dnd'
 import type { LineViewport } from '../../utils/lineViewport'
 import { assignSequentialNamesFromBase } from '../../utils/sequentialNaming'
-import { findUnitAt, getBuilderViewport } from '../../utils/lineViewport'
+import { getBuilderViewport } from '../../utils/lineViewport'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { GridCell } from './GridCell'
 import { PaletteItem } from './PaletteItem'
@@ -46,7 +50,7 @@ import {
 } from './PlacedUnit'
 import { UnitPropertiesPanel } from './UnitPropertiesPanel'
 
-const PALETTE_TYPES = CONVEYOR_TYPES
+const PALETTE_TYPES = BUILDER_PALETTE_TYPES
 
 interface LineBuilderProps {
   line: ConveyorLine
@@ -99,18 +103,63 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   const selectedUnit =
     draft.units.find((u) => u.id === selectedUnitId) ?? null
 
-  const draggingUnitId =
-    activeDrag?.source === 'grid' ? activeDrag.unitId : undefined
+  const draggingUnit =
+    activeDrag?.source === 'grid'
+      ? draft.units.find((u) => u.id === activeDrag.unitId)
+      : null
 
-  const getDropState = (gridX: number, gridY: number, cellKey: string) => {
-    if (!activeDrag || overCellId !== cellKey) {
+  const getDropState = (gridX: number, gridY: number) => {
+    if (!activeDrag || !overCellId) {
       return { isValidDrop: false, isInvalidDrop: false }
     }
 
-    const occupied = isCellOccupied(draft.units, gridX, gridY, draggingUnitId)
+    const overCell = parseCellId(overCellId)
+    if (!overCell) {
+      return { isValidDrop: false, isInvalidDrop: false }
+    }
+
+    const footprint =
+      activeDrag.source === 'palette'
+        ? getUnitFootprint(activeDrag.type)
+        : getUnitFootprint(draggingUnit ?? { type: 'straight' } as ConveyorUnit)
+
+    const footprintCells = getFootprintCells(
+      overCell.gridX,
+      overCell.gridY,
+      footprint,
+    )
+    const inFootprint = footprintCells.some(
+      (cell) => cell.gridX === gridX && cell.gridY === gridY,
+    )
+    if (!inFootprint) {
+      return { isValidDrop: false, isInvalidDrop: false }
+    }
+
+    const canPlace =
+      activeDrag.source === 'palette'
+        ? canPlaceAt(
+            draft.units,
+            activeDrag.type,
+            overCell.gridX,
+            overCell.gridY,
+            draft.gridSize.cols,
+            draft.gridSize.rows,
+          )
+        : draggingUnit
+          ? canPlaceAt(
+              draft.units,
+              draggingUnit.type,
+              overCell.gridX,
+              overCell.gridY,
+              draft.gridSize.cols,
+              draft.gridSize.rows,
+              draggingUnit.id,
+            )
+          : false
+
     return {
-      isValidDrop: !occupied,
-      isInvalidDrop: occupied,
+      isValidDrop: canPlace,
+      isInvalidDrop: !canPlace,
     }
   }
 
@@ -228,7 +277,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
       const summary =
         result.disconnectedUnitIds.length > 0
           ? `배치 완료: ${result.orderedUnitIds.length}개 모듈에 순번을 부여했습니다. 연결되지 않은 ${result.disconnectedUnitIds.length}개는 마지막 순번으로 배치했습니다.`
-          : `배치 완료: ${result.orderedUnitIds.length}개 모듈에 CV-01부터 순번을 부여했습니다.`
+          : `배치 완료: ${result.orderedUnitIds.length}개 모듈에 기준 이름 숫자부터 순번을 부여했습니다.`
 
       setCompletionMessage(summary)
     } catch (error) {
@@ -327,8 +376,10 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
               const gridX = viewport.minX + localX
               const gridY = viewport.minY + localY
               const cellKey = `cell-${gridX}-${gridY}`
-              const unit = findUnitAt(draft.units, gridX, gridY)
-              const dropState = getDropState(gridX, gridY, cellKey)
+              const unit = findUnitAtCell(draft.units, gridX, gridY)
+              const isAnchor = unit ? isUnitAnchor(unit, gridX, gridY) : false
+              const footprint = unit ? getUnitFootprint(unit) : null
+              const dropState = getDropState(gridX, gridY)
 
               return (
                 <GridCell
@@ -337,14 +388,17 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                   gridY={gridY}
                   cellSize={BUILDER_CELL_SIZE}
                   occupied={Boolean(unit)}
+                  overflowVisible={Boolean(isAnchor && footprint && (footprint.cols > 1 || footprint.rows > 1))}
                   {...dropState}
                 >
-                  {unit ? (
+                  {isAnchor && unit ? (
                     <PlacedUnit
                       unit={unit}
                       selected={selectedUnitId === unit.id}
                       isBase={baseUnitId === unit.id}
                       showLabels
+                      cellSize={BUILDER_CELL_SIZE}
+                      footprint={footprint ?? undefined}
                       onSelect={() => setSelectedUnitId(unit.id)}
                     />
                   ) : null}
@@ -379,7 +433,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
             label={typeLabel((activeDrag as PaletteDragData).type)}
           />
         ) : activeUnit ? (
-          <UnitDragPreview unit={activeUnit} />
+          <UnitDragPreview unit={activeUnit} cellSize={BUILDER_CELL_SIZE} />
         ) : null}
       </DragOverlay>
     </DndContext>

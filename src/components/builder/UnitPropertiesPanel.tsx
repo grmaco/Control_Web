@@ -1,13 +1,39 @@
-import type { ConveyorLine, ConveyorUnit } from '../../types/conveyor'
+import type {
+  ConveyorLine,
+  ConveyorUnit,
+  PortDirection,
+  PortLinkedUnit,
+  PortRecipe,
+  StorageMaintenanceArea,
+  StorageRobotCount,
+  StorageShape,
+} from '../../types/conveyor'
 import { STATUS_COLORS } from '../../constants/statusColors'
 import {
   CONVEYOR_TYPES,
   isDualModule,
+  isPortUnit,
+  isStorageUnit,
   showsRotation,
+  formatRotationDisplay,
+  isLiftUnit,
   typeDescription,
   typeLabel,
 } from '../../constants/conveyorTypes'
 import { INTERFACE_UNIT_TYPES } from '../../constants/interfaceUnits'
+import {
+  PORT_DIRECTIONS,
+  PORT_LINKED_UNITS,
+  PORT_RECIPES,
+} from '../../constants/port'
+import {
+  WAREHOUSE_FOOTPRINT_SIZE,
+  WAREHOUSE_MAINTENANCE_AREAS,
+  WAREHOUSE_ROBOT_COUNTS,
+  WAREHOUSE_SHAPES,
+  warehouseMaintenanceAreaLabel,
+  warehouseShapeLabel,
+} from '../../constants/warehouseUnit'
 import { updateUnitInLine } from '../../utils/units'
 import type { InterfaceUnitType } from '../../types/conveyor'
 
@@ -44,6 +70,8 @@ export function UnitPropertiesPanel({
   }
 
   const canRotate = showsRotation(unit.type)
+  const isPort = isPortUnit(unit)
+  const isStorage = isStorageUnit(unit)
 
   return (
     <div className="space-y-4">
@@ -61,23 +89,29 @@ export function UnitPropertiesPanel({
 
       <div>
         <label className="mb-1 block text-xs text-slate-400">타입</label>
-        <select
-          value={unit.type}
-          onChange={(e) =>
-            onChange(
-              updateUnitInLine(line, unit.id, {
-                type: e.target.value as ConveyorUnit['type'],
-              }),
-            )
-          }
-          className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
-        >
-          {CONVEYOR_TYPES.map((type) => (
-            <option key={type} value={type}>
-              {typeLabel(type)}
-            </option>
-          ))}
-        </select>
+        {isPort || isStorage ? (
+          <p className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm text-slate-200">
+            {typeLabel(unit.type)}
+          </p>
+        ) : (
+          <select
+            value={unit.type}
+            onChange={(e) =>
+              onChange(
+                updateUnitInLine(line, unit.id, {
+                  type: e.target.value as ConveyorUnit['type'],
+                }),
+              )
+            }
+            className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+          >
+            {CONVEYOR_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {typeLabel(type)}
+              </option>
+            ))}
+          </select>
+        )}
         <p className="mt-1 text-xs text-slate-500">{typeDescription(unit.type)}</p>
       </div>
 
@@ -87,30 +121,169 @@ export function UnitPropertiesPanel({
         </div>
       )}
 
-      <div>
-        <label className="mb-1 block text-xs text-slate-400">연동 유닛</label>
-        <select
-          value={unit.interfaceUnit ?? ''}
-          onChange={(e) =>
-            onChange(
-              updateUnitInLine(line, unit.id, {
-                interfaceUnit: (e.target.value || null) as InterfaceUnitType | null,
-              }),
-            )
-          }
-          className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
-        >
-          <option value="">없음</option>
-          {INTERFACE_UNIT_TYPES.map((type) => (
-            <option key={type} value={type}>
-              {type}
-            </option>
-          ))}
-        </select>
-        <p className="mt-1 text-xs text-slate-500">
-          외부 설비와 연동되는 유닛 타입을 선택하세요.
-        </p>
-      </div>
+      {isPort ? (
+        <>
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">방향 (IN/OUT)</label>
+            <select
+              value={unit.portDirection ?? 'IN'}
+              onChange={(e) =>
+                onChange(
+                  updateUnitInLine(line, unit.id, {
+                    portDirection: e.target.value as PortDirection,
+                  }),
+                )
+              }
+              className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+            >
+              {PORT_DIRECTIONS.map((direction) => (
+                <option key={direction} value={direction}>
+                  {direction}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">레시피</label>
+            <select
+              value={unit.portRecipe ?? '2BP1ST'}
+              onChange={(e) =>
+                onChange(
+                  updateUnitInLine(line, unit.id, {
+                    portRecipe: e.target.value as PortRecipe,
+                  }),
+                )
+              }
+              className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+            >
+              {PORT_RECIPES.map((recipe) => (
+                <option key={recipe} value={recipe}>
+                  {recipe}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">연동 유닛</label>
+            <select
+              value={unit.portLinkedUnit ?? 'OHT'}
+              onChange={(e) =>
+                onChange(
+                  updateUnitInLine(line, unit.id, {
+                    portLinkedUnit: e.target.value as PortLinkedUnit,
+                  }),
+                )
+              }
+              className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+            >
+              {PORT_LINKED_UNITS.map((linkedUnit) => (
+                <option key={linkedUnit} value={linkedUnit}>
+                  {linkedUnit}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-slate-500">
+              OHT, STK, AGV 중 연동 설비를 선택하세요.
+            </p>
+          </div>
+        </>
+      ) : isStorage ? (
+        <>
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">형상</label>
+            <select
+              value={unit.storageShape ?? 'flat'}
+              onChange={(e) =>
+                onChange(
+                  updateUnitInLine(line, unit.id, {
+                    storageShape: e.target.value as StorageShape,
+                  }),
+                )
+              }
+              className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+            >
+              {WAREHOUSE_SHAPES.map((shape) => (
+                <option key={shape} value={shape}>
+                  {warehouseShapeLabel(shape)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">ROBOT 수량</label>
+            <select
+              value={unit.storageRobotCount ?? '01'}
+              onChange={(e) =>
+                onChange(
+                  updateUnitInLine(line, unit.id, {
+                    storageRobotCount: e.target.value as StorageRobotCount,
+                  }),
+                )
+              }
+              className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+            >
+              {WAREHOUSE_ROBOT_COUNTS.map((count) => (
+                <option key={count} value={count}>
+                  {count}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">유지보수 영역</label>
+            <select
+              value={unit.storageMaintenanceArea ?? 'ALL'}
+              onChange={(e) =>
+                onChange(
+                  updateUnitInLine(line, unit.id, {
+                    storageMaintenanceArea: e.target.value as StorageMaintenanceArea,
+                  }),
+                )
+              }
+              className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+            >
+              {WAREHOUSE_MAINTENANCE_AREAS.map((area) => (
+                <option key={area} value={area}>
+                  {warehouseMaintenanceAreaLabel(area)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="rounded-md border border-orange-900/50 bg-orange-950/30 px-3 py-2 text-xs text-orange-200/90">
+            {WAREHOUSE_FOOTPRINT_SIZE}×{WAREHOUSE_FOOTPRINT_SIZE} 정사각형(9칸)을 차지합니다.
+          </div>
+        </>
+      ) : (
+        <div>
+          <label className="mb-1 block text-xs text-slate-400">연동 유닛</label>
+          <select
+            value={unit.interfaceUnit ?? ''}
+            onChange={(e) =>
+              onChange(
+                updateUnitInLine(line, unit.id, {
+                  interfaceUnit: (e.target.value || null) as InterfaceUnitType | null,
+                }),
+              )
+            }
+            className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+          >
+            <option value="">없음</option>
+            {INTERFACE_UNIT_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-slate-500">
+            외부 설비와 연동되는 유닛 타입을 선택하세요.
+          </p>
+        </div>
+      )}
 
       <div>
         <label className="mb-1 block text-xs text-slate-400">상태</label>
@@ -135,16 +308,46 @@ export function UnitPropertiesPanel({
 
       <div className="rounded-md border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-400">
         <p>위치: ({unit.gridX}, {unit.gridY})</p>
-        {canRotate && <p>회전: {unit.rotation}°</p>}
-        <p>
-          연동 유닛:{' '}
-          {unit.interfaceUnit ? unit.interfaceUnit : '없음'}
-        </p>
+        {canRotate && (
+          <p>
+            {isLiftUnit(unit) ? '높이' : '회전'}: {formatRotationDisplay(unit)}
+          </p>
+        )}
+        {isPort ? (
+          <>
+            <p>방향: {unit.portDirection ?? 'IN'}</p>
+            <p>레시피: {unit.portRecipe ?? '2BP1ST'}</p>
+            <p>연동 유닛: {unit.portLinkedUnit ?? 'OHT'}</p>
+          </>
+        ) : isStorage ? (
+          <>
+            <p>
+              점유: {WAREHOUSE_FOOTPRINT_SIZE}×{WAREHOUSE_FOOTPRINT_SIZE} (
+              {WAREHOUSE_FOOTPRINT_SIZE * WAREHOUSE_FOOTPRINT_SIZE}칸)
+            </p>
+            <p>
+              형상:{' '}
+              {unit.storageShape ? warehouseShapeLabel(unit.storageShape) : '평상형'}
+            </p>
+            <p>ROBOT 수량: {unit.storageRobotCount ?? '01'}</p>
+            <p>
+              유지보수 영역:{' '}
+              {unit.storageMaintenanceArea
+                ? warehouseMaintenanceAreaLabel(unit.storageMaintenanceArea)
+                : 'ALL'}
+            </p>
+          </>
+        ) : (
+          <p>
+            연동 유닛:{' '}
+            {unit.interfaceUnit ? unit.interfaceUnit : '없음'}
+          </p>
+        )}
         <p>연결: {unit.connections.length}개</p>
         {isBase && <p className="text-amber-300">기준 컨베이어 (CV-01 시작점)</p>}
       </div>
 
-      {!isBase && (
+      {!isBase && !isPort && !isStorage && (
         <button
           type="button"
           onClick={() => onSetBase(unit.id)}

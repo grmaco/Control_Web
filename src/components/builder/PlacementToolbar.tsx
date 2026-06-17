@@ -52,7 +52,7 @@ export function PlacementToolbar({
       </div>
 
       <p className="text-xs leading-relaxed text-slate-500">
-        기준 컨베이어에서 연결된 순서대로 CV-01, CV-02… 이름이 부여됩니다.
+        기준 컨베이어에서 연결 순서대로 이름 끝 숫자를 기준으로 1씩 증가해 순번을 부여합니다.
         {selectedUnit && (
           <>
             {' '}
