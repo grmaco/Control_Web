@@ -1,16 +1,30 @@
-import { useEffect, useRef } from 'react'
-import { Outlet } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { Outlet, useLocation } from 'react-router-dom'
+import { MonitorPage } from '../../pages/MonitorPage'
 import { SemiCnvConnectionBar } from '../monitor/SemiCnvConnectionBar'
 import { useSemiCnvMonitor } from '../../hooks/useSemiCnvMonitor'
 import { useConveyorStore } from '../../store/useConveyorStore'
+import { useMonitorStore } from '../../store/useMonitorStore'
 import { Navigation } from './Navigation'
 
 export function AppLayout() {
+  const location = useLocation()
+  const onMonitor = location.pathname === '/monitor'
+  const [monitorMounted, setMonitorMounted] = useState(onMonitor)
   const logApplication = useConveyorStore((s) => s.logApplication)
   const semiCnvEnabled = useConveyorStore((s) => s.settings.semiCnv?.enabled ?? false)
+  const initializeMonitor = useMonitorStore((s) => s.initialize)
   const hasLoggedStart = useRef(false)
 
   useSemiCnvMonitor()
+
+  useEffect(() => {
+    if (onMonitor) setMonitorMounted(true)
+  }, [onMonitor])
+
+  useEffect(() => {
+    initializeMonitor()
+  }, [initializeMonitor])
 
   useEffect(() => {
     if (hasLoggedStart.current) return
@@ -40,7 +54,12 @@ export function AppLayout() {
         </div>
       </header>
       <main className="mx-auto w-full max-w-7xl flex-1 p-4">
-        <Outlet />
+        {!onMonitor ? <Outlet /> : null}
+        {monitorMounted ? (
+          <div className={onMonitor ? undefined : 'hidden'} aria-hidden={!onMonitor}>
+            <MonitorPage />
+          </div>
+        ) : null}
       </main>
     </div>
   )

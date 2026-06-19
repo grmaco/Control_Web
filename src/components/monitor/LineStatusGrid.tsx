@@ -1,15 +1,15 @@
 import { useMemo } from 'react'
-import { unitTitle } from '../../constants/conveyorTypes'
+import { isPortUnit, isStorageUnit, unitTitle } from '../../constants/conveyorTypes'
 import type { ConveyorLine } from '../../types/conveyor'
 import { STATUS_COLORS } from '../../constants/statusColors'
 import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import type { LineViewport } from '../../utils/lineViewport'
 import { findUnitAt } from '../../utils/lineViewport'
-import { computeUnitFlowMap } from '../../utils/flowDirection'
-import { getUnitFootprint, isUnitAnchor } from '../../utils/unitFootprint'
+import { computeMinimapFlowMap } from '../../utils/flowDirection'
+import { getUnitFootprint, footprintBorderClasses, isUnitAnchor } from '../../utils/unitFootprint'
 import { buildUnitLabelLines, LABEL_LINE_HEIGHT } from '../../utils/monitorLabel'
 import { unitHasMaterial } from '../../utils/unitMaterial'
-import { MinimapFlowArrow } from './MinimapFlowArrow'
+import { MinimapFlowArrow, MinimapPortFallback, MinimapStorageLabel } from './MinimapFlowArrow'
 
 interface LineStatusGridProps {
   line: ConveyorLine
@@ -33,7 +33,7 @@ export function LineStatusGrid({
   className,
 }: LineStatusGridProps) {
   const flowByUnitId = useMemo(
-    () => (showFlowArrows ? computeUnitFlowMap(line) : new Map()),
+    () => (showFlowArrows ? computeMinimapFlowMap(line) : new Map()),
     [line, showFlowArrows],
   )
   const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
@@ -61,6 +61,7 @@ export function LineStatusGrid({
         const footprint = unit ? getUnitFootprint(unit) : null
         const isMultiCell = footprint !== null && (footprint.cols > 1 || footprint.rows > 1)
         const isMultiCellAnchor = isAnchor && isMultiCell
+        const isPort = unit != null && isPortUnit(unit)
         const showUnitLabel = unit && showLabels && isAnchor
         const label = showUnitLabel
           ? buildUnitLabelLines(
@@ -75,13 +76,21 @@ export function LineStatusGrid({
         const spanHeight = footprint ? footprint.rows * cellSize : cellSize
         const flow =
           unit && isAnchor && showFlowArrows ? flowByUnitId.get(unit.id) : null
+        const showMinimapPortOverlay =
+          showFlowArrows && isAnchor && isPort
+        const showMinimapStorageLabel =
+          showFlowArrows && isMultiCellAnchor && unit != null && isStorageUnit(unit)
 
         return (
           <div
             key={`${gridX}-${gridY}`}
             style={{ width: cellSize, height: cellSize }}
-            className={`flex h-full w-full min-w-0 flex-col items-center justify-center border p-0.5 ${
-              isMultiCellAnchor || flow
+            className={`flex h-full w-full min-w-0 flex-col items-center justify-center ${
+              isPort && isAnchor ? 'p-0' : 'p-0.5'
+            } ${
+              unit ? footprintBorderClasses(unit, gridX, gridY) : 'border'
+            } ${
+              isMultiCellAnchor || flow || showMinimapPortOverlay
                 ? 'relative'
                 : ''
             } ${
@@ -89,7 +98,7 @@ export function LineStatusGrid({
                 ? 'relative z-10 overflow-visible'
                 : isMultiCell && unit
                   ? 'relative z-0 overflow-hidden'
-                  : flow
+                  : flow && !isPort
                     ? 'overflow-visible'
                     : 'overflow-hidden'
             } ${
@@ -99,13 +108,25 @@ export function LineStatusGrid({
             }`}
             title={isAnchor && unit ? unitTitle(unit) : undefined}
           >
-            {flow && unit ? (
+            {flow && unit && !isStorageUnit(unit) ? (
               <MinimapFlowArrow
                 unitType={unit.type}
                 flow={flow}
                 rotation={unit.rotation}
+                unitName={unit.name}
+                cellSize={cellSize}
                 hasMaterial={unitHasMaterial(unit, unitRuntime)}
                 filterId={`neon-${unit.id.replace(/[^a-zA-Z0-9_-]/g, '')}`}
+              />
+            ) : showFlowArrows && isAnchor && unit && isPortUnit(unit) ? (
+              <MinimapPortFallback unit={unit} cellSize={cellSize} />
+            ) : null}
+            {showMinimapStorageLabel && unit && footprint ? (
+              <MinimapStorageLabel
+                name={unit.name}
+                cellSize={cellSize}
+                footprintCols={footprint.cols}
+                footprintRows={footprint.rows}
               />
             ) : null}
             {label && label.lines.length > 0 ? (

@@ -38,6 +38,29 @@ export function isUnitAnchor(unit: ConveyorUnit, gridX: number, gridY: number): 
   return unit.gridX === gridX && unit.gridY === gridY
 }
 
+/** 다칸 유닛(적재창고 등) — 내부 격자선 없이 외곽 테두리만 */
+export function footprintBorderClasses(
+  unit: ConveyorUnit,
+  gridX: number,
+  gridY: number,
+): string {
+  const footprint = getUnitFootprint(unit)
+  if (footprint.cols === 1 && footprint.rows === 1) return 'border'
+
+  const dx = gridX - unit.gridX
+  const dy = gridY - unit.gridY
+
+  return [
+    'border',
+    dy === 0 ? '' : 'border-t-transparent',
+    dy === footprint.rows - 1 ? '' : 'border-b-transparent',
+    dx === 0 ? '' : 'border-l-transparent',
+    dx === footprint.cols - 1 ? '' : 'border-r-transparent',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
 export function unitOccupiesCell(unit: ConveyorUnit, gridX: number, gridY: number): boolean {
   const footprint = getUnitFootprint(unit)
   return (

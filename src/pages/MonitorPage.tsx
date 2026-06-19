@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { LineSelectorPanel, useInitializeStore } from '../components/common/LineSelector'
 import { MonitorCanvas } from '../components/monitor/MonitorCanvas'
 import { STATUS_COLORS } from '../constants/statusColors'
@@ -8,7 +9,11 @@ export function MonitorPage() {
   const { isLoading, error } = useInitializeStore()
   const lines = useConveyorStore((s) => s.lines)
   const selectedLineId = useConveyorStore((s) => s.selectedLineId)
-  const selectedLine = lines.find((line) => line.id === selectedLineId)
+
+  const selectedLine = useMemo(
+    () => lines.find((line) => line.id === selectedLineId),
+    [lines, selectedLineId],
+  )
   const liveLine = useLiveLine(
     selectedLine ?? {
       id: '',

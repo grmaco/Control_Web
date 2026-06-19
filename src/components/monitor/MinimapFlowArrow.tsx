@@ -1,6 +1,12 @@
-import type { ReactNode } from 'react'
-import type { ConveyorType, Rotation } from '../../types/conveyor'
+import type { CSSProperties, ReactNode } from 'react'
+import type { ConveyorType, ConveyorUnit, Rotation } from '../../types/conveyor'
 import type { FlowDir, UnitFlowDirs } from '../../utils/flowDirection'
+import {
+  LABEL_LINE_HEIGHT,
+  minimapInnerSize,
+  minimapPortNameHalfInner,
+  pickMinimapLabelLines,
+} from '../../utils/monitorLabel'
 import {
   buildTurnArcPath,
   resolveTurnFlowDirs,
@@ -78,6 +84,8 @@ interface MinimapFlowArrowProps {
   unitType: ConveyorType
   flow: UnitFlowDirs
   rotation: Rotation
+  unitName?: string
+  cellSize?: number
   hasMaterial: boolean
   filterId: string
 }
@@ -519,13 +527,237 @@ function JunctionFlowArrow({
   )
 }
 
+/** 포트 전용 — 방향 삼각형 + IN/OUT·이름 (CV 화살표와 별도) */
+const PORT_DIRECTION_TRIANGLE: Record<FlowDir, string> = {
+  E: 'M 50,0 L 100,50 L 50,100 Z',
+  W: 'M 50,0 L 0,50 L 50,100 Z',
+  N: 'M 0,50 L 50,0 L 100,50 Z',
+  S: 'M 0,50 L 50,100 L 100,50 Z',
+}
+
+function portNameHalfStyle(dir: FlowDir): CSSProperties {
+  switch (dir) {
+    case 'E':
+      return { left: 0, top: 0, width: '50%', height: '100%' }
+    case 'W':
+      return { right: 0, top: 0, width: '50%', height: '100%' }
+    case 'N':
+      return { left: 0, bottom: 0, width: '100%', height: '50%' }
+    case 'S':
+      return { left: 0, top: 0, width: '100%', height: '50%' }
+  }
+}
+
+function portLabelCandidates(unitName: string, direction: string): string[] {
+  return [direction, unitName]
+}
+
+function PortNameHalf({
+  dir,
+  lines,
+  fontSize,
+}: {
+  dir: FlowDir
+  lines: string[]
+  fontSize: number
+}) {
+  if (lines.length === 0 || fontSize <= 0) return null
+
+  return (
+    <div
+      className="pointer-events-none absolute z-[6] flex flex-col items-center justify-center overflow-hidden px-0.5 text-center font-bold text-white"
+      style={{
+        ...portNameHalfStyle(dir),
+        fontSize,
+        lineHeight: LABEL_LINE_HEIGHT,
+        textShadow: '0 1px 2px rgba(0,0,0,0.85)',
+      }}
+    >
+      {lines.map((line, index) => (
+        <span key={index} className="block max-w-full truncate leading-none">
+          {line}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function PortTriangleHalf({
+  dir,
+  flow,
+  hasMaterial,
+  filterId,
+}: {
+  dir: FlowDir
+  flow: UnitFlowDirs
+  hasMaterial: boolean
+  filterId: string
+}) {
+  const triangle = PORT_DIRECTION_TRIANGLE[dir]
+  const fill = flow.portDirection === 'OUT' ? '#1d4ed8' : '#b45309'
+
+  return (
+    <>
+      {dir === 'E' || dir === 'W' ? (
+        <line x1={50} y1={0} x2={50} y2={100} stroke="#ffffff" strokeWidth={0.5} opacity={0.15} />
+      ) : (
+        <line x1={0} y1={50} x2={100} y2={50} stroke="#ffffff" strokeWidth={0.5} opacity={0.15} />
+      )}
+      {hasMaterial ? (
+        <>
+          <path
+            d={triangle}
+            fill={NEON.outer}
+            opacity={0.45}
+            filter={`url(#${neonHaloId(filterId)})`}
+            className="minimap-neon-halo"
+          />
+          <path
+            d={triangle}
+            fill={NEON.glow}
+            opacity={0.35}
+            filter={`url(#${filterId})`}
+            className="minimap-neon-glow"
+          />
+        </>
+      ) : null}
+      <path d={triangle} fill={fill} opacity={0.88} />
+      <path d={triangle} fill="none" stroke="#ffffff" strokeWidth={1} opacity={0.35} />
+    </>
+  )
+}
+
+function MinimapPortFlow({
+  flow,
+  unitName,
+  cellSize,
+  hasMaterial,
+  filterId,
+}: {
+  flow: UnitFlowDirs
+  unitName: string
+  cellSize: number
+  hasMaterial: boolean
+  filterId: string
+}) {
+  const dir = flowDir(flow)
+  if (!dir) return null
+
+  const neonId = hasMaterial ? filterId : 'neon'
+  const direction = flow.portDirection ?? 'IN'
+  const { lines, fontSize } = pickMinimapLabelLines(
+    minimapPortNameHalfInner(cellSize, dir),
+    portLabelCandidates(unitName, direction),
+  )
+
+  return (
+    <div
+      className={`pointer-events-none absolute inset-0 overflow-hidden ${
+        hasMaterial ? 'minimap-flow-neon' : ''
+      }`}
+      aria-hidden
+    >
+      <FlowSvg filterId={neonId} hasMaterial={hasMaterial}>
+        <PortTriangleHalf dir={dir} flow={flow} hasMaterial={hasMaterial} filterId={neonId} />
+      </FlowSvg>
+      <PortNameHalf dir={dir} lines={lines} fontSize={fontSize} />
+    </div>
+  )
+}
+
+/** 포트 — 적재창고 미연결 등 flow 없을 때 */
+export function MinimapPortFallback({
+  unit,
+  cellSize,
+}: {
+  unit: ConveyorUnit
+  cellSize: number
+}) {
+  const direction = unit.portDirection ?? 'IN'
+  const { lines, fontSize } = pickMinimapLabelLines(
+    minimapInnerSize(cellSize, 1, 1),
+    portLabelCandidates(unit.name, direction),
+  )
+  if (lines.length === 0 || fontSize <= 0) return null
+
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 z-[6] flex flex-col items-center justify-center overflow-hidden px-0.5 text-center font-bold text-white"
+      style={{
+        fontSize,
+        lineHeight: LABEL_LINE_HEIGHT,
+        textShadow: '0 1px 2px rgba(0,0,0,0.85)',
+      }}
+      aria-hidden
+    >
+      {lines.map((line, index) => (
+        <span key={index} className="block max-w-full truncate leading-none">
+          {line}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+export function MinimapStorageLabel({
+  name,
+  cellSize,
+  footprintCols,
+  footprintRows,
+}: {
+  name: string
+  cellSize: number
+  footprintCols: number
+  footprintRows: number
+}) {
+  const { lines, fontSize } = pickMinimapLabelLines(
+    minimapInnerSize(cellSize, footprintCols, footprintRows),
+    [name],
+  )
+  if (lines.length === 0 || fontSize <= 0) return null
+
+  return (
+    <div
+      className="pointer-events-none absolute top-0 left-0 z-[6] flex flex-col items-center justify-center overflow-hidden px-1 text-center font-bold text-white"
+      style={{
+        width: footprintCols * cellSize,
+        height: footprintRows * cellSize,
+        fontSize,
+        lineHeight: LABEL_LINE_HEIGHT,
+        textShadow: '0 1px 2px rgba(0,0,0,0.85)',
+      }}
+      aria-hidden
+    >
+      {lines.map((line, index) => (
+        <span key={index} className="block max-w-full truncate leading-none">
+          {line}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export function MinimapFlowArrow({
   unitType,
   flow,
   rotation,
+  unitName = '',
+  cellSize = 40,
   hasMaterial,
   filterId,
 }: MinimapFlowArrowProps) {
+  if (unitType === 'port') {
+    return (
+      <MinimapPortFlow
+        flow={flow}
+        unitName={unitName}
+        cellSize={cellSize}
+        hasMaterial={hasMaterial}
+        filterId={filterId}
+      />
+    )
+  }
+
   const neonId = hasMaterial ? filterId : 'neon'
 
   if (flow.role === 'start') {

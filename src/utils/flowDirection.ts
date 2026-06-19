@@ -1,4 +1,6 @@
-import type { ConveyorLine, ConveyorType, ConveyorUnit } from '../types/conveyor'
+import type { ConveyorLine, ConveyorType, ConveyorUnit, PortDirection } from '../types/conveyor'
+import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
+import { getUnitFootprint } from './unitFootprint'
 import { parseTrailingNumber } from './sequentialNaming'
 
 export type FlowDir = 'N' | 'E' | 'S' | 'W'
@@ -10,6 +12,8 @@ export interface UnitFlowDirs {
   cvNumber: number | null
   /** 물류 구간 역할 */
   role: 'start' | 'end' | 'through' | 'single'
+  /** 포트 IN/OUT (미니맵 표시용) */
+  portDirection?: PortDirection | null
 }
 
 const FLOW_ARROW_TYPES = new Set<ConveyorType>([
@@ -45,6 +49,96 @@ export function isPerpendicularFlow(inDir: FlowDir, outDir: FlowDir): boolean {
   const horizontal = inDir === 'E' || inDir === 'W'
   const outHorizontal = outDir === 'E' || outDir === 'W'
   return horizontal !== outHorizontal
+}
+
+export function oppositeFlowDir(dir: FlowDir): FlowDir {
+  switch (dir) {
+    case 'N':
+      return 'S'
+    case 'S':
+      return 'N'
+    case 'E':
+      return 'W'
+    case 'W':
+      return 'E'
+  }
+}
+
+function getUnitCenter(unit: ConveyorUnit): { x: number; y: number } {
+  const footprint = getUnitFootprint(unit)
+  return {
+    x: unit.gridX + footprint.cols / 2,
+    y: unit.gridY + footprint.rows / 2,
+  }
+}
+
+/** 유닛 중심 기준 from → to 방향 (적재창고 등 다칸 유닛 포함) */
+export function dirToward(from: ConveyorUnit, to: ConveyorUnit): FlowDir | null {
+  const a = getUnitCenter(from)
+  const b = getUnitCenter(to)
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) return null
+  if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'E' : 'W'
+  return dy > 0 ? 'S' : 'N'
+}
+
+function findConnectedNeighbor(
+  unit: ConveyorUnit,
+  unitMap: Map<string, ConveyorUnit>,
+  predicate: (neighbor: ConveyorUnit) => boolean,
+): ConveyorUnit | null {
+  for (const id of unit.connections) {
+    const neighbor = unitMap.get(id)
+    if (neighbor && predicate(neighbor)) return neighbor
+  }
+  return null
+}
+
+/** 포트 IN/OUT — IN은 적재창고 방향, OUT은 IN의 반대 방향 */
+export function computePortFlowDirs(
+  port: ConveyorUnit,
+  unitMap: Map<string, ConveyorUnit>,
+): UnitFlowDirs | null {
+  if (!isPortUnit(port)) return null
+
+  const storage = findConnectedNeighbor(port, unitMap, isStorageUnit)
+  const direction = port.portDirection ?? 'IN'
+
+  const towardStorage = storage ? dirToward(port, storage) : null
+  if (!towardStorage) return null
+
+  const outDir = direction === 'IN' ? towardStorage : oppositeFlowDir(towardStorage)
+  const inDir = oppositeFlowDir(outDir)
+
+  return {
+    inDir,
+    outDir,
+    cvNumber: null,
+    role: 'through',
+    portDirection: direction,
+  }
+}
+
+export function computePortFlowMap(line: ConveyorLine): Map<string, UnitFlowDirs> {
+  const result = new Map<string, UnitFlowDirs>()
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+
+  for (const unit of line.units) {
+    if (!isPortUnit(unit)) continue
+    const flow = computePortFlowDirs(unit, unitMap)
+    if (flow) result.set(unit.id, flow)
+  }
+
+  return result
+}
+
+export function computeMinimapFlowMap(line: ConveyorLine): Map<string, UnitFlowDirs> {
+  const result = computeUnitFlowMap(line)
+  for (const [id, flow] of computePortFlowMap(line)) {
+    result.set(id, flow)
+  }
+  return result
 }
 
 function cvSequenceNumber(unit: ConveyorUnit): number | null {

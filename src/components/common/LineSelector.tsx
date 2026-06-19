@@ -32,7 +32,7 @@ export function LineSelector() {
       value={selectedLineId ?? ''}
       onChange={(e) => {
         const lineId = e.target.value || null
-        void selectLine(lineId)
+        selectLine(lineId)
         if (lineId) {
           const line = lines.find((item) => item.id === lineId)
           void logApplication({

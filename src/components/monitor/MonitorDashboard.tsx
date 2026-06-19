@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import type { ConveyorLine } from '../../types/conveyor'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { useMonitorStore } from '../../store/useMonitorStore'
@@ -27,7 +27,6 @@ export function MonitorDashboard({
   lines,
   selectedLineId,
 }: MonitorDashboardProps) {
-  const initialize = useMonitorStore((s) => s.initialize)
   const etherCatConnected = useMonitorStore((s) => s.etherCatConnected)
   const toggleEtherCat = useMonitorStore((s) => s.toggleEtherCat)
   const toggleAllPower = useMonitorStore((s) => s.toggleAllPower)
@@ -36,10 +35,6 @@ export function MonitorDashboard({
   const lineControls = useMonitorStore((s) => s.lineControls)
   const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
   const logApplication = useConveyorStore((s) => s.logApplication)
-
-  useEffect(() => {
-    initialize()
-  }, [initialize])
 
   const control = getLineControl(line.id)
   const stats = useMemo(() => computeLineStats(line, unitRuntime), [line, unitRuntime])
