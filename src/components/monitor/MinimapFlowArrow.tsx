@@ -68,16 +68,25 @@ function arrowHead(tipX: number, tipY: number, dir: FlowDir, size = 10): string 
 }
 
 function straightLineCoords(dir: FlowDir): { x1: number; y1: number; x2: number; y2: number } {
+  const tip = EDGE[dir]
   switch (dir) {
     case 'E':
-      return { x1: 22, y1: 50, x2: 72, y2: 50 }
+      return { x1: 22, y1: tip.y, x2: tip.x - 11, y2: tip.y }
     case 'W':
-      return { x1: 78, y1: 50, x2: 28, y2: 50 }
+      return { x1: 78, y1: tip.y, x2: tip.x + 11, y2: tip.y }
     case 'S':
-      return { x1: 50, y1: 22, x2: 50, y2: 72 }
+      return { x1: tip.x, y1: 22, x2: tip.x, y2: tip.y - 11 }
     case 'N':
-      return { x1: 50, y1: 78, x2: 50, y2: 28 }
+      return { x1: tip.x, y1: 78, x2: tip.x, y2: tip.y + 11 }
   }
+}
+
+/** 직선 화살표 전체 — 몸통 + 촉 (회전 유닛처럼 한 path에 네온) */
+const STRAIGHT_ARROW_PATH: Record<FlowDir, string> = {
+  E: 'M 22,50 L 75,50 M 75,44 L 86,50 L 75,56',
+  W: 'M 78,50 L 25,50 M 25,44 L 14,50 L 25,56',
+  S: 'M 50,22 L 50,75 M 44,75 L 50,86 L 56,75',
+  N: 'M 50,78 L 50,25 M 44,25 L 50,14 L 56,25',
 }
 
 interface MinimapFlowArrowProps {
@@ -416,21 +425,22 @@ function FlowHead({
         <>
           <polygon
             points={arrowHead(tipX, tipY, dir, 16)}
-            fill="none"
-            stroke={NEON.outer}
-            strokeWidth={3}
-            strokeLinejoin="round"
-            opacity={0.55}
+            fill={NEON.outer}
+            opacity={0.45}
             filter={`url(#${neonHaloId(filterId)})`}
             className="minimap-neon-halo"
           />
           <polygon
             points={arrowHead(tipX, tipY, dir, 14)}
-            fill="none"
-            stroke={NEON.glow}
-            strokeWidth={3}
-            strokeLinejoin="round"
-            opacity={0.95}
+            fill={NEON.glow}
+            opacity={0.9}
+            filter={`url(#${filterId})`}
+            className="minimap-neon-glow"
+          />
+          <polygon
+            points={arrowHead(tipX, tipY, dir, 12)}
+            fill={NEON.hot}
+            opacity={0.85}
             filter={`url(#${filterId})`}
             className="minimap-neon-glow"
           />
@@ -455,13 +465,17 @@ function StraightFlowArrow({
   hasMaterial: boolean
   filterId: string
 }) {
+  if (hasMaterial) {
+    return <FlowPath d={STRAIGHT_ARROW_PATH[dir]} hasMaterial filterId={filterId} />
+  }
+
   const { x1, y1, x2, y2 } = straightLineCoords(dir)
   const tip = EDGE[dir]
 
   return (
     <g>
-      <FlowLine x1={x1} y1={y1} x2={x2} y2={y2} hasMaterial={hasMaterial} filterId={filterId} />
-      <FlowHead tipX={tip.x} tipY={tip.y} dir={dir} hasMaterial={hasMaterial} filterId={filterId} />
+      <FlowLine x1={x1} y1={y1} x2={x2} y2={y2} hasMaterial={false} filterId={filterId} />
+      <FlowHead tipX={tip.x} tipY={tip.y} dir={dir} hasMaterial={false} filterId={filterId} />
     </g>
   )
 }

@@ -326,7 +326,7 @@ export function UnitPropertiesPanel({
             <option value={1}>1 — 있음 (네온 표시)</option>
           </select>
           <p className="mt-1 text-xs text-slate-500">
-            HOME 미니맵 화살표 네온 효과 테스트용입니다.
+            주화면 미니맵 화살표 네온 효과 테스트용입니다.
           </p>
         </div>
       )}
