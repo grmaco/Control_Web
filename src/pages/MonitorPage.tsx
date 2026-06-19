@@ -1,6 +1,7 @@
 import { LineSelectorPanel, useInitializeStore } from '../components/common/LineSelector'
 import { MonitorCanvas } from '../components/monitor/MonitorCanvas'
 import { STATUS_COLORS } from '../constants/statusColors'
+import { useLiveLine } from '../hooks/useSemiCnvMonitor'
 import { useConveyorStore } from '../store/useConveyorStore'
 
 export function MonitorPage() {
@@ -8,6 +9,16 @@ export function MonitorPage() {
   const lines = useConveyorStore((s) => s.lines)
   const selectedLineId = useConveyorStore((s) => s.selectedLineId)
   const selectedLine = lines.find((line) => line.id === selectedLineId)
+  const liveLine = useLiveLine(
+    selectedLine ?? {
+      id: '',
+      name: '',
+      gridSize: { cols: 0, rows: 0 },
+      units: [],
+      createdAt: '',
+      updatedAt: '',
+    },
+  )
 
   if (isLoading) {
     return <PageState message="데이터를 불러오는 중..." />
@@ -37,7 +48,7 @@ export function MonitorPage() {
             ))}
           </div>
 
-          <MonitorCanvas line={selectedLine} />
+          <MonitorCanvas line={liveLine} />
         </>
       )}
     </div>

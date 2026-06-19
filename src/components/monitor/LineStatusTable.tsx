@@ -1,6 +1,9 @@
 import type { ConveyorLine } from '../../types/conveyor'
 import { flowModeLabel } from '../../utils/monitorStats'
 import type { LineMonitorStats } from '../../utils/monitorStats'
+import { useLineCommStatuses } from '../../hooks/useLineCommStatus'
+import { formatLastReceived } from '../../semicnv/lineCommStatus'
+import { LineCommIndicator } from './LineCommIndicator'
 
 interface LineStatusTableProps {
   lines: ConveyorLine[]
@@ -17,8 +20,13 @@ export function LineStatusTable({
   autoRunByLineId,
   powerOnByLineId,
 }: LineStatusTableProps) {
+  const commByLineId = useLineCommStatuses(lines)
+
   const columns = [
     'Line',
+    '통신',
+    'Site',
+    '마지막 수신',
     'Flow Mode',
     'Linked Unit',
     'On CST',
@@ -28,12 +36,12 @@ export function LineStatusTable({
   ] as const
 
   return (
-    <div className="overflow-hidden rounded border border-slate-700 bg-slate-900/80">
-      <table className="w-full text-left text-xs">
+    <div className="overflow-x-auto rounded border border-slate-700 bg-slate-900/80">
+      <table className="w-full min-w-[720px] text-left text-xs">
         <thead className="border-b border-slate-700 bg-slate-950/80 text-slate-400">
           <tr>
             {columns.map((col) => (
-              <th key={col} className="px-3 py-2.5 font-semibold">
+              <th key={col} className="whitespace-nowrap px-3 py-2.5 font-semibold">
                 {col}
               </th>
             ))}
@@ -61,20 +69,36 @@ export function LineStatusTable({
               const powerOn = powerOnByLineId[line.id] ?? false
               const autoRun = autoRunByLineId[line.id] ?? false
               const selected = line.id === selectedLineId
+              const comm = commByLineId[line.id]
 
               return (
                 <tr
                   key={line.id}
                   className={`border-b border-slate-800/80 ${
                     selected ? 'bg-blue-950/30' : 'hover:bg-slate-800/40'
-                  }`}
+                  } ${comm?.state === 'offline' ? 'opacity-70' : ''}`}
                 >
                   <td className="px-3 py-2.5 font-medium text-slate-200">{line.name}</td>
+                  <td className="px-3 py-2.5">
+                    {comm ? <LineCommIndicator comm={comm} compact /> : '-'}
+                  </td>
+                  <td className="px-3 py-2.5 text-slate-400">
+                    {comm?.siteId ?? line.semiCnvSiteId ?? '-'}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-slate-400">
+                    {formatLastReceived(comm?.lastMessageAt ?? null)}
+                  </td>
                   <td className="px-3 py-2.5 text-slate-300">
                     {flowModeLabel(autoRun, powerOn)}
                   </td>
                   <td className="px-3 py-2.5 text-slate-300">{stats.linkedUnits}EA</td>
-                  <td className="px-3 py-2.5 text-slate-300">{stats.onCstUnits}EA</td>
+                  <td
+                    className={`px-3 py-2.5 ${
+                      stats.onCstUnits > 0 ? 'font-semibold text-cyan-300' : 'text-slate-300'
+                    }`}
+                  >
+                    {stats.onCstUnits}EA
+                  </td>
                   <td className="px-3 py-2.5 text-emerald-400">{stats.runUnits}EA</td>
                   <td className="px-3 py-2.5 text-amber-400">{stats.manualUnits}EA</td>
                   <td className="px-3 py-2.5 text-red-400">{stats.errorUnits}EA</td>

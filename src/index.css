@@ -11,3 +11,51 @@ body {
     Roboto,
     sans-serif;
 }
+
+@keyframes minimap-neon-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes minimap-neon-halo-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.65;
+  }
+}
+
+@keyframes minimap-neon-flow {
+  from {
+    stroke-dashoffset: 24;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+.minimap-flow-neon {
+  filter:
+    drop-shadow(0 0 2px #22d3ee)
+    drop-shadow(0 0 6px #06b6d4)
+    drop-shadow(0 0 12px #0891b2);
+}
+
+.minimap-flow-neon .minimap-neon-halo {
+  animation: minimap-neon-halo-pulse 1.6s ease-in-out infinite;
+}
+
+.minimap-flow-neon .minimap-neon-glow {
+  animation: minimap-neon-pulse 1.2s ease-in-out infinite;
+}
+
+.minimap-flow-neon .minimap-neon-flow {
+  animation: minimap-neon-flow 0.5s linear infinite;
+}

@@ -155,6 +155,7 @@ export function normalizeUnit(
       storageShape: null,
       storageRobotCount: null,
       storageMaintenanceArea: null,
+      testMaterial: unit.testMaterial ?? 0,
     }
   }
 
@@ -170,6 +171,7 @@ export function normalizeUnit(
       storageRobotCount: unit.storageRobotCount ?? DEFAULT_WAREHOUSE_ROBOT_COUNT,
       storageMaintenanceArea:
         unit.storageMaintenanceArea ?? DEFAULT_WAREHOUSE_MAINTENANCE_AREA,
+      testMaterial: unit.testMaterial ?? 0,
     }
   }
 
@@ -183,6 +185,7 @@ export function normalizeUnit(
     storageShape: null,
     storageRobotCount: null,
     storageMaintenanceArea: null,
+    testMaterial: unit.testMaterial ?? 0,
   }
 }
 

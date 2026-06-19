@@ -1,4 +1,6 @@
 import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
+import type { SemiCnvUnitRuntime } from '../types/semicnv'
+import { countCvUnits, countLineMaterialUnits } from './unitMaterial'
 
 export interface LineMonitorStats {
   totalUnits: number
@@ -11,7 +13,10 @@ export interface LineMonitorStats {
   bufferUtilization: number
 }
 
-export function computeLineStats(line: ConveyorLine): LineMonitorStats {
+export function computeLineStats(
+  line: ConveyorLine,
+  unitRuntime: Record<string, SemiCnvUnitRuntime> = {},
+): LineMonitorStats {
   const units = line.units
   const totalUnits = units.length
   const runUnits = units.filter((u) => u.status === 'running').length
@@ -19,10 +24,11 @@ export function computeLineStats(line: ConveyorLine): LineMonitorStats {
   const manualUnits = units.filter((u) => u.status === 'maintenance').length
   const errorUnits = units.filter((u) => u.status === 'error').length
   const linkedUnits = units.filter((u) => u.interfaceUnit !== null).length
-  const onCstUnits = runUnits + manualUnits
+  const onCstUnits = countLineMaterialUnits(line, unitRuntime)
+  const cvUnitCount = countCvUnits(line)
 
   const bufferUtilization =
-    totalUnits === 0 ? 0 : ((totalUnits - idleUnits) / totalUnits) * 100
+    cvUnitCount === 0 ? 0 : Math.round((onCstUnits / cvUnitCount) * 100)
 
   return {
     totalUnits,

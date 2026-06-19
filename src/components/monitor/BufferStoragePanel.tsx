@@ -69,7 +69,7 @@ export function BufferStoragePanel({ utilization }: { utilization: number }) {
                 className="font-bold text-white"
                 style={{ fontSize: labelSize }}
               >
-                {utilization.toFixed(2)}%
+                {Math.round(utilization)}%
               </span>
               <span className="text-slate-500" style={{ fontSize: subLabelSize }}>
                 Utilization

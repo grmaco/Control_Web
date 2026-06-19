@@ -16,6 +16,7 @@ import type {
   ConveyorUnit,
   Rotation,
 } from '../types/conveyor'
+import { parseTrailingNumber } from './sequentialNaming'
 import {
   findUnitAtCell,
   getUnitFootprint,
@@ -48,12 +49,22 @@ export {
 } from './unitFootprint'
 
 export function nextUnitName(units: ConveyorUnit[]): string {
-  const numbers = units
-    .map((u) => /^CV-(\d+)$/.exec(u.name)?.[1])
-    .filter(Boolean)
-    .map(Number)
-  const next = numbers.length > 0 ? Math.max(...numbers) + 1 : units.length + 1
-  return `CV-${String(next).padStart(2, '0')}`
+  let maxNumber = 0
+  let prefix = 'CV'
+  let padWidth = 2
+
+  for (const unit of units) {
+    const parsed = parseTrailingNumber(unit.name)
+    if (!parsed) continue
+    if (parsed.number > maxNumber) {
+      maxNumber = parsed.number
+      prefix = parsed.prefix
+      padWidth = parsed.padWidth
+    }
+  }
+
+  const next = maxNumber > 0 ? maxNumber + 1 : 1
+  return `${prefix}${String(next).padStart(padWidth, '0')}`
 }
 
 export function nextPortName(units: ConveyorUnit[]): string {
@@ -89,6 +100,7 @@ export function createUnit(
     rotation: 0 as Rotation,
     connections: [] as string[],
     status: 'idle' as const,
+    testMaterial: 0 as const,
     createdAt: now,
     updatedAt: now,
   }
@@ -299,6 +311,7 @@ export function updateUnitInLine(
       | 'storageShape'
       | 'storageRobotCount'
       | 'storageMaintenanceArea'
+      | 'testMaterial'
     >
   >,
 ): ConveyorLine {

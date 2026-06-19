@@ -1,7 +1,10 @@
 import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
 
+export const DEFAULT_CV_NAME_PREFIX = 'CV'
+export const DEFAULT_CV_PAD_WIDTH = 2
+
 export function formatConveyorName(index: number): string {
-  return `CV-${String(index).padStart(2, '0')}`
+  return `${DEFAULT_CV_NAME_PREFIX}${String(index).padStart(DEFAULT_CV_PAD_WIDTH, '0')}`
 }
 
 export interface ParsedUnitName {
@@ -10,7 +13,7 @@ export interface ParsedUnitName {
   padWidth: number
 }
 
-/** 이름 끝의 숫자를 접두어·순번으로 분리 (예: "CV-05" → prefix "CV-", number 5) */
+/** 이름 끝의 숫자를 접두어·순번으로 분리 (예: "CV05" → prefix "CV", number 5) */
 export function parseTrailingNumber(name: string): ParsedUnitName | null {
   const match = /^(.*?)(\d+)$/.exec(name.trim())
   if (!match) return null
@@ -60,7 +63,11 @@ export function resolveNamingTemplate(
     }
   }
 
-  return { prefix: 'CV-', number: 1, padWidth: 2 }
+  return {
+    prefix: DEFAULT_CV_NAME_PREFIX,
+    number: 1,
+    padWidth: DEFAULT_CV_PAD_WIDTH,
+  }
 }
 
 function sortNeighborsForFlow(
@@ -87,20 +94,23 @@ function sortNeighborsForFlow(
   })
 }
 
-export interface SequentialNamingResult {
-  line: ConveyorLine
+export interface FlowOrderResult {
   orderedUnitIds: string[]
   disconnectedUnitIds: string[]
 }
 
-export function assignSequentialNamesFromBase(
+/** baseUnitId 기준 BFS 물류 순서 (이름 변경 없음) */
+export function computeFlowOrder(
   line: ConveyorLine,
-  baseUnitId: string,
-): SequentialNamingResult {
+  baseUnitId?: string | null,
+): FlowOrderResult {
+  if (!baseUnitId) {
+    return { orderedUnitIds: [], disconnectedUnitIds: [] }
+  }
+
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
-  const baseUnit = unitMap.get(baseUnitId)
-  if (!baseUnit) {
-    throw new Error('기준 컨베이어를 찾을 수 없습니다.')
+  if (!unitMap.has(baseUnitId)) {
+    return { orderedUnitIds: [], disconnectedUnitIds: [] }
   }
 
   const visited = new Set<string>()
@@ -132,8 +142,29 @@ export function assignSequentialNamesFromBase(
     .sort((a, b) => a.gridY - b.gridY || a.gridX - b.gridX)
     .map((unit) => unit.id)
 
-  orderedUnitIds.push(...disconnectedUnitIds)
+  return {
+    orderedUnitIds: [...orderedUnitIds, ...disconnectedUnitIds],
+    disconnectedUnitIds,
+  }
+}
 
+export interface SequentialNamingResult {
+  line: ConveyorLine
+  orderedUnitIds: string[]
+  disconnectedUnitIds: string[]
+}
+
+export function assignSequentialNamesFromBase(
+  line: ConveyorLine,
+  baseUnitId: string,
+): SequentialNamingResult {
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  const baseUnit = unitMap.get(baseUnitId)
+  if (!baseUnit) {
+    throw new Error('기준 컨베이어를 찾을 수 없습니다.')
+  }
+
+  const { orderedUnitIds, disconnectedUnitIds } = computeFlowOrder(line, baseUnitId)
   const template = resolveNamingTemplate(baseUnit, line.units)
   let nextNumber = template.number
   const nameById = new Map<string, string>()

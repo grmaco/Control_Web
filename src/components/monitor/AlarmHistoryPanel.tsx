@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 import type { ConveyorLine } from '../../types/conveyor'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { useMonitorStore } from '../../store/useMonitorStore'
+import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import { alarmLevelClass, buildAlarmList } from '../../utils/alarms'
 
 const VISIBLE_ALARM_ROWS = 5
@@ -12,15 +13,26 @@ export function AlarmHistoryPanel({ line }: { line: ConveyorLine }) {
   const history = useConveyorStore((s) => s.history)
   const fetchHistory = useConveyorStore((s) => s.fetchHistory)
   const etherCatConnected = useMonitorStore((s) => s.etherCatConnected)
+  const liveAlarms = useSemiCnvStore((s) => s.liveAlarms)
+  const isLive = useSemiCnvStore((s) => s.isLive)
 
   useEffect(() => {
     fetchHistory({ lineId: line.id })
   }, [fetchHistory, line.id])
 
-  const alarms = useMemo(
-    () => buildAlarmList(line, history, etherCatConnected),
-    [line, history, etherCatConnected],
-  )
+  const alarms = useMemo(() => {
+    const base = buildAlarmList(line, history, etherCatConnected)
+    if (!isLive || liveAlarms.length === 0) return base
+
+    const merged = [...liveAlarms, ...base]
+    const unique = new Map<string, typeof base[number]>()
+    for (const entry of merged) {
+      unique.set(`${entry.alarmId}-${entry.alarmText}-${entry.timestamp}`, entry)
+    }
+    return [...unique.values()]
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+      .slice(0, 30)
+  }, [line, history, etherCatConnected, isLive, liveAlarms])
 
   return (
     <div className="flex flex-col rounded border border-slate-700 bg-slate-900/80 p-4">

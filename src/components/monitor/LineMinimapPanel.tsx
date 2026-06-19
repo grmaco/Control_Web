@@ -41,16 +41,13 @@ export function LineMinimapPanel({ line }: { line: ConveyorLine }) {
         ref={containerRef}
         className="mt-4 flex flex-1 items-center justify-center overflow-hidden"
       >
-        {!viewport ? (
-          <p className="text-center text-xs text-slate-500">
-            배치된 라인이 없습니다.
-          </p>
-        ) : cellSize > 0 ? (
+        {viewport && cellSize > 0 ? (
           <LineStatusGrid
             line={line}
             viewport={viewport}
             cellSize={cellSize}
             showLabels={false}
+            showFlowArrows={line.units.length > 0}
           />
         ) : null}
       </div>

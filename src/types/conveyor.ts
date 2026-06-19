@@ -23,6 +23,9 @@ export type ConveyorStatus = 'idle' | 'running' | 'error' | 'maintenance'
 
 export type Rotation = 0 | 90 | 180 | 270
 
+/** 테스트용 — 미니맵 CST(자재) 표시 (0: 없음, 1: 있음) */
+export type TestMaterialFlag = 0 | 1
+
 export type HistoryEventType =
   | 'start'
   | 'stop'
@@ -34,6 +37,8 @@ export type HistoryEventType =
 export interface ConveyorUnit {
   id: string
   name: string
+  /** Semi C/V 프로그램 Conveyor.ID — WebSocket 매핑용 */
+  semiCnvId?: number
   gridX: number
   gridY: number
   type: ConveyorType
@@ -49,6 +54,8 @@ export interface ConveyorUnit {
   storageShape: StorageShape | null
   storageRobotCount: StorageRobotCount | null
   storageMaintenanceArea: StorageMaintenanceArea | null
+  /** 테스트용 — HOME 미니맵 자재(CST) 네온 표시 */
+  testMaterial: TestMaterialFlag
   createdAt: string
   updatedAt: string
 }
@@ -56,6 +63,10 @@ export interface ConveyorUnit {
 export interface ConveyorLine {
   id: string
   name: string
+  /** Semi C/V Line ID — WebSocket LINE_STATUS 매핑용 */
+  semiCnvLineId?: number
+  /** Semi C/V 현장(Site) ID — 다중 Fab 구분용 */
+  semiCnvSiteId?: string
   gridSize: { cols: number; rows: number }
   units: ConveyorUnit[]
   /** CV-01 순번 부여 시작점 유닛 ID */
@@ -85,7 +96,11 @@ export interface HistoryFilter {
   to?: string
 }
 
+import type { SemiCnvMonitorSettings } from './semicnv'
+
 export interface AppSettings {
   lastViewedLineId?: string
   zoomLevel?: number
+  /** Semi C/V WebSocket 모니터링 연동 설정 */
+  semiCnv?: SemiCnvMonitorSettings
 }

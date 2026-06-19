@@ -306,6 +306,31 @@ export function UnitPropertiesPanel({
         </select>
       </div>
 
+      {!isStorage && (
+        <div>
+          <label className="mb-1 block text-xs text-slate-400">
+            테스트 자재 (미니맵)
+          </label>
+          <select
+            value={unit.testMaterial ?? 0}
+            onChange={(e) =>
+              onChange(
+                updateUnitInLine(line, unit.id, {
+                  testMaterial: Number(e.target.value) as ConveyorUnit['testMaterial'],
+                }),
+              )
+            }
+            className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+          >
+            <option value={0}>0 — 없음</option>
+            <option value={1}>1 — 있음 (네온 표시)</option>
+          </select>
+          <p className="mt-1 text-xs text-slate-500">
+            HOME 미니맵 화살표 네온 효과 테스트용입니다.
+          </p>
+        </div>
+      )}
+
       <div className="rounded-md border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-400">
         <p>위치: ({unit.gridX}, {unit.gridY})</p>
         {canRotate && (
@@ -344,7 +369,7 @@ export function UnitPropertiesPanel({
           </p>
         )}
         <p>연결: {unit.connections.length}개</p>
-        {isBase && <p className="text-amber-300">기준 컨베이어 (CV-01 시작점)</p>}
+        {isBase && <p className="text-amber-300">기준 컨베이어 (CV01 시작점)</p>}
       </div>
 
       {!isBase && !isPort && !isStorage && (

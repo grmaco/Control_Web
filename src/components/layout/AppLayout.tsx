@@ -1,18 +1,23 @@
 import { useEffect, useRef } from 'react'
 import { Outlet } from 'react-router-dom'
+import { SemiCnvConnectionBar } from '../monitor/SemiCnvConnectionBar'
+import { useSemiCnvMonitor } from '../../hooks/useSemiCnvMonitor'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { Navigation } from './Navigation'
 
 export function AppLayout() {
   const logApplication = useConveyorStore((s) => s.logApplication)
+  const semiCnvEnabled = useConveyorStore((s) => s.settings.semiCnv?.enabled ?? false)
   const hasLoggedStart = useRef(false)
+
+  useSemiCnvMonitor()
 
   useEffect(() => {
     if (hasLoggedStart.current) return
     hasLoggedStart.current = true
     void logApplication({
       title: 'Application Start',
-      comment: 'C/V Control System initialized',
+      comment: 'PC Control System initialized',
     })
   }, [logApplication])
 
@@ -22,11 +27,16 @@ export function AppLayout() {
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-6">
             <h1 className="text-lg font-semibold tracking-tight">
-              C/V 관제시스템
+              PC제어 관제시스템
             </h1>
             <Navigation />
           </div>
-          <span className="text-xs text-slate-500">Phase 1 · localStorage</span>
+          <div className="flex items-center gap-4">
+            <SemiCnvConnectionBar />
+            <span className="text-xs text-slate-500">
+              {semiCnvEnabled ? 'Semi C/V 연동' : 'Phase 1 · localStorage'}
+            </span>
+          </div>
         </div>
       </header>
       <main className="mx-auto w-full max-w-7xl flex-1 p-4">

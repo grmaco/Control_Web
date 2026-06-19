@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 import type { ConveyorLine } from '../../types/conveyor'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { useMonitorStore } from '../../store/useMonitorStore'
+import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import {
   computeLineStats,
   isAutoEnabled,
@@ -33,6 +34,7 @@ export function MonitorDashboard({
   const setAllAutoRun = useMonitorStore((s) => s.setAllAutoRun)
   const getLineControl = useMonitorStore((s) => s.getLineControl)
   const lineControls = useMonitorStore((s) => s.lineControls)
+  const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
   const logApplication = useConveyorStore((s) => s.logApplication)
 
   useEffect(() => {
@@ -40,15 +42,17 @@ export function MonitorDashboard({
   }, [initialize])
 
   const control = getLineControl(line.id)
-  const stats = useMemo(() => computeLineStats(line), [line])
+  const stats = useMemo(() => computeLineStats(line, unitRuntime), [line, unitRuntime])
   const safetyOk = isSafetyOk(etherCatConnected, stats)
   const autoEnabled = isAutoEnabled(safetyOk, control.powerOn, stats)
   const currentStatus = resolveCurrentStatus(stats, control.autoRun, control.powerOn)
 
   const statsByLineId = useMemo(
     () =>
-      Object.fromEntries(lines.map((item) => [item.id, computeLineStats(item)])),
-    [lines],
+      Object.fromEntries(
+        lines.map((item) => [item.id, computeLineStats(item, unitRuntime)]),
+      ),
+    [lines, unitRuntime],
   )
 
   const autoRunByLineId = useMemo(

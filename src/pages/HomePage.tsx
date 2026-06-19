@@ -1,12 +1,14 @@
 import { LineSelectorPanel, useInitializeStore } from '../components/common/LineSelector'
 import { MonitorDashboard } from '../components/monitor/MonitorDashboard'
+import { useLiveLines } from '../hooks/useSemiCnvMonitor'
 import { useConveyorStore } from '../store/useConveyorStore'
 
 export function HomePage() {
   const { isLoading, error } = useInitializeStore()
   const lines = useConveyorStore((s) => s.lines)
   const selectedLineId = useConveyorStore((s) => s.selectedLineId)
-  const selectedLine = lines.find((line) => line.id === selectedLineId)
+  const liveLines = useLiveLines(lines)
+  const selectedLine = liveLines.find((line) => line.id === selectedLineId)
 
   if (isLoading) {
     return <PageState message="데이터를 불러오는 중..." />
@@ -28,7 +30,7 @@ export function HomePage() {
       ) : (
         <MonitorDashboard
           line={selectedLine}
-          lines={lines}
+          lines={liveLines}
           selectedLineId={selectedLineId}
         />
       )}

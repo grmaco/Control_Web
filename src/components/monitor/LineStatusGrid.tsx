@@ -1,16 +1,23 @@
+import { useMemo } from 'react'
 import { unitTitle } from '../../constants/conveyorTypes'
 import type { ConveyorLine } from '../../types/conveyor'
 import { STATUS_COLORS } from '../../constants/statusColors'
+import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import type { LineViewport } from '../../utils/lineViewport'
 import { findUnitAt } from '../../utils/lineViewport'
+import { computeUnitFlowMap } from '../../utils/flowDirection'
 import { getUnitFootprint, isUnitAnchor } from '../../utils/unitFootprint'
 import { buildUnitLabelLines, LABEL_LINE_HEIGHT } from '../../utils/monitorLabel'
+import { unitHasMaterial } from '../../utils/unitMaterial'
+import { MinimapFlowArrow } from './MinimapFlowArrow'
 
 interface LineStatusGridProps {
   line: ConveyorLine
   cellSize: number
   viewport?: LineViewport
   showLabels?: boolean
+  /** 미니맵 등 — CV 물류 순서 화살표 */
+  showFlowArrows?: boolean
   /** 줌 배율 — 라벨 크기 계산에 사용 */
   scale?: number
   className?: string
@@ -21,9 +28,15 @@ export function LineStatusGrid({
   cellSize,
   viewport,
   showLabels = true,
+  showFlowArrows = false,
   scale = 1,
   className,
 }: LineStatusGridProps) {
+  const flowByUnitId = useMemo(
+    () => (showFlowArrows ? computeUnitFlowMap(line) : new Map()),
+    [line, showFlowArrows],
+  )
+  const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
   const minX = viewport?.minX ?? 0
   const minY = viewport?.minY ?? 0
   const cols = viewport?.cols ?? line.gridSize.cols
@@ -60,17 +73,25 @@ export function LineStatusGrid({
           : null
         const spanWidth = footprint ? footprint.cols * cellSize : cellSize
         const spanHeight = footprint ? footprint.rows * cellSize : cellSize
+        const flow =
+          unit && isAnchor && showFlowArrows ? flowByUnitId.get(unit.id) : null
 
         return (
           <div
             key={`${gridX}-${gridY}`}
             style={{ width: cellSize, height: cellSize }}
             className={`flex h-full w-full min-w-0 flex-col items-center justify-center border p-0.5 ${
+              isMultiCellAnchor || flow
+                ? 'relative'
+                : ''
+            } ${
               isMultiCellAnchor
                 ? 'relative z-10 overflow-visible'
                 : isMultiCell && unit
                   ? 'relative z-0 overflow-hidden'
-                  : 'overflow-hidden'
+                  : flow
+                    ? 'overflow-visible'
+                    : 'overflow-hidden'
             } ${
               unit
                 ? `${colors!.bg} ${colors!.border} text-white`
@@ -78,6 +99,15 @@ export function LineStatusGrid({
             }`}
             title={isAnchor && unit ? unitTitle(unit) : undefined}
           >
+            {flow && unit ? (
+              <MinimapFlowArrow
+                unitType={unit.type}
+                flow={flow}
+                rotation={unit.rotation}
+                hasMaterial={unitHasMaterial(unit, unitRuntime)}
+                filterId={`neon-${unit.id.replace(/[^a-zA-Z0-9_-]/g, '')}`}
+              />
+            ) : null}
             {label && label.lines.length > 0 ? (
               <div
                 className={`flex flex-col items-center justify-center overflow-hidden ${
