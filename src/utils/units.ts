@@ -14,9 +14,11 @@ import type {
   ConveyorLine,
   ConveyorType,
   ConveyorUnit,
+  ConveyorStatus,
   Rotation,
+  TestMaterialFlag,
 } from '../types/conveyor'
-import { parseTrailingNumber } from './sequentialNaming'
+import { parseTrailingNumber, formatConveyorName } from './sequentialNaming'
 import {
   findUnitAtCell,
   getUnitFootprint,
@@ -50,21 +52,15 @@ export {
 
 export function nextUnitName(units: ConveyorUnit[]): string {
   let maxNumber = 0
-  let prefix = 'CV'
-  let padWidth = 2
 
   for (const unit of units) {
+    if (isPort(unit.type) || isStorage(unit.type)) continue
     const parsed = parseTrailingNumber(unit.name)
-    if (!parsed) continue
-    if (parsed.number > maxNumber) {
-      maxNumber = parsed.number
-      prefix = parsed.prefix
-      padWidth = parsed.padWidth
-    }
+    if (!parsed || parsed.prefix !== 'CV') continue
+    if (parsed.number > maxNumber) maxNumber = parsed.number
   }
 
-  const next = maxNumber > 0 ? maxNumber + 1 : 1
-  return `${prefix}${String(next).padStart(padWidth, '0')}`
+  return formatConveyorName(maxNumber + 1)
 }
 
 export function nextPortName(units: ConveyorUnit[]): string {
@@ -78,11 +74,11 @@ export function nextPortName(units: ConveyorUnit[]): string {
 
 export function nextStorageName(units: ConveyorUnit[]): string {
   const numbers = units
-    .map((u) => /^ST-(\d+)$/.exec(u.name)?.[1])
+    .map((u) => /^(?:STK|ST)-(\d+)$/.exec(u.name)?.[1])
     .filter(Boolean)
     .map(Number)
   const next = numbers.length > 0 ? Math.max(...numbers) + 1 : 1
-  return `ST-${String(next).padStart(2, '0')}`
+  return `STK-${String(next).padStart(2, '0')}`
 }
 
 export function createUnit(
@@ -287,6 +283,74 @@ export function moveUnitInLine(
   return { ...line, units, updatedAt: new Date().toISOString() }
 }
 
+/** 선택된 유닛들을 anchor 기준 동일 Δ만큼 이동 */
+export function moveUnitsInLine(
+  line: ConveyorLine,
+  unitIds: string[],
+  anchorUnitId: string,
+  gridX: number,
+  gridY: number,
+): ConveyorLine | null {
+  if (unitIds.length === 0) return null
+
+  const anchor = line.units.find((u) => u.id === anchorUnitId)
+  if (!anchor) return null
+
+  const dx = gridX - anchor.gridX
+  const dy = gridY - anchor.gridY
+  if (dx === 0 && dy === 0) return line
+
+  const movingIds = new Set(unitIds)
+  const moving = line.units.filter((u) => movingIds.has(u.id))
+  if (moving.length !== unitIds.length) return null
+
+  const staticUnits = line.units.filter((u) => !movingIds.has(u.id))
+
+  for (const unit of moving) {
+    const nextX = unit.gridX + dx
+    const nextY = unit.gridY + dy
+    if (
+      !isFootprintAvailable(
+        staticUnits,
+        nextX,
+        nextY,
+        getUnitFootprint(unit),
+        line.gridSize.cols,
+        line.gridSize.rows,
+      )
+    ) {
+      return null
+    }
+  }
+
+  let units = line.units.map((u) =>
+    movingIds.has(u.id)
+      ? {
+          ...u,
+          gridX: u.gridX + dx,
+          gridY: u.gridY + dy,
+          updatedAt: new Date().toISOString(),
+        }
+      : u,
+  )
+
+  for (const id of unitIds) {
+    units = syncConnectionsForUnit(units, id, line.gridSize.cols, line.gridSize.rows)
+  }
+
+  return { ...line, units, updatedAt: new Date().toISOString() }
+}
+
+export function canMoveUnitsInLine(
+  line: ConveyorLine,
+  unitIds: string[],
+  anchorUnitId: string,
+  gridX: number,
+  gridY: number,
+): boolean {
+  return moveUnitsInLine(line, unitIds, anchorUnitId, gridX, gridY) !== null
+}
+
 export function removeUnitFromLine(line: ConveyorLine, unitId: string): ConveyorLine {
   const units = line.units
     .filter((u) => u.id !== unitId)
@@ -364,6 +428,46 @@ export function updateUnitInLine(
     return next
   })
   return { ...line, units, updatedAt: new Date().toISOString() }
+}
+
+/** 선택된 유닛들에 동일 상태 일괄 적용 */
+export function updateUnitsStatusInLine(
+  line: ConveyorLine,
+  unitIds: string[],
+  status: ConveyorStatus,
+): ConveyorLine {
+  if (unitIds.length === 0) return line
+
+  const idSet = new Set(unitIds)
+  const now = new Date().toISOString()
+
+  return {
+    ...line,
+    units: line.units.map((unit) =>
+      idSet.has(unit.id) ? { ...unit, status, updatedAt: now } : unit,
+    ),
+    updatedAt: now,
+  }
+}
+
+/** 선택된 유닛들에 동일 테스트 자재 플래그 일괄 적용 */
+export function updateUnitsTestMaterialInLine(
+  line: ConveyorLine,
+  unitIds: string[],
+  testMaterial: TestMaterialFlag,
+): ConveyorLine {
+  if (unitIds.length === 0) return line
+
+  const idSet = new Set(unitIds)
+  const now = new Date().toISOString()
+
+  return {
+    ...line,
+    units: line.units.map((unit) =>
+      idSet.has(unit.id) ? { ...unit, testMaterial, updatedAt: now } : unit,
+    ),
+    updatedAt: now,
+  }
 }
 
 export function rotateUnit(unit: ConveyorUnit): Rotation | null {

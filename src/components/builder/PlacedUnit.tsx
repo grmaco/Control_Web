@@ -20,6 +20,7 @@ interface PlacedUnitProps {
   showLabels?: boolean
   cellSize: number
   footprint?: UnitFootprint
+  dragEnabled?: boolean
   onSelect: () => void
 }
 
@@ -30,11 +31,13 @@ export function PlacedUnit({
   showLabels = true,
   cellSize,
   footprint = { cols: 1, rows: 1 },
+  dragEnabled = true,
   onSelect,
 }: PlacedUnitProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: unitDragId(unit.id),
     data: { source: 'grid', unitId: unit.id } satisfies GridDragData,
+    disabled: !dragEnabled,
   })
 
   const colors = STATUS_COLORS[unit.status]

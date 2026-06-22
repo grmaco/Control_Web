@@ -1,7 +1,8 @@
-import type { ConveyorLine, ConveyorType, ConveyorUnit, PortDirection } from '../types/conveyor'
+import type { ConveyorLine, ConveyorType, ConveyorUnit, PortDirection, Rotation } from '../types/conveyor'
 import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
 import { getUnitFootprint } from './unitFootprint'
-import { parseTrailingNumber } from './sequentialNaming'
+import { computeFlowOrder, parseTrailingNumber } from './sequentialNaming'
+import { getTurnOpenings, isValidTurnFlow } from './turnArc'
 
 export type FlowDir = 'N' | 'E' | 'S' | 'W'
 
@@ -208,6 +209,216 @@ function pickFlowNeighbors(
   return { prev: null, next: null }
 }
 
+/** 기준 CV 물류 순서상 이전 연결 유닛 (회전·분기 in 방향) */
+function pickFlowPredecessor(
+  unit: ConveyorUnit,
+  unitMap: Map<string, ConveyorUnit>,
+  line: ConveyorLine,
+): ConveyorUnit | null {
+  const { prev } = pickFlowNeighbors(unit, unitMap)
+  if (prev) return prev
+
+  if (!line.baseUnitId) return null
+
+  const { orderedUnitIds } = computeFlowOrder(line, line.baseUnitId)
+  const index = orderedUnitIds.indexOf(unit.id)
+  if (index <= 0) return null
+
+  for (let i = index - 1; i >= 0; i -= 1) {
+    const candidate = unitMap.get(orderedUnitIds[i])
+    if (candidate && unit.connections.includes(candidate.id)) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+/** 회전 유닛 — 연결 이웃(CV03 등) + rotation(270°→CV05, 180°→CV13) 기준 in/out */
+function computeTurnUnitFlow(
+  turn: ConveyorUnit,
+  unitMap: Map<string, ConveyorUnit>,
+  line: ConveyorLine,
+): { inDir: FlowDir | null; outDir: FlowDir | null } {
+  const neighbors = getConnectedNeighbors(turn, unitMap)
+  if (neighbors.length === 0) return { inDir: null, outDir: null }
+
+  const prev = pickFlowPredecessor(turn, unitMap, line)
+  if (!prev) return { inDir: null, outDir: null }
+
+  const inDir = flowEntryDir(prev, turn)
+  if (!inDir) return { inDir: null, outDir: null }
+
+  const outDir = pickTurnOutDir(
+    turn,
+    inDir,
+    neighbors,
+    prev.id,
+    turn.rotation,
+  )
+
+  return { inDir, outDir }
+}
+
+/** 회전 유닛 출구 — 후보 이웃 중 rotation 규칙으로 방향 선택 */
+function resolveTurnOutAmongOptions(
+  inDir: FlowDir,
+  options: { neighbor: ConveyorUnit; dir: FlowDir }[],
+  rotation: Rotation,
+): FlowDir | null {
+  if (options.length === 0) return null
+  if (options.length === 1) return options[0].dir
+
+  const [openA, openB] = getTurnOpenings(rotation)
+
+  if (inDir === openA || inDir === openB) {
+    const pairedOut = inDir === openA ? openB : openA
+    const paired = options.find((item) => item.dir === pairedOut)
+    if (paired) return paired.dir
+  }
+
+  const atOpenings = options.filter(
+    (item) => item.dir === openA || item.dir === openB,
+  )
+
+  if (atOpenings.length === 1) return atOpenings[0].dir
+
+  if (atOpenings.length > 1) {
+    if (rotation === 180) {
+      const opposite = oppositeFlowDir(inDir)
+      const oppositeMatch = atOpenings.find((item) => item.dir === opposite)
+      if (oppositeMatch) return oppositeMatch.dir
+    }
+
+    if (rotation === 90) {
+      const perpendicular = atOpenings.find((item) =>
+        isPerpendicularFlow(inDir, item.dir),
+      )
+      if (perpendicular) return perpendicular.dir
+    }
+
+    return atOpenings[0].dir
+  }
+
+  const drawable = options.filter((item) => isValidTurnFlow(inDir, item.dir))
+  if (drawable.length === 1) return drawable[0].dir
+
+  if (drawable.length > 1) {
+    if (rotation === 180) {
+      const opposite = oppositeFlowDir(inDir)
+      const oppositeMatch = drawable.find((item) => item.dir === opposite)
+      if (oppositeMatch) return oppositeMatch.dir
+    }
+
+    if (rotation === 90) {
+      const perpendicular = drawable.find((item) =>
+        isPerpendicularFlow(inDir, item.dir),
+      )
+      if (perpendicular) return perpendicular.dir
+    }
+
+    return drawable[0].dir
+  }
+
+  return options[0].dir
+}
+
+function pickTurnOutDir(
+  turn: ConveyorUnit,
+  inDir: FlowDir,
+  neighbors: ConveyorUnit[],
+  prevId: string,
+  rotation: Rotation,
+): FlowDir | null {
+  const options = neighbors
+    .filter((neighbor) => neighbor.id !== prevId)
+    .map((neighbor) => ({
+      neighbor,
+      dir: flowExitDir(turn, neighbor),
+    }))
+    .filter((item): item is { neighbor: ConveyorUnit; dir: FlowDir } => item.dir != null)
+
+  if (options.length === 0) return null
+
+  const outAt270 = resolveTurnOutAmongOptions(inDir, options, 90)
+
+  /** 270° — 기준 출구 (예: CV05) */
+  if (rotation === 270) {
+    return outAt270
+  }
+
+  /** 90° — 270° 출구의 반대 방향 */
+  if (rotation === 90) {
+    if (outAt270) {
+      const mirrored = oppositeFlowDir(outAt270)
+      const mirroredOption = options.find((item) => item.dir === mirrored)
+      if (mirroredOption) return mirroredOption.dir
+    }
+    return resolveTurnOutAmongOptions(inDir, options, 270)
+  }
+
+  return resolveTurnOutAmongOptions(inDir, options, rotation)
+}
+
+/** 기준 CV BFS 체인 기준 — 시작·종료는 각 1개만 */
+function resolveGlobalFlowEndpoints(line: ConveyorLine): {
+  startId: string | null
+  endId: string | null
+} {
+  if (!line.baseUnitId) return { startId: null, endId: null }
+
+  const { orderedUnitIds, disconnectedUnitIds } = computeFlowOrder(
+    line,
+    line.baseUnitId,
+  )
+  if (orderedUnitIds.length === 0) return { startId: null, endId: null }
+
+  const disconnected = new Set(disconnectedUnitIds)
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+
+  const connectedFlowIds = orderedUnitIds.filter((id) => {
+    if (disconnected.has(id)) return false
+    const unit = unitMap.get(id)
+    return unit != null && FLOW_ARROW_TYPES.has(unit.type)
+  })
+
+  if (connectedFlowIds.length === 0) {
+    return { startId: null, endId: null }
+  }
+
+  const base = unitMap.get(line.baseUnitId)
+  const startId =
+    base != null &&
+    !disconnected.has(line.baseUnitId) &&
+    FLOW_ARROW_TYPES.has(base.type)
+      ? line.baseUnitId
+      : connectedFlowIds[0]
+
+  return {
+    startId,
+    endId: connectedFlowIds[connectedFlowIds.length - 1],
+  }
+}
+
+function applyGlobalStartEndRoles(
+  result: Map<string, UnitFlowDirs>,
+  line: ConveyorLine,
+): void {
+  const { startId, endId } = resolveGlobalFlowEndpoints(line)
+  if (startId == null && endId == null) return
+
+  for (const [id, flow] of result) {
+    if (id === startId) {
+      flow.role = flow.outDir ? 'start' : flow.inDir ? 'end' : 'single'
+    } else if (id === endId) {
+      flow.role = flow.inDir ? 'end' : flow.outDir ? 'start' : 'single'
+    } else if (flow.role === 'start' || flow.role === 'end') {
+      if (flow.inDir && flow.outDir) flow.role = 'through'
+      else flow.role = 'single'
+    }
+  }
+}
+
 export function computeUnitFlowMap(line: ConveyorLine): Map<string, UnitFlowDirs> {
   const result = new Map<string, UnitFlowDirs>()
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
@@ -215,9 +426,18 @@ export function computeUnitFlowMap(line: ConveyorLine): Map<string, UnitFlowDirs
   for (const unit of line.units) {
     if (!FLOW_ARROW_TYPES.has(unit.type)) continue
 
-    const { prev, next } = pickFlowNeighbors(unit, unitMap)
-    const inDir = prev ? flowEntryDir(prev, unit) : null
-    const outDir = next ? flowExitDir(unit, next) : null
+    let inDir: FlowDir | null = null
+    let outDir: FlowDir | null = null
+
+    if (unit.type === 'turn') {
+      const turnFlow = computeTurnUnitFlow(unit, unitMap, line)
+      inDir = turnFlow.inDir
+      outDir = turnFlow.outDir
+    } else {
+      const { prev, next } = pickFlowNeighbors(unit, unitMap)
+      inDir = prev ? flowEntryDir(prev, unit) : null
+      outDir = next ? flowExitDir(unit, next) : null
+    }
 
     if (!inDir && !outDir) continue
 
@@ -229,6 +449,8 @@ export function computeUnitFlowMap(line: ConveyorLine): Map<string, UnitFlowDirs
 
     result.set(unit.id, { inDir, outDir, cvNumber, role })
   }
+
+  applyGlobalStartEndRoles(result, line)
 
   return result
 }

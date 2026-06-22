@@ -8,10 +8,9 @@ import {
   pickMinimapLabelLines,
 } from '../../utils/monitorLabel'
 import {
-  buildTurnArcPath,
+  buildTurnFlowPath,
   resolveTurnFlowDirs,
   TURN_EDGE,
-  turnArcEdge,
 } from '../../utils/turnArc'
 
 const EDGE = TURN_EDGE
@@ -494,17 +493,16 @@ function TurnFlowArrow({
   const dirs = resolveTurnFlowDirs(flow.inDir, flow.outDir, rotation)
   if (!dirs) return null
 
-  const arc = buildTurnArcPath(dirs.inDir, dirs.outDir)
-  const tipInfo = turnArcEdge(dirs.inDir, dirs.outDir)
-  if (!arc || !tipInfo) return null
+  const pathInfo = buildTurnFlowPath(dirs.inDir, dirs.outDir)
+  if (!pathInfo) return null
 
   return (
     <g>
-      <FlowPath d={arc} hasMaterial={hasMaterial} filterId={filterId} />
+      <FlowPath d={pathInfo.d} hasMaterial={hasMaterial} filterId={filterId} />
       <FlowHead
-        tipX={tipInfo.tip.x}
-        tipY={tipInfo.tip.y}
-        dir={tipInfo.outDir}
+        tipX={pathInfo.tip.x}
+        tipY={pathInfo.tip.y}
+        dir={pathInfo.outDir}
         hasMaterial={hasMaterial}
         filterId={filterId}
       />

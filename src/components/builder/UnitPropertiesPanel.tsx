@@ -1,6 +1,8 @@
 import type {
   ConveyorLine,
   ConveyorUnit,
+  ConveyorStatus,
+  TestMaterialFlag,
   PortDirection,
   PortLinkedUnit,
   PortRecipe,
@@ -34,12 +36,13 @@ import {
   warehouseMaintenanceAreaLabel,
   warehouseShapeLabel,
 } from '../../constants/warehouseUnit'
-import { updateUnitInLine } from '../../utils/units'
+import { updateUnitInLine, updateUnitsStatusInLine, updateUnitsTestMaterialInLine } from '../../utils/units'
 import type { InterfaceUnitType } from '../../types/conveyor'
 
 interface UnitPropertiesPanelProps {
   line: ConveyorLine
   unit: ConveyorUnit | null
+  selectedUnitIds?: string[]
   isBase: boolean
   onSetBase: (unitId: string) => void
   onChange: (line: ConveyorLine) => void
@@ -55,12 +58,97 @@ const STATUSES = Object.entries(STATUS_COLORS).map(([value, colors]) => ({
 export function UnitPropertiesPanel({
   line,
   unit,
+  selectedUnitIds = [],
   isBase,
   onSetBase,
   onChange,
   onDelete,
   onRotate,
 }: UnitPropertiesPanelProps) {
+  if (selectedUnitIds.length > 1) {
+    const selectedUnits = line.units.filter((item) =>
+      selectedUnitIds.includes(item.id),
+    )
+    const uniqueStatuses = new Set(selectedUnits.map((item) => item.status))
+    const bulkStatus =
+      uniqueStatuses.size === 1 ? [...uniqueStatuses][0]! : ''
+
+    const materialUnits = selectedUnits.filter((item) => !isStorageUnit(item))
+    const uniqueMaterials = new Set(
+      materialUnits.map((item) => item.testMaterial ?? 0),
+    )
+    const bulkMaterial =
+      uniqueMaterials.size === 1 ? [...uniqueMaterials][0]! : ''
+
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-violet-300">
+          {selectedUnitIds.length}개 모듈 선택됨
+          {selectedUnitIds.length === line.units.length ? ' (전체)' : ''}
+        </p>
+
+        <div>
+          <label className="mb-1 block text-xs text-slate-400">상태 (일괄 적용)</label>
+          <select
+            value={bulkStatus}
+            onChange={(e) => {
+              const nextStatus = e.target.value as ConveyorStatus
+              if (!nextStatus) return
+              onChange(updateUnitsStatusInLine(line, selectedUnitIds, nextStatus))
+            }}
+            className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+          >
+            {uniqueStatuses.size > 1 ? (
+              <option value="">— 여러 상태 —</option>
+            ) : null}
+            {STATUSES.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {materialUnits.length > 0 ? (
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">
+              테스트 자재 (미니맵, 일괄 적용)
+            </label>
+            <select
+              value={bulkMaterial === '' ? '' : String(bulkMaterial)}
+              onChange={(e) => {
+                if (e.target.value === '') return
+                const nextMaterial = Number(e.target.value) as TestMaterialFlag
+                onChange(
+                  updateUnitsTestMaterialInLine(
+                    line,
+                    materialUnits.map((item) => item.id),
+                    nextMaterial,
+                  ),
+                )
+              }}
+              className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+            >
+              {uniqueMaterials.size > 1 ? (
+                <option value="">— 여러 값 —</option>
+              ) : null}
+              <option value={0}>0 — 없음</option>
+              <option value={1}>1 — 있음 (네온 표시)</option>
+            </select>
+            <p className="mt-1 text-xs text-slate-500">
+              적재창고를 제외한 {materialUnits.length}개 모듈에 적용됩니다.
+            </p>
+          </div>
+        ) : null}
+
+        <p className="text-xs leading-relaxed text-slate-500">
+          선택된 모듈을 드래그해 함께 이동할 수 있습니다. 상태·자재 설정은 선택된
+          모듈에 일괄 적용됩니다.
+        </p>
+      </div>
+    )
+  }
+
   if (!unit) {
     return (
       <p className="text-sm text-slate-500">

@@ -33,8 +33,51 @@ export function formatSequentialName(
   return `${template.prefix}${String(number).padStart(template.padWidth, '0')}`
 }
 
-function isConveyorForNaming(unit: ConveyorUnit): boolean {
+/** 배치 완료 CV 순번 — 포트·적재창고 제외, 회전/분기/리프트 포함 */
+function receivesCvSequentialName(unit: ConveyorUnit): boolean {
   return unit.type !== 'port' && unit.type !== 'storage'
+}
+
+/** prev → from 진입 방향의 반대(되돌아가기)인 이웃 */
+function isBacktrack(
+  prev: ConveyorUnit,
+  from: ConveyorUnit,
+  next: ConveyorUnit,
+): boolean {
+  const inDx = from.gridX - prev.gridX
+  const inDy = from.gridY - prev.gridY
+  const outDx = next.gridX - from.gridX
+  const outDy = next.gridY - from.gridY
+
+  if (inDx !== 0 && outDx !== 0 && inDy === 0 && outDy === 0) {
+    return Math.sign(inDx) !== Math.sign(outDx)
+  }
+  if (inDy !== 0 && outDy !== 0 && inDx === 0 && outDx === 0) {
+    return Math.sign(inDy) !== Math.sign(outDy)
+  }
+  return false
+}
+
+/** 메인 라인 우선 — 직진 > 회전/분기 > 가지 */
+function flowWalkPriority(
+  prev: ConveyorUnit | null,
+  from: ConveyorUnit,
+  next: ConveyorUnit,
+): number {
+  if (prev && isBacktrack(prev, from, next)) return 3
+  if (!prev) return 0
+
+  const inDx = from.gridX - prev.gridX
+  const inDy = from.gridY - prev.gridY
+  const outDx = next.gridX - from.gridX
+  const outDy = next.gridY - from.gridY
+  const collinear =
+    (inDx !== 0 && outDx !== 0 && Math.sign(inDx) === Math.sign(outDx)) ||
+    (inDy !== 0 && outDy !== 0 && Math.sign(inDy) === Math.sign(outDy))
+
+  if (collinear) return 0
+  if (next.type === 'turn' || next.type === 'junction') return 1
+  return 2
 }
 
 /** 기준 유닛·기존 이름에서 순번 시작값과 접두어를 결정 */
@@ -47,7 +90,7 @@ export function resolveNamingTemplate(
 
   let best: ParsedUnitName | null = null
   for (const unit of units) {
-    if (!isConveyorForNaming(unit)) continue
+    if (!receivesCvSequentialName(unit)) continue
     const parsed = parseTrailingNumber(unit.name)
     if (!parsed) continue
     if (!best || parsed.number > best.number) {
@@ -73,8 +116,19 @@ export function resolveNamingTemplate(
 function sortNeighborsForFlow(
   neighbors: ConveyorUnit[],
   from: ConveyorUnit,
+  prev: ConveyorUnit | null = null,
 ): ConveyorUnit[] {
   return [...neighbors].sort((a, b) => {
+    const priA = flowWalkPriority(prev, from, a)
+    const priB = flowWalkPriority(prev, from, b)
+    if (priA !== priB) return priA - priB
+
+    if (prev) {
+      const backA = isBacktrack(prev, from, a)
+      const backB = isBacktrack(prev, from, b)
+      if (backA !== backB) return backA ? 1 : -1
+    }
+
     const dxA = a.gridX - from.gridX
     const dyA = a.gridY - from.gridY
     const dxB = b.gridX - from.gridX
@@ -99,7 +153,7 @@ export interface FlowOrderResult {
   disconnectedUnitIds: string[]
 }
 
-/** baseUnitId 기준 BFS 물류 순서 (이름 변경 없음) */
+/** baseUnitId 기준 물류 순서 — 되돌아가기·가지 우선순위로 메인 라인 따라감 */
 export function computeFlowOrder(
   line: ConveyorLine,
   baseUnitId?: string | null,
@@ -115,27 +169,28 @@ export function computeFlowOrder(
 
   const visited = new Set<string>()
   const orderedUnitIds: string[] = []
-  const queue = [baseUnitId]
-  visited.add(baseUnitId)
 
-  while (queue.length > 0) {
-    const currentId = queue.shift()!
+  const traverse = (currentId: string, prevId: string | null) => {
+    if (visited.has(currentId)) return
+    visited.add(currentId)
     orderedUnitIds.push(currentId)
 
     const current = unitMap.get(currentId)!
+    const prev = prevId ? (unitMap.get(prevId) ?? null) : null
     const neighbors = sortNeighborsForFlow(
       current.connections
         .map((id) => unitMap.get(id))
-        .filter((unit): unit is ConveyorUnit => Boolean(unit)),
+        .filter((unit): unit is ConveyorUnit => Boolean(unit && !visited.has(unit.id))),
       current,
+      prev,
     )
 
     for (const neighbor of neighbors) {
-      if (visited.has(neighbor.id)) continue
-      visited.add(neighbor.id)
-      queue.push(neighbor.id)
+      traverse(neighbor.id, currentId)
     }
   }
+
+  traverse(baseUnitId, null)
 
   const disconnectedUnitIds = line.units
     .filter((unit) => !visited.has(unit.id))
@@ -171,7 +226,7 @@ export function assignSequentialNamesFromBase(
 
   for (const id of orderedUnitIds) {
     const unit = unitMap.get(id)!
-    if (!isConveyorForNaming(unit)) continue
+    if (!receivesCvSequentialName(unit)) continue
     nameById.set(id, formatSequentialName(template, nextNumber))
     nextNumber += 1
   }
@@ -179,7 +234,7 @@ export function assignSequentialNamesFromBase(
   const now = new Date().toISOString()
   const units = line.units.map((unit) => ({
     ...unit,
-    name: isConveyorForNaming(unit)
+    name: receivesCvSequentialName(unit)
       ? (nameById.get(unit.id) ?? unit.name)
       : unit.name,
     updatedAt: now,

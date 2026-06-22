@@ -26,6 +26,8 @@ import {
   getUnitFootprint,
   isUnitAnchor,
   moveUnitInLine,
+  moveUnitsInLine,
+  canMoveUnitsInLine,
   removeUnitFromLine,
   rotateUnit,
   showsRotation,
@@ -59,7 +61,7 @@ interface LineBuilderProps {
 
 export function LineBuilder({ line, onSave }: LineBuilderProps) {
   const [draft, setDraft] = useState(line)
-  const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null)
+  const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([])
   const [completionMessage, setCompletionMessage] = useState<string | null>(null)
   const [activeDrag, setActiveDrag] = useState<BuilderDragData | null>(null)
   const [overCellId, setOverCellId] = useState<string | null>(null)
@@ -67,12 +69,14 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   const logApplication = useConveyorStore((s) => s.logApplication)
   const draftRef = useRef(draft)
   draftRef.current = draft
+  const selectedUnitIdsRef = useRef(selectedUnitIds)
+  selectedUnitIdsRef.current = selectedUnitIds
 
   const baseUnitId = draft.baseUnitId ?? null
 
   useEffect(() => {
     setDraft(line)
-    setSelectedUnitId(null)
+    setSelectedUnitIds([])
     setCompletionMessage(null)
   }, [line.id])
 
@@ -100,8 +104,23 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     [onSave],
   )
 
+  const selectedUnitIdsSet = useMemo(
+    () => new Set(selectedUnitIds),
+    [selectedUnitIds],
+  )
+  const selectedCount = selectedUnitIds.length
+  const allSelected =
+    selectedCount > 0 && selectedCount === draft.units.length
+
   const selectedUnit =
-    draft.units.find((u) => u.id === selectedUnitId) ?? null
+    selectedCount === 1
+      ? (draft.units.find((u) => u.id === selectedUnitIds[0]) ?? null)
+      : null
+
+  const primarySelectedUnit =
+    selectedCount > 0
+      ? (draft.units.find((u) => u.id === selectedUnitIds[0]) ?? null)
+      : null
 
   const draggingUnit =
     activeDrag?.source === 'grid'
@@ -146,15 +165,24 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
             draft.gridSize.rows,
           )
         : draggingUnit
-          ? canPlaceAt(
-              draft.units,
-              draggingUnit.type,
-              overCell.gridX,
-              overCell.gridY,
-              draft.gridSize.cols,
-              draft.gridSize.rows,
-              draggingUnit.id,
-            )
+          ? selectedUnitIds.length > 1 &&
+            selectedUnitIdsSet.has(draggingUnit.id)
+            ? canMoveUnitsInLine(
+                draft,
+                selectedUnitIds,
+                draggingUnit.id,
+                overCell.gridX,
+                overCell.gridY,
+              )
+            : canPlaceAt(
+                draft.units,
+                draggingUnit.type,
+                overCell.gridX,
+                overCell.gridY,
+                draft.gridSize.cols,
+                draft.gridSize.rows,
+                draggingUnit.id,
+              )
           : false
 
     return {
@@ -196,20 +224,35 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
 
     const { gridX, gridY } = cell
     const currentDraft = draftRef.current
+    const currentSelectedIds = selectedUnitIdsRef.current
+    const currentSelectedSet = new Set(currentSelectedIds)
 
     if (dragData.source === 'palette') {
       const next = addUnitToLine(currentDraft, dragData.type, gridX, gridY)
       if (!next) return
       await persist(next)
       const placed = next.units.find((u) => u.gridX === gridX && u.gridY === gridY)
-      if (placed) setSelectedUnitId(placed.id)
+      if (placed) setSelectedUnitIds([placed.id])
       return
     }
 
-    const next = moveUnitInLine(currentDraft, dragData.unitId, gridX, gridY)
+    const isGroupMove =
+      currentSelectedIds.length > 1 && currentSelectedSet.has(dragData.unitId)
+
+    const next = isGroupMove
+      ? moveUnitsInLine(
+          currentDraft,
+          currentSelectedIds,
+          dragData.unitId,
+          gridX,
+          gridY,
+        )
+      : moveUnitInLine(currentDraft, dragData.unitId, gridX, gridY)
     if (!next) return
     await persist(next)
-    setSelectedUnitId(dragData.unitId)
+    if (!isGroupMove) {
+      setSelectedUnitIds([dragData.unitId])
+    }
   }
 
   const handleDragCancel = () => {
@@ -238,10 +281,18 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
         baseUnitId: draft.baseUnitId === unitId ? null : (draft.baseUnitId ?? null),
         updatedAt: new Date().toISOString(),
       })
-      setSelectedUnitId(null)
+      setSelectedUnitIds([])
     },
     [draft, persist],
   )
+
+  const handleSelectAll = useCallback(() => {
+    setSelectedUnitIds(draft.units.map((unit) => unit.id))
+  }, [draft.units])
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedUnitIds([])
+  }, [])
 
   const handleSetBase = useCallback(
     async (unitId: string) => {
@@ -289,18 +340,17 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== 'r' || !selectedUnitId) return
-      const unit = draft.units.find((u) => u.id === selectedUnitId)
-      if (!unit || !showsRotation(unit.type)) return
+      if (e.key.toLowerCase() !== 'r' || selectedCount !== 1 || !selectedUnit) return
+      if (!showsRotation(selectedUnit.type)) return
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) {
         return
       }
       e.preventDefault()
-      handleRotate(selectedUnitId)
+      handleRotate(selectedUnit.id)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedUnitId, handleRotate, draft.units])
+  }, [selectedCount, selectedUnit, handleRotate])
 
   const activeUnit: ConveyorUnit | null =
     activeDrag?.source === 'grid'
@@ -354,11 +404,15 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
 
           <PlacementToolbar
             units={draft.units}
-            selectedUnit={selectedUnit}
+            selectedUnit={primarySelectedUnit}
+            selectedCount={selectedCount}
+            allSelected={allSelected}
             baseUnitId={baseUnitId}
             completionMessage={completionMessage}
             onSetBase={handleSetBase}
             onComplete={handleCompletePlacement}
+            onSelectAll={handleSelectAll}
+            onClearSelection={handleClearSelection}
           />
 
           <div className="max-h-[520px] overflow-auto rounded border border-slate-800">
@@ -368,7 +422,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                 gridTemplateColumns: `repeat(${viewport.cols}, ${BUILDER_CELL_SIZE}px)`,
                 gridTemplateRows: `repeat(${viewport.rows}, ${BUILDER_CELL_SIZE}px)`,
               }}
-              onClick={() => setSelectedUnitId(null)}
+              onClick={() => setSelectedUnitIds([])}
             >
             {Array.from({ length: viewport.cols * viewport.rows }).map((_, index) => {
               const localX = index % viewport.cols
@@ -394,12 +448,25 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                   {isAnchor && unit ? (
                     <PlacedUnit
                       unit={unit}
-                      selected={selectedUnitId === unit.id}
+                      selected={selectedUnitIdsSet.has(unit.id)}
                       isBase={baseUnitId === unit.id}
                       showLabels
                       cellSize={BUILDER_CELL_SIZE}
                       footprint={footprint ?? undefined}
-                      onSelect={() => setSelectedUnitId(unit.id)}
+                      dragEnabled={
+                        selectedCount <= 1 || selectedUnitIdsSet.has(unit.id)
+                      }
+                      onSelect={() => {
+                        setSelectedUnitIds((prev) => {
+                          if (prev.length > 1) {
+                            if (prev.includes(unit.id)) {
+                              return prev.filter((id) => id !== unit.id)
+                            }
+                            return [...prev, unit.id]
+                          }
+                          return [unit.id]
+                        })
+                      }}
                     />
                   ) : null}
                 </GridCell>
@@ -418,6 +485,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
           <UnitPropertiesPanel
             line={draft}
             unit={selectedUnit}
+            selectedUnitIds={selectedUnitIds}
             isBase={selectedUnit ? baseUnitId === selectedUnit.id : false}
             onSetBase={handleSetBase}
             onChange={persist}

@@ -10,12 +10,16 @@ const EDGE: Record<FlowDir, { x: number; y: number }> = {
   W: { x: 14, y: 50 },
 }
 
-/** 회전 유닛 기본 개구부 — 0°=좌·하, 90°=하·우, 180°=우·상, 270°=상·좌 */
+/** 회전 유닛 기본 개구부 — 0°=좌·하, 90°=상·좌, 180°=우·상, 270°=하·우 (빌더 회전 라벨 기준) */
 const TURN_OPENINGS: Record<Rotation, readonly [FlowDir, FlowDir]> = {
   0: ['W', 'S'],
-  90: ['S', 'E'],
+  90: ['N', 'W'],
   180: ['E', 'N'],
-  270: ['N', 'W'],
+  270: ['S', 'E'],
+}
+
+export function getTurnOpenings(rotation: Rotation): readonly [FlowDir, FlowDir] {
+  return TURN_OPENINGS[rotation]
 }
 
 /** 짧은 1/4 호 (스크린 좌표, y↓) */
@@ -32,6 +36,44 @@ const TURN_SWEEP: Record<string, 0 | 1> = {
 
 function turnKey(inDir: FlowDir, outDir: FlowDir): string {
   return `${inDir}-${outDir}`
+}
+
+export function isValidTurnArc(inDir: FlowDir, outDir: FlowDir): boolean {
+  return TURN_SWEEP[turnKey(inDir, outDir)] != null
+}
+
+/** 180° 직통 — 개구부가 마주보는 경우 */
+const TURN_THROUGH: Record<string, string> = {
+  'W-E': `M ${EDGE.W.x},${EDGE.W.y} L ${EDGE.E.x},${EDGE.E.y}`,
+  'E-W': `M ${EDGE.E.x},${EDGE.E.y} L ${EDGE.W.x},${EDGE.W.y}`,
+  'N-S': `M ${EDGE.N.x},${EDGE.N.y} L ${EDGE.S.x},${EDGE.S.y}`,
+  'S-N': `M ${EDGE.S.x},${EDGE.S.y} L ${EDGE.N.x},${EDGE.N.y}`,
+}
+
+export function isValidTurnThrough(inDir: FlowDir, outDir: FlowDir): boolean {
+  return TURN_THROUGH[turnKey(inDir, outDir)] != null
+}
+
+export function isValidTurnFlow(inDir: FlowDir, outDir: FlowDir): boolean {
+  return isValidTurnArc(inDir, outDir) || isValidTurnThrough(inDir, outDir)
+}
+
+export function buildTurnFlowPath(
+  inDir: FlowDir,
+  outDir: FlowDir,
+): { d: string; tip: { x: number; y: number }; outDir: FlowDir } | null {
+  const arc = buildTurnArcPath(inDir, outDir)
+  if (arc) {
+    const tipInfo = turnArcEdge(inDir, outDir)
+    if (tipInfo) return { d: arc, tip: tipInfo.tip, outDir: tipInfo.outDir }
+  }
+
+  const through = TURN_THROUGH[turnKey(inDir, outDir)]
+  if (through) {
+    return { d: through, tip: EDGE[outDir], outDir }
+  }
+
+  return null
 }
 
 /**

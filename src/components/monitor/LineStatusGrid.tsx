@@ -20,6 +20,8 @@ interface LineStatusGridProps {
   showFlowArrows?: boolean
   /** 줌 배율 — 라벨 크기 계산에 사용 */
   scale?: number
+  /** 셀 격자 실선 표시 */
+  showGridLines?: boolean
   className?: string
 }
 
@@ -30,6 +32,7 @@ export function LineStatusGrid({
   showLabels = true,
   showFlowArrows = false,
   scale = 1,
+  showGridLines = false,
   className,
 }: LineStatusGridProps) {
   const flowByUnitId = useMemo(
@@ -44,7 +47,9 @@ export function LineStatusGrid({
 
   return (
     <div
-      className={`inline-grid gap-0 border border-slate-700 bg-slate-950/50 ${className ?? ''}`}
+      className={`inline-grid gap-0 bg-slate-950/50 ${
+        showGridLines ? 'border border-slate-700' : ''
+      } ${className ?? ''}`}
       style={{
         gridTemplateColumns: `repeat(${cols}, ${cellSize}px)`,
         gridTemplateRows: `repeat(${rows}, ${cellSize}px)`,
@@ -88,7 +93,11 @@ export function LineStatusGrid({
             className={`flex h-full w-full min-w-0 flex-col items-center justify-center ${
               isPort && isAnchor ? 'p-0' : 'p-0.5'
             } ${
-              unit ? footprintBorderClasses(unit, gridX, gridY) : 'border'
+              unit
+                ? footprintBorderClasses(unit, gridX, gridY)
+                : showGridLines
+                  ? 'border'
+                  : ''
             } ${
               isMultiCellAnchor || flow || showMinimapPortOverlay
                 ? 'relative'
@@ -104,7 +113,9 @@ export function LineStatusGrid({
             } ${
               unit
                 ? `${colors!.bg} ${colors!.border} text-white`
-                : 'border-slate-800 bg-slate-900/60 text-slate-600'
+                : showGridLines
+                  ? 'border-slate-800 bg-slate-900/60 text-slate-600'
+                  : 'bg-slate-900/60 text-slate-600'
             }`}
             title={isAnchor && unit ? unitTitle(unit) : undefined}
           >
