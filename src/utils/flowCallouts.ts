@@ -1,0 +1,388 @@
+import type { ConveyorLine, ConveyorStatus, ConveyorUnit } from '../types/conveyor'
+import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
+import { STATUS_COLORS } from '../constants/statusColors'
+import type { UnitFlowDirs } from './flowDirection'
+import type { LineViewport } from './lineViewport'
+import { getUnitFootprint } from './unitFootprint'
+import { formatTurnFlowAngleLabel } from './turnArc'
+import { unitDisplayCode } from './unitPropertyHelpers'
+
+export type FlowCalloutTagKind = 'start' | 'end' | 'angle'
+
+export interface FlowCalloutTag {
+  kind: FlowCalloutTagKind
+  text: string
+}
+
+export interface FlowCallout {
+  unitId: string
+  unitName: string
+  unitCode: string
+  status: ConveyorStatus
+  statusLabel: string
+  tags: FlowCalloutTag[]
+  lineStart: { x: number; y: number }
+  lineEnd: { x: number; y: number }
+  panelX: number
+  panelY: number
+  panelWidth: number
+  panelHeight: number
+}
+
+interface PxRect {
+  left: number
+  top: number
+  right: number
+  bottom: number
+}
+
+const DIRECTIONS: Array<{ x: -1 | 0 | 1; y: -1 | 0 | 1 }> = [
+  { x: -1, y: -1 },
+  { x: 1, y: -1 },
+  { x: -1, y: 1 },
+  { x: 1, y: 1 },
+  { x: -1, y: 0 },
+  { x: 0, y: -1 },
+  { x: 1, y: 0 },
+  { x: 0, y: 1 },
+]
+
+/** 그리드 밖 콜아웃이 잘리지 않도록 오버레이 여백 */
+export const FLOW_CALLOUT_OVERLAY_PAD = 120
+
+function unitBoundsPx(
+  unit: ConveyorUnit,
+  cellSize: number,
+  minX: number,
+  minY: number,
+): PxRect & { cx: number; cy: number } {
+  const footprint = getUnitFootprint(unit)
+  const left = (unit.gridX - minX) * cellSize
+  const top = (unit.gridY - minY) * cellSize
+  const right = left + footprint.cols * cellSize
+  const bottom = top + footprint.rows * cellSize
+  return {
+    left,
+    top,
+    right,
+    bottom,
+    cx: (left + right) / 2,
+    cy: (top + bottom) / 2,
+  }
+}
+
+function edgePointToward(
+  bounds: PxRect & { cx: number; cy: number },
+  targetX: number,
+  targetY: number,
+): { x: number; y: number } {
+  const dx = targetX - bounds.cx
+  const dy = targetY - bounds.cy
+  if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) {
+    return { x: bounds.cx, y: bounds.top }
+  }
+
+  const halfW = (bounds.right - bounds.left) / 2
+  const halfH = (bounds.bottom - bounds.top) / 2
+  const scale = 1 / Math.max(Math.abs(dx) / halfW, Math.abs(dy) / halfH, 1e-6)
+  return {
+    x: bounds.cx + dx * scale,
+    y: bounds.cy + dy * scale,
+  }
+}
+
+function edgePointOnRect(rect: PxRect, fromX: number, fromY: number): { x: number; y: number } {
+  const cx = (rect.left + rect.right) / 2
+  const cy = (rect.top + rect.bottom) / 2
+  return edgePointToward({ ...rect, cx, cy }, fromX, fromY)
+}
+
+function rectsOverlap(a: PxRect, b: PxRect, gap = 0): boolean {
+  return !(
+    a.right + gap < b.left ||
+    a.left - gap > b.right ||
+    a.bottom + gap < b.top ||
+    a.top - gap > b.bottom
+  )
+}
+
+function buildUnitRects(
+  line: ConveyorLine,
+  cellSize: number,
+  minX: number,
+  minY: number,
+): PxRect[] {
+  return line.units.map((unit) => {
+    const bounds = unitBoundsPx(unit, cellSize, minX, minY)
+    return {
+      left: bounds.left,
+      top: bounds.top,
+      right: bounds.right,
+      bottom: bounds.bottom,
+    }
+  })
+}
+
+export function collectCalloutTags(unit: ConveyorUnit, flow: UnitFlowDirs): FlowCalloutTag[] {
+  const tags: FlowCalloutTag[] = []
+
+  if (flow.role === 'start') {
+    tags.push({ kind: 'start', text: '시작점' })
+  }
+  if (flow.role === 'end') {
+    tags.push({ kind: 'end', text: '종료점' })
+  }
+
+  const isTurnLike = unit.type === 'turn' || unit.type === 'junction'
+  if (isTurnLike && flow.inDir && flow.outDir) {
+    const angle = formatTurnFlowAngleLabel(flow.inDir, flow.outDir)
+    if (angle) {
+      tags.push({ kind: 'angle', text: `회전 ${angle}` })
+    }
+  }
+
+  return tags
+}
+
+function needsCallout(unit: ConveyorUnit, flow: UnitFlowDirs): boolean {
+  if (isStorageUnit(unit) || isPortUnit(unit)) return false
+  return collectCalloutTags(unit, flow).length > 0
+}
+
+function positionPanelOutside(
+  lineStart: { x: number; y: number },
+  dir: { x: -1 | 0 | 1; y: -1 | 0 | 1 },
+  panelWidth: number,
+  panelHeight: number,
+  gap: number,
+): PxRect {
+  let panelX = lineStart.x - panelWidth / 2
+  let panelY = lineStart.y - panelHeight / 2
+
+  if (dir.x < 0) panelX = lineStart.x - panelWidth - gap
+  else if (dir.x > 0) panelX = lineStart.x + gap
+
+  if (dir.y < 0) panelY = lineStart.y - panelHeight - gap
+  else if (dir.y > 0) panelY = lineStart.y + gap
+
+  return {
+    left: panelX,
+    top: panelY,
+    right: panelX + panelWidth,
+    bottom: panelY + panelHeight,
+  }
+}
+
+function panelOverlapsModule(
+  panel: PxRect,
+  unitRects: PxRect[],
+  moduleGap: number,
+): boolean {
+  return unitRects.some((rect) => rectsOverlap(panel, rect, moduleGap))
+}
+
+function fallbackPlacement(
+  bounds: PxRect & { cx: number; cy: number },
+  panelWidth: number,
+  panelHeight: number,
+  unitRects: PxRect[],
+  reservedPanels: PxRect[],
+): {
+  lineStart: { x: number; y: number }
+  lineEnd: { x: number; y: number }
+  panel: PxRect
+} | null {
+  const moduleGap = 2
+  const margin = 6
+  const anchors = [
+    {
+      x: bounds.left,
+      y: bounds.top,
+      panelX: bounds.left - panelWidth - margin,
+      panelY: bounds.top - panelHeight - margin,
+    },
+    {
+      x: bounds.right,
+      y: bounds.top,
+      panelX: bounds.right + margin,
+      panelY: bounds.top - panelHeight - margin,
+    },
+    {
+      x: bounds.left,
+      y: bounds.bottom,
+      panelX: bounds.left - panelWidth - margin,
+      panelY: bounds.bottom + margin,
+    },
+    {
+      x: bounds.right,
+      y: bounds.bottom,
+      panelX: bounds.right + margin,
+      panelY: bounds.bottom + margin,
+    },
+  ]
+
+  for (const anchor of anchors) {
+    const panel: PxRect = {
+      left: anchor.panelX,
+      top: anchor.panelY,
+      right: anchor.panelX + panelWidth,
+      bottom: anchor.panelY + panelHeight,
+    }
+    if (panelOverlapsModule(panel, unitRects, moduleGap)) continue
+    if (reservedPanels.some((rect) => rectsOverlap(panel, rect, 4))) continue
+
+    const lineStart = { x: anchor.x, y: anchor.y }
+    const lineEnd = edgePointOnRect(panel, lineStart.x, lineStart.y)
+    return { lineStart, lineEnd, panel }
+  }
+
+  return null
+}
+
+function placeCalloutPanel(
+  bounds: PxRect & { cx: number; cy: number },
+  cellSize: number,
+  panelWidth: number,
+  panelHeight: number,
+  unitRects: PxRect[],
+  reservedPanels: PxRect[],
+): {
+  lineStart: { x: number; y: number }
+  lineEnd: { x: number; y: number }
+  panel: PxRect
+} | null {
+  const moduleGap = 2
+  const panelGap = 4
+  const maxSteps = 28
+
+  let best: {
+    lineStart: { x: number; y: number }
+    lineEnd: { x: number; y: number }
+    panel: PxRect
+    score: number
+  } | null = null
+
+  for (const dir of DIRECTIONS) {
+    if (dir.x === 0 && dir.y === 0) continue
+
+    for (let step = 1; step <= maxSteps; step += 1) {
+      const length = cellSize * (1.8 + step * 0.65)
+      const targetX = bounds.cx + dir.x * length
+      const targetY = bounds.cy + dir.y * length
+      const lineStart = edgePointToward(bounds, targetX, targetY)
+      const panel = positionPanelOutside(lineStart, dir, panelWidth, panelHeight, panelGap)
+      const lineEnd = edgePointOnRect(panel, lineStart.x, lineStart.y)
+
+      if (panelOverlapsModule(panel, unitRects, moduleGap)) continue
+      if (reservedPanels.some((rect) => rectsOverlap(panel, rect, 4))) continue
+
+      const score = length + (panel.left < 0 ? -8 : 0) + (panel.top < 0 ? -8 : 0)
+      if (!best || score < best.score) {
+        best = { lineStart, lineEnd, panel, score }
+      }
+      break
+    }
+  }
+
+  if (best) {
+    return {
+      lineStart: best.lineStart,
+      lineEnd: best.lineEnd,
+      panel: best.panel,
+    }
+  }
+
+  return fallbackPlacement(bounds, panelWidth, panelHeight, unitRects, reservedPanels)
+}
+
+export function computeFlowCallouts(
+  line: ConveyorLine,
+  flowMap: Map<string, UnitFlowDirs>,
+  viewport: LineViewport,
+  cellSize: number,
+): FlowCallout[] {
+  const panelWidth = Math.max(88, Math.round(cellSize * 3))
+  const panelHeight = 50
+  const unitRects = buildUnitRects(line, cellSize, viewport.minX, viewport.minY)
+  const reservedPanels: PxRect[] = []
+  const callouts: FlowCallout[] = []
+
+  const units = [...line.units].sort((a, b) => {
+    const ay = a.gridY - a.gridX
+    const by = b.gridY - b.gridX
+    return ay - by || a.gridX - b.gridX
+  })
+
+  for (const unit of units) {
+    const flow = flowMap.get(unit.id)
+    if (!flow || !needsCallout(unit, flow)) continue
+
+    const bounds = unitBoundsPx(unit, cellSize, viewport.minX, viewport.minY)
+    const placement = placeCalloutPanel(
+      bounds,
+      cellSize,
+      panelWidth,
+      panelHeight,
+      unitRects,
+      reservedPanels,
+    )
+    if (!placement) continue
+
+    reservedPanels.push(placement.panel)
+    const tags = collectCalloutTags(unit, flow)
+
+    callouts.push({
+      unitId: unit.id,
+      unitName: unit.name,
+      unitCode: unitDisplayCode(unit),
+      status: unit.status,
+      statusLabel: STATUS_COLORS[unit.status].label,
+      tags,
+      lineStart: placement.lineStart,
+      lineEnd: placement.lineEnd,
+      panelX: placement.panel.left,
+      panelY: placement.panel.top,
+      panelWidth,
+      panelHeight,
+    })
+  }
+
+  return callouts
+}
+
+export type FlowCalloutPosition = { panelX: number; panelY: number }
+
+export function buildCalloutPositions(
+  callouts: FlowCallout[],
+  saved?: Record<string, FlowCalloutPosition>,
+): Record<string, FlowCalloutPosition> {
+  const result: Record<string, FlowCalloutPosition> = {}
+  for (const callout of callouts) {
+    const stored = saved?.[callout.unitId]
+    result[callout.unitId] = stored ?? {
+      panelX: callout.panelX,
+      panelY: callout.panelY,
+    }
+  }
+  return result
+}
+
+export function panelLineEnd(
+  panelX: number,
+  panelY: number,
+  panelWidth: number,
+  panelHeight: number,
+  fromX: number,
+  fromY: number,
+): { x: number; y: number } {
+  return edgePointOnRect(
+    {
+      left: panelX,
+      top: panelY,
+      right: panelX + panelWidth,
+      bottom: panelY + panelHeight,
+    },
+    fromX,
+    fromY,
+  )
+}

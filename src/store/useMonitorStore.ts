@@ -14,6 +14,8 @@ export interface MonitorViewTransform {
   layoutSignature?: string
   /** @deprecated layoutSignature 사용 */
   lineUpdatedAt?: string
+  /** 모니터 콜아웃 표 위치 (unitId → 그리드 px) */
+  calloutPositions?: Record<string, { panelX: number; panelY: number }>
 }
 
 interface PersistedMonitorState {
@@ -21,6 +23,8 @@ interface PersistedMonitorState {
   lineControls: Record<string, LineControlState>
   lineViews: Record<string, MonitorViewTransform>
   lastMonitorLineId: string | null
+  /** 적재창고(STK) 제외 모듈 이름 숨김 */
+  hideModuleNames: boolean
 }
 
 interface MonitorState {
@@ -29,12 +33,19 @@ interface MonitorState {
   lineViews: Record<string, MonitorViewTransform>
   /** 모니터링 화면 전용 선택 라인 */
   monitorLineId: string | null
+  hideModuleNames: boolean
   hasHydrated: boolean
   initialize: () => void
   resolveMonitorLine: (lineIds: string[], fallbackLineId: string | null) => void
   selectMonitorLine: (lineId: string | null) => void
   getLineView: (lineId: string) => MonitorViewTransform | null
   saveLineView: (lineId: string, view: MonitorViewTransform) => void
+  saveCalloutPositions: (
+    lineId: string,
+    layoutSignature: string,
+    positions: Record<string, { panelX: number; panelY: number }>,
+  ) => void
+  toggleHideModuleNames: () => void
   toggleEtherCat: () => void
   toggleAllPower: (lineId: string) => void
   setAllAutoRun: (lineId: string) => void
@@ -50,6 +61,7 @@ function readPersisted(): PersistedMonitorState {
         lineControls: {},
         lineViews: {},
         lastMonitorLineId: null,
+        hideModuleNames: false,
       }
     }
     const parsed = JSON.parse(raw) as Partial<PersistedMonitorState>
@@ -58,6 +70,7 @@ function readPersisted(): PersistedMonitorState {
       lineControls: parsed.lineControls ?? {},
       lineViews: parsed.lineViews ?? {},
       lastMonitorLineId: parsed.lastMonitorLineId ?? null,
+      hideModuleNames: parsed.hideModuleNames ?? false,
     }
   } catch {
     return {
@@ -65,6 +78,7 @@ function readPersisted(): PersistedMonitorState {
       lineControls: {},
       lineViews: {},
       lastMonitorLineId: null,
+      hideModuleNames: false,
     }
   }
 }
@@ -79,6 +93,7 @@ function snapshot(state: MonitorState): PersistedMonitorState {
     lineControls: state.lineControls,
     lineViews: state.lineViews,
     lastMonitorLineId: state.monitorLineId,
+    hideModuleNames: state.hideModuleNames,
   }
 }
 
@@ -102,6 +117,7 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
   lineControls: {},
   lineViews: {},
   monitorLineId: null,
+  hideModuleNames: false,
   hasHydrated: false,
 
   initialize: () => {
@@ -113,6 +129,7 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
       lineControls: saved.lineControls,
       lineViews: saved.lineViews,
       monitorLineId: saved.lastMonitorLineId,
+      hideModuleNames: saved.hideModuleNames,
     })
   },
 
@@ -128,9 +145,7 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
     set({ monitorLineId: nextLineId })
     const next = get()
     persist({
-      etherCatConnected: next.etherCatConnected,
-      lineControls: next.lineControls,
-      lineViews: next.lineViews,
+      ...snapshot(next),
       lastMonitorLineId: nextLineId,
     })
   },
@@ -139,9 +154,7 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
     set({ monitorLineId: lineId })
     const next = get()
     persist({
-      etherCatConnected: next.etherCatConnected,
-      lineControls: next.lineControls,
-      lineViews: next.lineViews,
+      ...snapshot(next),
       lastMonitorLineId: lineId,
     })
   },
@@ -149,7 +162,11 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
   getLineView: (lineId) => get().lineViews[lineId] ?? null,
 
   saveLineView: (lineId, view) => {
-    const lineViews = { ...get().lineViews, [lineId]: view }
+    const existing = get().lineViews[lineId]
+    const lineViews = {
+      ...get().lineViews,
+      [lineId]: { ...existing, ...view },
+    }
     set({ lineViews })
     const next = get()
     persist({
@@ -157,6 +174,27 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
       lineControls: next.lineControls,
       lineViews,
       lastMonitorLineId: next.monitorLineId,
+      hideModuleNames: next.hideModuleNames,
+    })
+  },
+
+  saveCalloutPositions: (lineId, layoutSignature, positions) => {
+    const existing = get().lineViews[lineId]
+    get().saveLineView(lineId, {
+      scale: existing?.scale ?? 1,
+      positionX: existing?.positionX ?? 0,
+      positionY: existing?.positionY ?? 0,
+      layoutSignature,
+      calloutPositions: positions,
+    })
+  },
+
+  toggleHideModuleNames: () => {
+    const hideModuleNames = !get().hideModuleNames
+    set({ hideModuleNames })
+    persist({
+      ...snapshot(get()),
+      hideModuleNames,
     })
   },
 

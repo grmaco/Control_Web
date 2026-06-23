@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 import {
   DEFAULT_PORT_DIRECTION,
-  DEFAULT_PORT_LINKED_UNIT,
+  DEFAULT_PORT_NUMBER_START,
   DEFAULT_PORT_RECIPE,
 } from '../constants/port'
 import {
@@ -19,6 +19,7 @@ import type {
   TestMaterialFlag,
 } from '../types/conveyor'
 import { parseTrailingNumber, formatConveyorName } from './sequentialNaming'
+import { defaultPropertiesForRole } from './unitPropertyHelpers'
 import {
   findUnitAtCell,
   getUnitFootprint,
@@ -63,13 +64,28 @@ export function nextUnitName(units: ConveyorUnit[]): string {
   return formatConveyorName(maxNumber + 1)
 }
 
+function parsePortSequenceNumber(unit: ConveyorUnit): number | null {
+  for (const raw of [unit.code, unit.name]) {
+    if (!raw?.trim()) continue
+    const base = raw.replace(/\s+(IN|OUT)$/i, '').trim()
+    const match = /^(\d+)$/.exec(base)
+    if (match) return Number(match[1])
+  }
+  return null
+}
+
 export function nextPortName(units: ConveyorUnit[]): string {
-  const numbers = units
-    .map((u) => /^PT-(\d+)$/.exec(u.name)?.[1])
-    .filter(Boolean)
-    .map(Number)
-  const next = numbers.length > 0 ? Math.max(...numbers) + 1 : 1
-  return `PT-${String(next).padStart(2, '0')}`
+  let maxNumber = DEFAULT_PORT_NUMBER_START - 1
+
+  for (const unit of units) {
+    if (!isPort(unit.type)) continue
+    const number = parsePortSequenceNumber(unit)
+    if (number != null && number >= DEFAULT_PORT_NUMBER_START && number > maxNumber) {
+      maxNumber = number
+    }
+  }
+
+  return String(maxNumber + 1)
 }
 
 export function nextStorageName(units: ConveyorUnit[]): string {
@@ -102,13 +118,15 @@ export function createUnit(
   }
 
   if (isPort(type)) {
+    const portCode = nextPortName(units)
     return {
       ...base,
-      name: nextPortName(units),
+      name: portCode,
+      code: portCode,
       interfaceUnit: null,
       portDirection: DEFAULT_PORT_DIRECTION,
       portRecipe: DEFAULT_PORT_RECIPE,
-      portLinkedUnit: DEFAULT_PORT_LINKED_UNIT,
+      portLinkedUnit: null,
       storageShape: null,
       storageRobotCount: null,
       storageMaintenanceArea: null,
@@ -149,6 +167,44 @@ const ADJACENT_OFFSETS = [
   [1, 0],
 ] as const
 
+/** 현재 그리드 좌표 기준 직교 인접 유닛 (저장된 connections 무시) */
+export function getOrthogonalNeighborUnits(
+  units: ConveyorUnit[],
+  unit: ConveyorUnit,
+  cols: number,
+  rows: number,
+): ConveyorUnit[] {
+  const neighbors: ConveyorUnit[] = []
+  const seen = new Set<string>()
+
+  for (const [dx, dy] of ADJACENT_OFFSETS) {
+    const nx = unit.gridX + dx
+    const ny = unit.gridY + dy
+    if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue
+    const neighbor = findUnitAt(units, nx, ny)
+    if (neighbor && neighbor.id !== unit.id && !seen.has(neighbor.id)) {
+      seen.add(neighbor.id)
+      neighbors.push(neighbor)
+    }
+  }
+
+  return neighbors
+}
+
+export function areGridAdjacent(
+  units: ConveyorUnit[],
+  aId: string,
+  bId: string,
+  cols: number,
+  rows: number,
+): boolean {
+  const a = units.find((unit) => unit.id === aId)
+  if (!a) return false
+  return getOrthogonalNeighborUnits(units, a, cols, rows).some(
+    (neighbor) => neighbor.id === bId,
+  )
+}
+
 function findUnitAt(
   units: ConveyorUnit[],
   gridX: number,
@@ -184,12 +240,8 @@ export function syncConnectionsForUnit(
   if (!unit) return units
 
   const adjacentIds = new Set<string>()
-  for (const [dx, dy] of ADJACENT_OFFSETS) {
-    const nx = unit.gridX + dx
-    const ny = unit.gridY + dy
-    if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue
-    const neighbor = findUnitAt(units, nx, ny)
-    if (neighbor) adjacentIds.add(neighbor.id)
+  for (const neighbor of getOrthogonalNeighborUnits(units, unit, cols, rows)) {
+    adjacentIds.add(neighbor.id)
   }
 
   return units.map((u) => {
@@ -376,6 +428,11 @@ export function updateUnitInLine(
       | 'storageRobotCount'
       | 'storageMaintenanceArea'
       | 'testMaterial'
+      | 'flowRole'
+      | 'code'
+      | 'role'
+      | 'properties'
+      | 'stkRouting'
     >
   >,
 ): ConveyorLine {
@@ -385,6 +442,10 @@ export function updateUnitInLine(
     const nextType = patch.type ?? u.type
     let next: ConveyorUnit = { ...u, ...patch, updatedAt: new Date().toISOString() }
 
+    if (patch.role != null && patch.role !== u.role && patch.properties == null) {
+      next.properties = defaultPropertiesForRole(patch.role, line, next)
+    }
+
     if (nextType === 'port') {
       next = {
         ...next,
@@ -392,7 +453,7 @@ export function updateUnitInLine(
         interfaceUnit: null,
         portDirection: patch.portDirection ?? u.portDirection ?? DEFAULT_PORT_DIRECTION,
         portRecipe: patch.portRecipe ?? u.portRecipe ?? DEFAULT_PORT_RECIPE,
-        portLinkedUnit: patch.portLinkedUnit ?? u.portLinkedUnit ?? DEFAULT_PORT_LINKED_UNIT,
+        portLinkedUnit: null,
         storageShape: null,
         storageRobotCount: null,
         storageMaintenanceArea: null,

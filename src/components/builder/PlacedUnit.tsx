@@ -1,5 +1,6 @@
 import { useDraggable } from '@dnd-kit/core'
-import type { ConveyorUnit } from '../../types/conveyor'
+import type { ConveyorUnit, FlowRole } from '../../types/conveyor'
+import type { TurnFlowDisplay } from '../../constants/conveyorTypes'
 import { STATUS_COLORS } from '../../constants/statusColors'
 import {
   isPortUnit,
@@ -10,28 +11,40 @@ import {
   typeLabel,
   unitTitle,
 } from '../../constants/conveyorTypes'
+import { formatFlowRoleLabel } from '../../utils/flowEntries'
 import type { UnitFootprint } from '../../utils/unitFootprint'
 import { type GridDragData, unitDragId } from './dnd'
 
 interface PlacedUnitProps {
   unit: ConveyorUnit
   selected: boolean
-  isBase: boolean
+  routingHighlighted?: boolean
+  routingTooltip?: string | null
   showLabels?: boolean
   cellSize: number
   footprint?: UnitFootprint
   dragEnabled?: boolean
+  flow?: TurnFlowDisplay | null
+  pickHighlight?: 'source' | 'target' | null
   onSelect: () => void
+}
+
+function flowRoleBadgeClass(role: FlowRole): string {
+  if (role === 'entry') return 'bg-amber-600'
+  return 'bg-emerald-600'
 }
 
 export function PlacedUnit({
   unit,
   selected,
-  isBase,
+  routingHighlighted = false,
+  routingTooltip = null,
   showLabels = true,
   cellSize,
   footprint = { cols: 1, rows: 1 },
   dragEnabled = true,
+  flow = null,
+  pickHighlight = null,
   onSelect,
 }: PlacedUnitProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -45,6 +58,8 @@ export function PlacedUnit({
   const isStorage = isStorageUnit(unit)
   const spanWidth = footprint.cols * cellSize
   const spanHeight = footprint.rows * cellSize
+  const flowRole = unit.flowRole ?? null
+  const flowRoleLabel = formatFlowRoleLabel(flowRole)
 
   return (
     <button
@@ -61,13 +76,32 @@ export function PlacedUnit({
         height: spanHeight,
       }}
       className={`absolute top-0 left-0 flex cursor-grab flex-col items-center justify-center border p-1 text-[10px] leading-tight active:cursor-grabbing ${colors.bg} ${colors.border} ${selected ? 'ring-2 ring-inset ring-white' : ''} ${
-        isBase ? 'ring-2 ring-inset ring-violet-400' : ''
+        pickHighlight === 'source'
+          ? 'ring-2 ring-inset ring-cyan-300 brightness-125'
+          : pickHighlight === 'target'
+            ? 'ring-2 ring-inset ring-emerald-300 brightness-125 cursor-crosshair'
+            : ''
+      } ${
+        routingHighlighted ? 'ring-2 ring-inset ring-violet-300 brightness-125' : ''
+      } ${
+        flowRole === 'entry'
+          ? 'ring-2 ring-inset ring-amber-400'
+          : flowRole === 'exit'
+            ? 'ring-2 ring-inset ring-emerald-400'
+            : ''
       } ${isDragging ? 'opacity-30' : 'hover:brightness-110'}`}
-      title={isBase ? `${unitTitle(unit)} · 기준` : unitTitle(unit)}
+      title={
+        routingTooltip ??
+        (flowRoleLabel
+          ? `${unitTitle(unit, flow)} · ${flowRoleLabel}`
+          : unitTitle(unit, flow))
+      }
     >
-      {isBase && showLabels && (
-        <span className="absolute top-0.5 left-0.5 rounded bg-violet-600 px-0.5 text-[8px] font-bold text-white">
-          기준
+      {flowRole && showLabels && (
+        <span
+          className={`absolute top-0.5 left-0.5 rounded px-0.5 text-[8px] font-bold text-white ${flowRoleBadgeClass(flowRole)}`}
+        >
+          {flowRoleLabel}
         </span>
       )}
       {showLabels ? (
@@ -81,7 +115,7 @@ export function PlacedUnit({
                 <span className="text-white/70">{typeLabel(unit.type)}</span>
               )}
               {showsRotation(unit.type) && (
-                <span className="text-white/60">{formatRotationDisplay(unit)}</span>
+                <span className="text-white/60">{formatRotationDisplay(unit, flow)}</span>
               )}
             </>
           )}

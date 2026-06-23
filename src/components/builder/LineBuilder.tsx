@@ -17,7 +17,7 @@ import {
   typeLabel,
 } from '../../constants/conveyorTypes'
 import { BUILDER_CELL_SIZE } from '../../constants/grid'
-import type { ConveyorLine, ConveyorUnit } from '../../types/conveyor'
+import type { ConveyorLine, ConveyorUnit, FlowRole } from '../../types/conveyor'
 import {
   addUnitToLine,
   canPlaceAt,
@@ -39,8 +39,17 @@ import {
   type PaletteDragData,
 } from './dnd'
 import type { LineViewport } from '../../utils/lineViewport'
-import { assignSequentialNamesFromBase } from '../../utils/sequentialNaming'
+import { assignSequentialNamesFromEntries } from '../../utils/sequentialNaming'
+import { hasFlowEntries, isFlowCapableUnit, isOutputDestinationCandidate } from '../../utils/flowEntries'
+import { isStkRoutingSourceUnit, updatePortPropertiesInLine } from '../../utils/unitPropertyHelpers'
+import {
+  isCellInRoutingPath,
+  routingTooltipForUnit,
+  simulateStkRouting,
+} from '../../utils/routingSimulation'
+import type { RoutingSimulationResult } from '../../types/unitProperties'
 import { getBuilderViewport } from '../../utils/lineViewport'
+import { computeMinimapFlowMap } from '../../utils/flowDirection'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { GridCell } from './GridCell'
 import { PaletteItem } from './PaletteItem'
@@ -63,21 +72,30 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   const [draft, setDraft] = useState(line)
   const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([])
   const [completionMessage, setCompletionMessage] = useState<string | null>(null)
+  const [routingSimulation, setRoutingSimulation] =
+    useState<RoutingSimulationResult | null>(null)
+  const [routingSimulationMessage, setRoutingSimulationMessage] = useState<
+    string | null
+  >(null)
   const [activeDrag, setActiveDrag] = useState<BuilderDragData | null>(null)
   const [overCellId, setOverCellId] = useState<string | null>(null)
   const [frozenViewport, setFrozenViewport] = useState<LineViewport | null>(null)
+  const [outputDestinationPickPortId, setOutputDestinationPickPortId] = useState<
+    string | null
+  >(null)
   const logApplication = useConveyorStore((s) => s.logApplication)
   const draftRef = useRef(draft)
   draftRef.current = draft
   const selectedUnitIdsRef = useRef(selectedUnitIds)
   selectedUnitIdsRef.current = selectedUnitIds
 
-  const baseUnitId = draft.baseUnitId ?? null
-
   useEffect(() => {
     setDraft(line)
     setSelectedUnitIds([])
     setCompletionMessage(null)
+    setRoutingSimulation(null)
+    setRoutingSimulationMessage(null)
+    setOutputDestinationPickPortId(null)
   }, [line.id])
 
   useEffect(() => {
@@ -86,11 +104,10 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
         ? {
             ...current,
             name: line.name,
-            baseUnitId: line.baseUnitId ?? null,
           }
         : current,
     )
-  }, [line.id, line.name, line.baseUnitId])
+  }, [line.id, line.name])
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -278,7 +295,6 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
       const next = removeUnitFromLine(draft, unitId)
       await persist({
         ...next,
-        baseUnitId: draft.baseUnitId === unitId ? null : (draft.baseUnitId ?? null),
         updatedAt: new Date().toISOString(),
       })
       setSelectedUnitIds([])
@@ -292,31 +308,89 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
 
   const handleClearSelection = useCallback(() => {
     setSelectedUnitIds([])
+    setOutputDestinationPickPortId(null)
   }, [])
 
-  const handleSetBase = useCallback(
-    async (unitId: string) => {
-      setCompletionMessage(null)
-      const unit = draft.units.find((item) => item.id === unitId)
-      await persist({
-        ...draft,
-        baseUnitId: unitId,
-        updatedAt: new Date().toISOString(),
+  const handleStartPickOutputDestination = useCallback((portId: string) => {
+    setOutputDestinationPickPortId(portId)
+    setSelectedUnitIds([portId])
+  }, [])
+
+  const handleCancelPickOutputDestination = useCallback(() => {
+    setOutputDestinationPickPortId(null)
+  }, [])
+
+  const handlePickOutputDestination = useCallback(
+    async (portId: string, destinationUnitId: string) => {
+      const current = draftRef.current
+      const port = current.units.find((item) => item.id === portId)
+      if (!port) return
+      const destination = current.units.find((item) => item.id === destinationUnitId)
+      if (!destination || !isOutputDestinationCandidate(current, destination, portId)) return
+
+      const next = updatePortPropertiesInLine(current, portId, {
+        outputDestination: destinationUnitId,
       })
+      setDraft(next)
+      await persist(next)
+      setOutputDestinationPickPortId(null)
+      setSelectedUnitIds([portId])
+
       void logApplication({
         title: 'Button Click',
-        comment: `Builder: Set Base Unit ${unit?.name ?? unitId}`,
+        comment: `Builder: Port Output Destination ${port.name} → ${destination.name}`,
+        lineId: current.id,
+      })
+    },
+    [persist, logApplication],
+  )
+
+  const handleSetFlowRole = useCallback(
+    async (unitId: string, role: FlowRole | null) => {
+      setCompletionMessage(null)
+      const unit = draft.units.find((item) => item.id === unitId)
+      if (!unit || !isFlowCapableUnit(unit)) return
+
+      const next = updateUnitInLine(draft, unitId, { flowRole: role })
+      await persist({
+        ...next,
+        baseUnitId: null,
+        updatedAt: new Date().toISOString(),
+      })
+
+      const label =
+        role === 'entry' ? 'Entry' : role === 'exit' ? 'Exit' : 'Clear'
+      void logApplication({
+        title: 'Button Click',
+        comment: `Builder: Set Flow Role ${label} ${unit.name}`,
         lineId: draft.id,
       })
     },
     [draft, persist, logApplication],
   )
 
+  const canRoutingSimulation =
+    selectedCount === 1 &&
+    selectedUnit != null &&
+    isStkRoutingSourceUnit(selectedUnit)
+
+  const handleRoutingSimulation = useCallback(() => {
+    if (!selectedUnit) return
+    const result = simulateStkRouting(draft, selectedUnit.id)
+    setRoutingSimulation(result)
+    setRoutingSimulationMessage(result.message)
+  }, [draft, selectedUnit])
+
+  const handleClearRoutingSimulation = useCallback(() => {
+    setRoutingSimulation(null)
+    setRoutingSimulationMessage(null)
+  }, [])
+
   const handleCompletePlacement = useCallback(async () => {
-    if (!baseUnitId) return
+    if (!hasFlowEntries(draft)) return
 
     try {
-      const result = assignSequentialNamesFromBase(draft, baseUnitId)
+      const result = assignSequentialNamesFromEntries(draft)
       await persist(result.line)
 
       void logApplication({
@@ -328,7 +402,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
       const summary =
         result.disconnectedUnitIds.length > 0
           ? `배치 완료: ${result.orderedUnitIds.length}개 모듈에 순번을 부여했습니다. 연결되지 않은 ${result.disconnectedUnitIds.length}개는 마지막 순번으로 배치했습니다.`
-          : `배치 완료: ${result.orderedUnitIds.length}개 모듈에 기준 이름 숫자부터 순번을 부여했습니다.`
+          : `배치 완료: ${result.orderedUnitIds.length}개 모듈에 투입점 이름 숫자부터 순번을 부여했습니다.`
 
       setCompletionMessage(summary)
     } catch (error) {
@@ -336,21 +410,26 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
         error instanceof Error ? error.message : '순번 부여에 실패했습니다.',
       )
     }
-  }, [baseUnitId, draft, persist, logApplication])
+  }, [draft, persist, logApplication])
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== 'r' || selectedCount !== 1 || !selectedUnit) return
-      if (!showsRotation(selectedUnit.type)) return
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) {
         return
       }
+      if (e.key === 'Escape' && outputDestinationPickPortId) {
+        e.preventDefault()
+        setOutputDestinationPickPortId(null)
+        return
+      }
+      if (e.key.toLowerCase() !== 'r' || selectedCount !== 1 || !selectedUnit) return
+      if (!showsRotation(selectedUnit.type)) return
       e.preventDefault()
       handleRotate(selectedUnit.id)
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedCount, selectedUnit, handleRotate])
+  }, [outputDestinationPickPortId, selectedCount, selectedUnit, handleRotate])
 
   const activeUnit: ConveyorUnit | null =
     activeDrag?.source === 'grid'
@@ -359,6 +438,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
 
   const computedViewport = useMemo(() => getBuilderViewport(draft), [draft])
   const viewport = frozenViewport ?? computedViewport
+  const unitFlowMap = useMemo(() => computeMinimapFlowMap(draft), [draft])
 
   return (
     <DndContext
@@ -403,18 +483,26 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
           </div>
 
           <PlacementToolbar
-            units={draft.units}
+            line={draft}
             selectedUnit={primarySelectedUnit}
             selectedCount={selectedCount}
             allSelected={allSelected}
-            baseUnitId={baseUnitId}
             completionMessage={completionMessage}
-            onSetBase={handleSetBase}
+            canRoutingSimulation={canRoutingSimulation}
+            routingSimulationMessage={routingSimulationMessage}
+            onSetFlowRole={handleSetFlowRole}
             onComplete={handleCompletePlacement}
+            onRoutingSimulation={handleRoutingSimulation}
+            onClearRoutingSimulation={handleClearRoutingSimulation}
             onSelectAll={handleSelectAll}
             onClearSelection={handleClearSelection}
           />
 
+          {outputDestinationPickPortId ? (
+            <p className="mb-2 rounded-md border border-emerald-800/60 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
+              출고구 CV 선택 중 — 캔버스에서 CV를 클릭하세요 (Esc 취소)
+            </p>
+          ) : null}
           <div className="max-h-[520px] overflow-auto rounded border border-slate-800">
             <div
               className="inline-grid gap-0 select-none"
@@ -422,7 +510,12 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                 gridTemplateColumns: `repeat(${viewport.cols}, ${BUILDER_CELL_SIZE}px)`,
                 gridTemplateRows: `repeat(${viewport.rows}, ${BUILDER_CELL_SIZE}px)`,
               }}
-              onClick={() => setSelectedUnitIds([])}
+              onClick={() => {
+                if (outputDestinationPickPortId) {
+                  setOutputDestinationPickPortId(null)
+                }
+                setSelectedUnitIds([])
+              }}
             >
             {Array.from({ length: viewport.cols * viewport.rows }).map((_, index) => {
               const localX = index % viewport.cols
@@ -449,14 +542,44 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                     <PlacedUnit
                       unit={unit}
                       selected={selectedUnitIdsSet.has(unit.id)}
-                      isBase={baseUnitId === unit.id}
+                      routingHighlighted={isCellInRoutingPath(unit.id, routingSimulation)}
+                      routingTooltip={routingTooltipForUnit(unit.id, routingSimulation)}
                       showLabels
                       cellSize={BUILDER_CELL_SIZE}
                       footprint={footprint ?? undefined}
+                      flow={unitFlowMap.get(unit.id) ?? null}
+                      pickHighlight={
+                        outputDestinationPickPortId === unit.id
+                          ? 'source'
+                          : outputDestinationPickPortId &&
+                              isOutputDestinationCandidate(
+                                draft,
+                                unit,
+                                outputDestinationPickPortId,
+                              )
+                            ? 'target'
+                            : null
+                      }
                       dragEnabled={
-                        selectedCount <= 1 || selectedUnitIdsSet.has(unit.id)
+                        !outputDestinationPickPortId &&
+                        (selectedCount <= 1 || selectedUnitIdsSet.has(unit.id))
                       }
                       onSelect={() => {
+                        if (outputDestinationPickPortId) {
+                          if (
+                            isOutputDestinationCandidate(
+                              draft,
+                              unit,
+                              outputDestinationPickPortId,
+                            )
+                          ) {
+                            void handlePickOutputDestination(
+                              outputDestinationPickPortId,
+                              unit.id,
+                            )
+                          }
+                          return
+                        }
                         setSelectedUnitIds((prev) => {
                           if (prev.length > 1) {
                             if (prev.includes(unit.id)) {
@@ -486,11 +609,13 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
             line={draft}
             unit={selectedUnit}
             selectedUnitIds={selectedUnitIds}
-            isBase={selectedUnit ? baseUnitId === selectedUnit.id : false}
-            onSetBase={handleSetBase}
+            onSetFlowRole={handleSetFlowRole}
             onChange={persist}
             onDelete={handleDelete}
             onRotate={handleRotate}
+            outputDestinationPickPortId={outputDestinationPickPortId}
+            onStartPickOutputDestination={handleStartPickOutputDestination}
+            onCancelPickOutputDestination={handleCancelPickOutputDestination}
           />
         </aside>
       </div>

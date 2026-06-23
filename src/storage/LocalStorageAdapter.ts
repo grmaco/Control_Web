@@ -39,7 +39,7 @@ export class LocalStorageAdapter implements StorageAdapter {
   }
 
   async saveLine(line: ConveyorLine): Promise<void> {
-    const lines = await this.getLines()
+    const lines = readJson<ConveyorLine[]>(STORAGE_KEYS.lines, [])
     const index = lines.findIndex((item) => item.id === line.id)
     const next =
       index >= 0

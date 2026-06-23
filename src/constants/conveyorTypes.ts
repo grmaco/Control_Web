@@ -1,4 +1,5 @@
 import type {
+  ConveyorLine,
   ConveyorType,
   ConveyorUnit,
   InterfaceUnitType,
@@ -10,9 +11,13 @@ import type {
   StorageRobotCount,
   StorageShape,
 } from '../types/conveyor'
+import type { FlowDir } from '../utils/flowDirection'
+import { formatTurnFlowAngleLabel } from '../utils/turnArc'
+import { migrateLineFlowRoles } from '../utils/flowEntries'
+import { normalizeLineRoleFields } from '../utils/unitPropertyHelpers'
+import { syncAllConnections } from '../utils/units'
 import {
   DEFAULT_PORT_DIRECTION,
-  DEFAULT_PORT_LINKED_UNIT,
   DEFAULT_PORT_RECIPE,
 } from './port'
 import {
@@ -114,9 +119,22 @@ export function isLiftUnit(unit: ConveyorUnit): boolean {
   return unit.type === 'lift'
 }
 
-/** 리프트는 mm, 그 외 회전 가능 모듈은 ° */
-export function formatRotationDisplay(unit: ConveyorUnit): string {
-  return unit.type === 'lift' ? `${unit.rotation}mm` : `${unit.rotation}°`
+export interface TurnFlowDisplay {
+  inDir: FlowDir | null
+  outDir: FlowDir | null
+}
+
+/** 리프트는 mm, 회전/분기는 입고 방향 기준 상대 각도(있으면), 없으면 저장 rotation */
+export function formatRotationDisplay(
+  unit: ConveyorUnit,
+  flow?: TurnFlowDisplay | null,
+): string {
+  if (unit.type === 'lift') return `${unit.rotation}mm`
+  if (unit.type === 'turn' || unit.type === 'junction') {
+    const flowAngle = formatTurnFlowAngleLabel(flow?.inDir, flow?.outDir)
+    if (flowAngle) return flowAngle
+  }
+  return `${unit.rotation}°`
 }
 
 /** 그리드 셀 안에 타입명(리프트, 포트 등) 표시 여부 */
@@ -151,11 +169,12 @@ export function normalizeUnit(
       interfaceUnit: null,
       portDirection: unit.portDirection ?? DEFAULT_PORT_DIRECTION,
       portRecipe: unit.portRecipe ?? DEFAULT_PORT_RECIPE,
-      portLinkedUnit: unit.portLinkedUnit ?? DEFAULT_PORT_LINKED_UNIT,
+      portLinkedUnit: null,
       storageShape: null,
       storageRobotCount: null,
       storageMaintenanceArea: null,
       testMaterial: unit.testMaterial ?? 0,
+      flowRole: null,
     }
   }
 
@@ -172,6 +191,7 @@ export function normalizeUnit(
       storageMaintenanceArea:
         unit.storageMaintenanceArea ?? DEFAULT_WAREHOUSE_MAINTENANCE_AREA,
       testMaterial: unit.testMaterial ?? 0,
+      flowRole: null,
     }
   }
 
@@ -186,6 +206,7 @@ export function normalizeUnit(
     storageRobotCount: null,
     storageMaintenanceArea: null,
     testMaterial: unit.testMaterial ?? 0,
+    flowRole: unit.flowRole ?? null,
   }
 }
 
@@ -197,34 +218,35 @@ export function normalizeLine<
   },
 >(line: T): T {
   const units = line.units.map((unit) => normalizeUnit(unit))
-  const baseUnitId =
-    line.baseUnitId && units.some((unit) => unit.id === line.baseUnitId)
-      ? line.baseUnitId
-      : null
+  const migrated = migrateLineFlowRoles({ ...line, units })
+  const withRoles = normalizeLineRoleFields({ ...migrated, units: migrated.units })
 
-  return {
-    ...line,
+  const normalized = {
+    ...migrated,
+    ...withRoles,
     gridSize: { ...DEFAULT_GRID_SIZE },
-    units,
-    baseUnitId,
+    baseUnitId: null,
   }
+
+  return syncAllConnections(normalized as unknown as ConveyorLine) as unknown as T
 }
 
-export function unitTitle(unit: ConveyorUnit): string {
+export function unitTitle(unit: ConveyorUnit, flow?: TurnFlowDisplay | null): string {
   const parts = [unit.name]
   if (showsTypeLabelInCell(unit.type)) {
     parts.push(typeLabel(unit.type))
   }
   if (showsRotation(unit.type)) {
-    parts.push(formatRotationDisplay(unit))
+    parts.push(formatRotationDisplay(unit, flow))
   }
   if (isDualModule(unit.type)) {
     parts.push('2모듈 겹침')
   }
   if (isPortUnit(unit)) {
-    if (unit.portDirection) parts.push(unit.portDirection)
+    if (unit.portDirection) {
+      parts.push(unit.portDirection === 'OUT' ? '출고구' : '투입고')
+    }
     if (unit.portRecipe) parts.push(unit.portRecipe)
-    if (unit.portLinkedUnit) parts.push(unit.portLinkedUnit)
   } else if (isStorageUnit(unit)) {
     if (unit.storageShape) parts.push(warehouseShapeLabel(unit.storageShape))
     if (unit.storageRobotCount) parts.push(`ROBOT ${unit.storageRobotCount}`)

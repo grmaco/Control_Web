@@ -1,15 +1,24 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { isPortUnit, isStorageUnit, unitTitle } from '../../constants/conveyorTypes'
-import type { ConveyorLine } from '../../types/conveyor'
+import type { ConveyorLine, ConveyorUnit } from '../../types/conveyor'
 import { STATUS_COLORS } from '../../constants/statusColors'
+import { useMonitorStore } from '../../store/useMonitorStore'
 import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import type { LineViewport } from '../../utils/lineViewport'
-import { findUnitAt } from '../../utils/lineViewport'
-import { computeMinimapFlowMap } from '../../utils/flowDirection'
+import {
+  computeMinimapFlowMap,
+  flowEntryDir,
+  flowExitDir,
+  overlaySimulationPathOnFlowMap,
+  type UnitFlowDirs,
+} from '../../utils/flowDirection'
 import { getUnitFootprint, footprintBorderClasses, isUnitAnchor } from '../../utils/unitFootprint'
+import { lineLayoutSignature } from '../../utils/lineLayoutSignature'
 import { buildUnitLabelLines, LABEL_LINE_HEIGHT } from '../../utils/monitorLabel'
 import { unitHasMaterial } from '../../utils/unitMaterial'
 import { MinimapFlowArrow, MinimapPortFallback, MinimapStorageLabel } from './MinimapFlowArrow'
+import { FlowCalloutOverlay } from './FlowCalloutLayer'
+import { computeFlowCallouts } from '../../utils/flowCallouts'
 
 interface LineStatusGridProps {
   line: ConveyorLine
@@ -18,11 +27,89 @@ interface LineStatusGridProps {
   showLabels?: boolean
   /** 미니맵 등 — CV 물류 순서 화살표 */
   showFlowArrows?: boolean
+  /** 모니터링 맵 전용 — 시작/종료/회전 콜아웃 표 */
+  showFlowCallouts?: boolean
   /** 줌 배율 — 라벨 크기 계산에 사용 */
   scale?: number
   /** 셀 격자 실선 표시 */
   showGridLines?: boolean
+  /** 적재창고(STK) 제외 모듈 이름 숨김 */
+  hideModuleNames?: boolean
+  /** 경로 시뮬레이션 — 자재(CST) 위치 (복수) */
+  simulationActiveUnitIds?: string[]
+  /** 경로 시뮬레이션 — 자재별 진행 (flow 오버레이) */
+  simulationLoads?: Array<{ pathUnitIds: string[]; stepIndex: number }>
+  /** 경로 시뮬레이션 — 계획 경로 하이라이트 */
+  simulationPathUnitIds?: string[]
+  /** 콜아웃 드래그 중 맵 패닝 잠금 */
+  onCalloutPanLockChange?: (locked: boolean) => void
+  /** 증가 시 콜아웃 선택 해제 */
+  calloutDeselectToken?: number
   className?: string
+}
+
+function resolveSimulationUnitFlow(
+  line: ConveyorLine,
+  unitId: string,
+  simulationLoads: Array<{ pathUnitIds: string[]; stepIndex: number }>,
+  flowMap: Map<string, UnitFlowDirs>,
+): UnitFlowDirs | null {
+  const activeLoad = simulationLoads.find(
+    (load) => load.pathUnitIds[load.stepIndex] === unitId,
+  )
+  if (!activeLoad) return flowMap.get(unitId) ?? null
+
+  const pathIndex = activeLoad.pathUnitIds.indexOf(unitId)
+  if (pathIndex < 0 || pathIndex > activeLoad.stepIndex) {
+    return flowMap.get(unitId) ?? null
+  }
+
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  const unit = unitMap.get(unitId)
+  if (!unit) return null
+
+  // 포트(IN/OUT) 삼각형은 STK·LOAD UNIT 기준 고정 — 경로 오버레이 시 방향이 뒤집히지 않도록 유지
+  if (isPortUnit(unit)) {
+    return flowMap.get(unitId) ?? null
+  }
+
+  const prev = pathIndex > 0 ? unitMap.get(activeLoad.pathUnitIds[pathIndex - 1]!) : null
+  const next =
+    pathIndex < activeLoad.pathUnitIds.length - 1
+      ? unitMap.get(activeLoad.pathUnitIds[pathIndex + 1]!)
+      : null
+
+  const inDir = prev ? flowEntryDir(prev, unit) : null
+  const outDir = next ? flowExitDir(unit, next) : null
+  if (!inDir && !outDir) return flowMap.get(unitId) ?? null
+
+  let role: UnitFlowDirs['role'] = 'single'
+  if (inDir && outDir) role = 'through'
+  else if (!inDir && outDir) role = 'start'
+  else if (inDir && !outDir) role = 'end'
+
+  const existing = flowMap.get(unitId)
+  return {
+    inDir,
+    outDir,
+    cvNumber: existing?.cvNumber ?? null,
+    role,
+    portDirection: existing?.portDirection,
+  }
+}
+
+function storageFootprintOutlineClass(
+  unit: ConveyorUnit,
+  isSimActive: boolean,
+  isOnSimPath: boolean,
+): string {
+  if (isSimActive) {
+    return 'border-2 border-cyan-300 shadow-[0_0_14px_rgba(34,211,238,0.65)]'
+  }
+  if (isOnSimPath) {
+    return 'border-[0.5px] border-violet-400/80'
+  }
+  return `border-[0.5px] ${STATUS_COLORS[unit.status].border}`
 }
 
 export function LineStatusGrid({
@@ -31,43 +118,121 @@ export function LineStatusGrid({
   viewport,
   showLabels = true,
   showFlowArrows = false,
+  showFlowCallouts = false,
   scale = 1,
   showGridLines = false,
+  hideModuleNames = false,
+  simulationActiveUnitIds = [],
+  simulationLoads = [],
+  simulationPathUnitIds = [],
+  onCalloutPanLockChange,
+  calloutDeselectToken = 0,
   className,
 }: LineStatusGridProps) {
-  const flowByUnitId = useMemo(
-    () => (showFlowArrows ? computeMinimapFlowMap(line) : new Map()),
-    [line, showFlowArrows],
+  const layoutSignature = useMemo(() => lineLayoutSignature(line), [line])
+  const unitByCell = useMemo(() => {
+    const map = new Map<string, ConveyorUnit>()
+    for (const unit of line.units) {
+      const footprint = getUnitFootprint(unit)
+      for (let dy = 0; dy < footprint.rows; dy += 1) {
+        for (let dx = 0; dx < footprint.cols; dx += 1) {
+          map.set(`${unit.gridX + dx},${unit.gridY + dy}`, unit)
+        }
+      }
+    }
+    return map
+  }, [layoutSignature, line.units])
+  const simulationPathSet = useMemo(
+    () => new Set(simulationPathUnitIds),
+    [simulationPathUnitIds],
   )
-  const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
+  const simulationActiveSet = useMemo(
+    () => new Set(simulationActiveUnitIds),
+    [simulationActiveUnitIds],
+  )
   const minX = viewport?.minX ?? 0
   const minY = viewport?.minY ?? 0
   const cols = viewport?.cols ?? line.gridSize.cols
   const rows = viewport?.rows ?? line.gridSize.rows
+  const flowByUnitId = useMemo(() => {
+    if (!showFlowArrows && !showFlowCallouts) return new Map()
+    let result = computeMinimapFlowMap(line)
+    if (simulationLoads.length === 0) return result
+    for (const load of simulationLoads) {
+      result = overlaySimulationPathOnFlowMap(
+        line,
+        result,
+        load.pathUnitIds,
+        load.stepIndex,
+      )
+    }
+    return result
+  }, [layoutSignature, line, showFlowArrows, showFlowCallouts, simulationLoads])
+  const unitById = useMemo(
+    () => new Map(line.units.map((unit) => [unit.id, unit])),
+    [layoutSignature, line.units],
+  )
+  const viewportBounds = useMemo(
+    () => ({ minX, minY, cols, rows, maxX: minX + cols - 1, maxY: minY + rows - 1 }),
+    [minX, minY, cols, rows],
+  )
+  const flowCallouts = useMemo(() => {
+    if (!showFlowCallouts || flowByUnitId.size === 0) return []
+    return computeFlowCallouts(line, flowByUnitId, viewportBounds, cellSize)
+  }, [cellSize, flowByUnitId, layoutSignature, line, showFlowCallouts, viewportBounds])
+  const lineView = useMonitorStore((s) => s.lineViews[line.id] ?? null)
+  const saveCalloutPositions = useMonitorStore((s) => s.saveCalloutPositions)
+  const savedCalloutPositions = useMemo(() => {
+    if (lineView?.layoutSignature !== layoutSignature) return undefined
+    return lineView.calloutPositions
+  }, [layoutSignature, lineView])
+  const handleSaveCalloutPositions = useCallback(
+    (positions: Record<string, { panelX: number; panelY: number }>) => {
+      saveCalloutPositions(line.id, layoutSignature, positions)
+    },
+    [layoutSignature, line.id, saveCalloutPositions],
+  )
+  const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
 
   return (
-    <div
-      className={`inline-grid gap-0 bg-slate-950/50 ${
-        showGridLines ? 'border border-slate-700' : ''
-      } ${className ?? ''}`}
-      style={{
-        gridTemplateColumns: `repeat(${cols}, ${cellSize}px)`,
-        gridTemplateRows: `repeat(${rows}, ${cellSize}px)`,
-      }}
-    >
+    <div className={`relative overflow-visible ${className ?? ''}`}>
+      <div
+        className={`inline-grid gap-0 overflow-visible bg-slate-950/50 ${
+          showGridLines ? 'border border-slate-700' : ''
+        }`}
+        style={{
+          gridTemplateColumns: `repeat(${cols}, ${cellSize}px)`,
+          gridTemplateRows: `repeat(${rows}, ${cellSize}px)`,
+        }}
+      >
       {Array.from({ length: cols * rows }).map((_, index) => {
         const localX = index % cols
         const localY = Math.floor(index / cols)
         const gridX = minX + localX
         const gridY = minY + localY
-        const unit = findUnitAt(line.units, gridX, gridY)
+        const unit = unitByCell.get(`${gridX},${gridY}`)
         const colors = unit ? STATUS_COLORS[unit.status] : null
         const isAnchor = unit ? isUnitAnchor(unit, gridX, gridY) : false
         const footprint = unit ? getUnitFootprint(unit) : null
         const isMultiCell = footprint !== null && (footprint.cols > 1 || footprint.rows > 1)
         const isMultiCellAnchor = isAnchor && isMultiCell
         const isPort = unit != null && isPortUnit(unit)
-        const showUnitLabel = unit && showLabels && isAnchor
+        const flow =
+          unit && isAnchor && showFlowArrows
+            ? resolveSimulationUnitFlow(line, unit.id, simulationLoads, flowByUnitId)
+            : null
+        const showMinimapPortOverlay =
+          showFlowArrows && isAnchor && isPort
+        const showMinimapStorageLabel =
+          showFlowArrows && isMultiCellAnchor && unit != null && isStorageUnit(unit)
+        const showUnitLabel =
+          unit &&
+          showLabels &&
+          isAnchor &&
+          !hideModuleNames &&
+          !isStorageUnit(unit) &&
+          !(showFlowArrows && isPort && flow) &&
+          !showMinimapStorageLabel
         const label = showUnitLabel
           ? buildUnitLabelLines(
               unit,
@@ -79,12 +244,15 @@ export function LineStatusGrid({
           : null
         const spanWidth = footprint ? footprint.cols * cellSize : cellSize
         const spanHeight = footprint ? footprint.rows * cellSize : cellSize
-        const flow =
-          unit && isAnchor && showFlowArrows ? flowByUnitId.get(unit.id) : null
-        const showMinimapPortOverlay =
-          showFlowArrows && isAnchor && isPort
-        const showMinimapStorageLabel =
-          showFlowArrows && isMultiCellAnchor && unit != null && isStorageUnit(unit)
+        const isSimActive = unit != null && simulationActiveSet.has(unit.id)
+        const isOnSimPath = unit != null && simulationPathSet.has(unit.id)
+        const isStorage = unit != null && isStorageUnit(unit)
+        const showStorageOutline =
+          isStorage && isMultiCellAnchor && unit != null && footprint != null
+        const showSimMaterial = Boolean(
+          unit &&
+            (isSimActive || unitHasMaterial(unit, unitRuntime)),
+        )
 
         return (
           <div
@@ -96,7 +264,7 @@ export function LineStatusGrid({
               unit
                 ? footprintBorderClasses(unit, gridX, gridY)
                 : showGridLines
-                  ? 'border'
+                  ? 'border-[0.5px]'
                   : ''
             } ${
               isMultiCellAnchor || flow || showMinimapPortOverlay
@@ -110,6 +278,14 @@ export function LineStatusGrid({
                   : flow && !isPort
                     ? 'overflow-visible'
                     : 'overflow-hidden'
+            } ${
+              isOnSimPath && isAnchor && !isStorage
+                ? 'ring-1 ring-inset ring-violet-400/70'
+                : ''
+            } ${
+              isSimActive && isAnchor && !isStorage
+                ? 'ring-2 ring-inset ring-cyan-300'
+                : ''
             } ${
               unit
                 ? `${colors!.bg} ${colors!.border} text-white`
@@ -125,12 +301,31 @@ export function LineStatusGrid({
                 flow={flow}
                 rotation={unit.rotation}
                 unitName={unit.name}
+                showUnitName={!hideModuleNames}
                 cellSize={cellSize}
-                hasMaterial={unitHasMaterial(unit, unitRuntime)}
+                hasMaterial={showSimMaterial}
                 filterId={`neon-${unit.id.replace(/[^a-zA-Z0-9_-]/g, '')}`}
               />
             ) : showFlowArrows && isAnchor && unit && isPortUnit(unit) ? (
-              <MinimapPortFallback unit={unit} cellSize={cellSize} />
+              <MinimapPortFallback
+                unit={unit}
+                cellSize={cellSize}
+                showName={!hideModuleNames}
+              />
+            ) : null}
+            {showStorageOutline ? (
+              <div
+                className={`pointer-events-none absolute top-0 left-0 z-[4] box-border ${storageFootprintOutlineClass(
+                  unit,
+                  isSimActive,
+                  isOnSimPath,
+                )}`}
+                style={{
+                  width: spanWidth,
+                  height: spanHeight,
+                }}
+                aria-hidden
+              />
             ) : null}
             {showMinimapStorageLabel && unit && footprint ? (
               <MinimapStorageLabel
@@ -173,6 +368,23 @@ export function LineStatusGrid({
           </div>
         )
       })}
+      </div>
+      {showFlowCallouts && flowCallouts.length > 0 ? (
+        <FlowCalloutOverlay
+          callouts={flowCallouts}
+          unitById={unitById}
+          flowByUnitId={flowByUnitId}
+          unitRuntime={unitRuntime}
+          gridWidth={cols * cellSize}
+          gridHeight={rows * cellSize}
+          scale={scale}
+          savedPositions={savedCalloutPositions}
+          onSavePositions={handleSaveCalloutPositions}
+          onPanLockChange={onCalloutPanLockChange}
+          deselectToken={calloutDeselectToken}
+          activeUnitIds={simulationActiveSet}
+        />
+      ) : null}
     </div>
   )
 }

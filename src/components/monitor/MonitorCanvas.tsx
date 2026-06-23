@@ -4,16 +4,21 @@ import {
   type ReactZoomPanPinchRef,
 } from 'react-zoom-pan-pinch'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { DEFAULT_GRID_COLS, DEFAULT_GRID_ROWS, MONITOR_CELL_SIZE } from '../../constants/grid'
+import { MONITOR_CELL_SIZE } from '../../constants/grid'
+import { usePathSimulation } from '../../hooks/usePathSimulation'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { useMonitorStore, type MonitorViewTransform } from '../../store/useMonitorStore'
 import type { ConveyorLine } from '../../types/conveyor'
+import { PATH_SIMULATION_STEP_MS } from '../../types/unitProperties'
 import { lineLayoutSignature } from '../../utils/lineLayoutSignature'
+import { getBuilderViewport, getLineViewport } from '../../utils/lineViewport'
 import { fitFullMapInView, focusLineInView } from '../../utils/monitorView'
 import { LineStatusGrid } from './LineStatusGrid'
+import { PathSimulationBar } from './PathSimulationBar'
 
 const CELL_SIZE = MONITOR_CELL_SIZE
 const LABELS_MIN_EFFECTIVE_CELL = 32
+const MONITOR_VIEWPORT_PADDING = 6
 
 const ZOOM_CONFIG = {
   minScale: 0.1,
@@ -25,7 +30,7 @@ const ZOOM_CONFIG = {
     animationTime: 320,
     animationType: 'easeOut' as const,
   },
-  panning: { velocityDisabled: true },
+  panning: { velocityDisabled: true, disabled: false },
   doubleClick: { disabled: true },
 }
 
@@ -46,9 +51,18 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   const transformRef = useRef<ReactZoomPanPinchRef>(null)
   const initializedLineRef = useRef<string | null>(null)
   const layoutSignature = useMemo(() => lineLayoutSignature(line), [line])
+  const viewport = useMemo(
+    () =>
+      getLineViewport(line, MONITOR_VIEWPORT_PADDING) ??
+      getBuilderViewport(line, MONITOR_VIEWPORT_PADDING),
+    [layoutSignature, line],
+  )
   const savedView = useMonitorStore((s) => s.lineViews[line.id] ?? null)
   const saveLineView = useMonitorStore((s) => s.saveLineView)
+  const hideModuleNames = useMonitorStore((s) => s.hideModuleNames)
+  const toggleHideModuleNames = useMonitorStore((s) => s.toggleHideModuleNames)
   const logApplication = useConveyorStore((s) => s.logApplication)
+  const simulation = usePathSimulation(line)
 
   const initialTransform = useMemo(() => {
     if (isSavedViewValid(savedView, layoutSignature)) {
@@ -62,6 +76,8 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   }, [layoutSignature, line.id, savedView])
 
   const [scale, setScale] = useState(initialTransform.scale)
+  const [calloutPanLock, setCalloutPanLock] = useState(false)
+  const [calloutDeselectToken, setCalloutDeselectToken] = useState(0)
   const viewStateRef = useRef(initialTransform)
 
   const logButton = (comment: string) => {
@@ -129,14 +145,30 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
 
   const effectiveCellSize = CELL_SIZE * scale
   const showLabels = effectiveCellSize >= LABELS_MIN_EFFECTIVE_CELL
+  const zoomConfig = useMemo(
+    () => ({
+      ...ZOOM_CONFIG,
+      panning: { ...ZOOM_CONFIG.panning, disabled: calloutPanLock },
+    }),
+    [calloutPanLock],
+  )
 
   return (
     <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900">
       <div className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
         <p className="text-sm text-slate-400">
-          {line.name} · {DEFAULT_GRID_COLS}×{DEFAULT_GRID_ROWS} · 유닛 {line.units.length}개
+          {line.name} · {viewport.cols}×{viewport.rows} · 유닛 {line.units.length}개
         </p>
         <div className="flex items-center gap-1">
+          <ZoomButton
+            label={hideModuleNames ? '이름 보기' : '이름 숨기기'}
+            active={hideModuleNames}
+            onClick={() => {
+              toggleHideModuleNames()
+              logButton(hideModuleNames ? 'Show Module Names' : 'Hide Module Names')
+            }}
+            wide
+          />
           <ZoomButton
             label="−"
             onClick={() => {
@@ -179,6 +211,42 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
         </div>
       </div>
 
+      <PathSimulationBar
+        mode={simulation.mode}
+        onModeChange={simulation.changeMode}
+        conveyorOnlyLine={simulation.conveyorOnlyLine}
+        sources={simulation.sources}
+        selectedSourceUnitIds={simulation.selectedSourceUnitIds}
+        onToggleSource={simulation.toggleSourceUnitId}
+        plan={simulation.plan}
+        status={simulation.status}
+        progressLabel={simulation.progressLabel}
+        canSimulate={simulation.canSimulate}
+        activeUnitLabel={simulation.activeUnitLabel}
+        waitingLabels={simulation.waitingLabels}
+        onStart={() => {
+          simulation.start()
+          logButton('Path Simulation Start')
+        }}
+        onPause={() => {
+          simulation.pause()
+          logButton('Path Simulation Pause')
+        }}
+        onResume={() => {
+          simulation.resume()
+          logButton('Path Simulation Resume')
+        }}
+        onReset={() => {
+          simulation.reset()
+          setCalloutDeselectToken((token) => token + 1)
+          logButton('Path Simulation Reset')
+        }}
+        onStepForward={() => {
+          simulation.stepForward()
+          logButton('Path Simulation Step')
+        }}
+      />
+
       <TransformWrapper
         key={line.id}
         ref={transformRef}
@@ -190,23 +258,39 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
           setScale(state.scale)
           persistView(state.scale, state.positionX, state.positionY)
         }}
-        {...ZOOM_CONFIG}
+        {...zoomConfig}
       >
         <TransformComponent
-          wrapperClass="!h-[520px] !w-full cursor-grab active:cursor-grabbing"
+          wrapperClass={`!h-[520px] !w-full overflow-visible ${
+            calloutPanLock ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
+          }`}
+          contentClass="!overflow-visible"
         >
           <LineStatusGrid
             line={line}
+            viewport={viewport}
             cellSize={CELL_SIZE}
             scale={scale}
             showLabels={showLabels}
+            hideModuleNames={hideModuleNames}
+            showFlowArrows={line.units.length > 0}
+            showFlowCallouts={line.units.length > 0}
+            simulationActiveUnitIds={simulation.activeUnitIds}
+            simulationLoads={simulation.loads.map((load) => ({
+              pathUnitIds: load.pathUnitIds,
+              stepIndex: load.stepIndex,
+            }))}
+            simulationPathUnitIds={simulation.pathUnitIds}
+            onCalloutPanLockChange={setCalloutPanLock}
+            calloutDeselectToken={calloutDeselectToken}
             className="pointer-events-none select-none"
           />
         </TransformComponent>
       </TransformWrapper>
 
       <p className="border-t border-slate-800 px-4 py-2 text-xs text-slate-500">
-        마우스 휠: 줌 · 드래그: 이동 · 줌인 시 모듈 정보 표시 · 라인 맞춤 / 전체 맵
+        마우스 휠: 줌 · 드래그: 맵 이동 · 정보 표: 클릭 선택 후 드래그로 위치 고정 · 경로 시뮬레이션: 투입(IN) 또는 출고(OUT) 다중 동시 출발 (
+        {PATH_SIMULATION_STEP_MS / 1000}초/모듈)
       </p>
     </div>
   )
@@ -216,18 +300,22 @@ function ZoomButton({
   label,
   onClick,
   wide,
+  active = false,
 }: {
   label: string
   onClick: () => void
   wide?: boolean
+  active?: boolean
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`rounded border border-slate-700 bg-slate-800 text-sm text-slate-200 hover:bg-slate-700 ${
-        wide ? 'px-2.5 py-1' : 'h-7 w-7'
-      }`}
+      className={`rounded border bg-slate-800 text-sm hover:bg-slate-700 ${
+        active
+          ? 'border-cyan-500/70 text-cyan-200'
+          : 'border-slate-700 text-slate-200'
+      } ${wide ? 'px-2.5 py-1' : 'h-7 w-7'}`}
     >
       {label}
     </button>

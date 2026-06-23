@@ -34,8 +34,20 @@ export type HistoryEventType =
   | 'statusChange'
   | 'application'
 
+export type FlowRole = 'entry' | 'exit'
+
+import type {
+  StkRoutingProperties,
+  UnitRole,
+  UnitRoleProperties,
+} from './unitProperties'
+
+export type { UnitRole, StkPolicy, StkRoutingProperties, StkProperties, PortProperties, OutputPortProperties, UnitRoleProperties, RoutingSimulationResult } from './unitProperties'
+
 export interface ConveyorUnit {
   id: string
+  /** 사용자 지정 코드 (예: CV01) — 미설정 시 name과 동일 */
+  code?: string
   name: string
   /** Semi C/V 프로그램 Conveyor.ID — WebSocket 매핑용 */
   semiCnvId?: number
@@ -46,6 +58,14 @@ export interface ConveyorUnit {
   connections: string[]
   status: ConveyorStatus
   interfaceUnit: InterfaceUnitType | null
+  /** 물류 역할 (투입구·스토커·출고 포트 등) */
+  role?: UnitRole | null
+  /** 역할별 상세 속성 — STORAGE, PORT_OUT */
+  properties?: UnitRoleProperties | null
+  /** type === 'turn' | 'junction' — STK 분기 라우팅 */
+  stkRouting?: StkRoutingProperties | null
+  /** 물류 시작(투입) / 종료(출고) — 분기 라인에서 복수 지정 */
+  flowRole?: FlowRole | null
   /** type === 'port' 일 때만 사용 */
   portDirection: PortDirection | null
   portRecipe: PortRecipe | null
@@ -69,7 +89,7 @@ export interface ConveyorLine {
   semiCnvSiteId?: string
   gridSize: { cols: number; rows: number }
   units: ConveyorUnit[]
-  /** CV-01 순번 부여 시작점 유닛 ID */
+  /** @deprecated flowRole=entry 사용 — 로드 시 자동 마이그레이션 */
   baseUnitId?: string | null
   createdAt: string
   updatedAt: string

@@ -1,10 +1,10 @@
+import { useMemo } from 'react'
 import type {
   ConveyorLine,
   ConveyorUnit,
   ConveyorStatus,
   TestMaterialFlag,
   PortDirection,
-  PortLinkedUnit,
   PortRecipe,
   StorageMaintenanceArea,
   StorageRobotCount,
@@ -25,7 +25,6 @@ import {
 import { INTERFACE_UNIT_TYPES } from '../../constants/interfaceUnits'
 import {
   PORT_DIRECTIONS,
-  PORT_LINKED_UNITS,
   PORT_RECIPES,
 } from '../../constants/port'
 import {
@@ -37,17 +36,31 @@ import {
   warehouseShapeLabel,
 } from '../../constants/warehouseUnit'
 import { updateUnitInLine, updateUnitsStatusInLine, updateUnitsTestMaterialInLine } from '../../utils/units'
-import type { InterfaceUnitType } from '../../types/conveyor'
+import type { InterfaceUnitType, FlowRole } from '../../types/conveyor'
+import {
+  formatFlowRoleLabel,
+  isFlowCapableUnit,
+} from '../../utils/flowEntries'
+import { RolePropertySections } from './UnitRolePropertySections'
+import { computeMinimapFlowMap } from '../../utils/flowDirection'
+import {
+  getPortProperties,
+  portRoleFromDirection,
+  readPortProperties,
+  unitDisplayCode,
+} from '../../utils/unitPropertyHelpers'
 
 interface UnitPropertiesPanelProps {
   line: ConveyorLine
   unit: ConveyorUnit | null
   selectedUnitIds?: string[]
-  isBase: boolean
-  onSetBase: (unitId: string) => void
+  onSetFlowRole: (unitId: string, role: FlowRole | null) => void
   onChange: (line: ConveyorLine) => void
   onDelete: (unitId: string) => void
   onRotate: (unitId: string) => void
+  outputDestinationPickPortId?: string | null
+  onStartPickOutputDestination?: (portId: string) => void
+  onCancelPickOutputDestination?: () => void
 }
 
 const STATUSES = Object.entries(STATUS_COLORS).map(([value, colors]) => ({
@@ -59,12 +72,16 @@ export function UnitPropertiesPanel({
   line,
   unit,
   selectedUnitIds = [],
-  isBase,
-  onSetBase,
+  onSetFlowRole,
   onChange,
   onDelete,
   onRotate,
+  outputDestinationPickPortId = null,
+  onStartPickOutputDestination,
+  onCancelPickOutputDestination,
 }: UnitPropertiesPanelProps) {
+  const unitFlowMap = useMemo(() => computeMinimapFlowMap(line), [line])
+
   if (selectedUnitIds.length > 1) {
     const selectedUnits = line.units.filter((item) =>
       selectedUnitIds.includes(item.id),
@@ -164,13 +181,33 @@ export function UnitPropertiesPanel({
   return (
     <div className="space-y-4">
       <div>
+        <label className="mb-1 block text-xs text-slate-400">코드</label>
+        <input
+          type="text"
+          value={unit.code ?? unit.name}
+          onChange={(e) =>
+            onChange(updateUnitInLine(line, unit.id, { code: e.target.value }))
+          }
+          className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+        />
+      </div>
+
+      <div>
         <label className="mb-1 block text-xs text-slate-400">이름</label>
         <input
           type="text"
           value={unit.name}
-          onChange={(e) =>
-            onChange(updateUnitInLine(line, unit.id, { name: e.target.value }))
-          }
+          onChange={(e) => {
+            const nextName = e.target.value
+            const prevCode = unit.code?.trim()
+            const prevName = unit.name.trim()
+            onChange(
+              updateUnitInLine(line, unit.id, {
+                name: nextName,
+                ...(!prevCode || prevCode === prevName ? { code: nextName } : {}),
+              }),
+            )
+          }}
           className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
         />
       </div>
@@ -212,24 +249,33 @@ export function UnitPropertiesPanel({
       {isPort ? (
         <>
           <div>
-            <label className="mb-1 block text-xs text-slate-400">방향 (IN/OUT)</label>
+            <label className="mb-1 block text-xs text-slate-400">
+              방향 · 역할 (투입고 / 출고구)
+            </label>
             <select
               value={unit.portDirection ?? 'IN'}
-              onChange={(e) =>
+              onChange={(e) => {
+                const portDirection = e.target.value as PortDirection
+                const role = portRoleFromDirection(portDirection)
                 onChange(
                   updateUnitInLine(line, unit.id, {
-                    portDirection: e.target.value as PortDirection,
+                    portDirection,
+                    role,
+                    properties: readPortProperties(line, unit),
                   }),
                 )
-              }
+              }}
               className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
             >
               {PORT_DIRECTIONS.map((direction) => (
                 <option key={direction} value={direction}>
-                  {direction}
+                  {direction === 'IN' ? 'IN · 투입고' : 'OUT · 출고구'}
                 </option>
               ))}
             </select>
+            <p className="mt-1 text-xs text-slate-500">
+              방향과 역할(투입고/출고구)은 함께 결정됩니다. STK는 인접 배치 시 자동 인식되며, LOAD/UNLOAD UNIT은 아래에서 지정하세요.
+            </p>
           </div>
 
           <div>
@@ -251,30 +297,6 @@ export function UnitPropertiesPanel({
                 </option>
               ))}
             </select>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs text-slate-400">연동 유닛</label>
-            <select
-              value={unit.portLinkedUnit ?? 'OHT'}
-              onChange={(e) =>
-                onChange(
-                  updateUnitInLine(line, unit.id, {
-                    portLinkedUnit: e.target.value as PortLinkedUnit,
-                  }),
-                )
-              }
-              className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
-            >
-              {PORT_LINKED_UNITS.map((linkedUnit) => (
-                <option key={linkedUnit} value={linkedUnit}>
-                  {linkedUnit}
-                </option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-slate-500">
-              OHT, STK, AGV 중 연동 설비를 선택하세요.
-            </p>
           </div>
         </>
       ) : isStorage ? (
@@ -419,18 +441,45 @@ export function UnitPropertiesPanel({
         </div>
       )}
 
+      <RolePropertySections
+        line={line}
+        unit={unit}
+        onChange={onChange}
+        pickingOutputDestination={
+          isPortUnit(unit) &&
+          (unit.portDirection ?? 'IN') === 'OUT' &&
+          outputDestinationPickPortId === unit.id
+        }
+        onStartPickOutputDestination={
+          onStartPickOutputDestination
+            ? () => onStartPickOutputDestination(unit.id)
+            : undefined
+        }
+        onCancelPickOutputDestination={onCancelPickOutputDestination}
+      />
+
       <div className="rounded-md border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-400">
         <p>위치: ({unit.gridX}, {unit.gridY})</p>
         {canRotate && (
           <p>
-            {isLiftUnit(unit) ? '높이' : '회전'}: {formatRotationDisplay(unit)}
+            {isLiftUnit(unit) ? '높이' : '회전'}:{' '}
+            {formatRotationDisplay(unit, unitFlowMap.get(unit.id) ?? null)}
           </p>
         )}
         {isPort ? (
           <>
             <p>방향: {unit.portDirection ?? 'IN'}</p>
+            <p>역할: {unit.portDirection === 'OUT' ? '출고구' : '투입고'}</p>
             <p>레시피: {unit.portRecipe ?? '2BP1ST'}</p>
-            <p>연동 유닛: {unit.portLinkedUnit ?? 'OHT'}</p>
+            {getPortProperties(unit)?.linkedUnitId ? (
+              <p>
+                연동:{' '}
+                {unitDisplayCode(
+                  line.units.find((item) => item.id === getPortProperties(unit)?.linkedUnitId) ??
+                    unit,
+                )}
+              </p>
+            ) : null}
           </>
         ) : isStorage ? (
           <>
@@ -457,17 +506,35 @@ export function UnitPropertiesPanel({
           </p>
         )}
         <p>연결: {unit.connections.length}개</p>
-        {isBase && <p className="text-amber-300">기준 컨베이어 (CV01 시작점)</p>}
+        {unit.flowRole && (
+          <p className={unit.flowRole === 'entry' ? 'text-amber-300' : 'text-emerald-300'}>
+            {formatFlowRoleLabel(unit.flowRole)}점
+            {unit.flowRole === 'entry' ? ' (순번 시작)' : ' (물류 종료)'}
+          </p>
+        )}
       </div>
 
-      {!isBase && !isPort && !isStorage && (
-        <button
-          type="button"
-          onClick={() => onSetBase(unit.id)}
-          className="w-full rounded-md border border-amber-800/60 px-2 py-1.5 text-xs text-amber-200 hover:bg-amber-950/40"
-        >
-          기준 컨베이어로 지정
-        </button>
+      {isFlowCapableUnit(unit) && (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              onSetFlowRole(unit.id, unit.flowRole === 'entry' ? null : 'entry')
+            }
+            className="flex-1 rounded-md border border-amber-800/60 px-2 py-1.5 text-xs text-amber-200 hover:bg-amber-950/40"
+          >
+            {unit.flowRole === 'entry' ? '투입 해제' : '투입 지정'}
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              onSetFlowRole(unit.id, unit.flowRole === 'exit' ? null : 'exit')
+            }
+            className="flex-1 rounded-md border border-emerald-800/60 px-2 py-1.5 text-xs text-emerald-200 hover:bg-emerald-950/40"
+          >
+            {unit.flowRole === 'exit' ? '출고 해제' : '출고 지정'}
+          </button>
+        </div>
       )}
 
       <div className="flex gap-2">

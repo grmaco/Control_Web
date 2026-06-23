@@ -1,4 +1,3 @@
-import { isPortUnit, isStorageUnit, showsRotation, showsTypeLabelInCell, formatRotationDisplay, typeLabel } from '../constants/conveyorTypes'
 import type { ConveyorUnit } from '../types/conveyor'
 
 export const LABEL_LINE_HEIGHT = 1.12
@@ -75,6 +74,47 @@ export function pickMinimapLabelLines(
   return { lines, fontSize: fitVisualFontSize(innerSize, lines) }
 }
 
+/** 포트 표시명 — "30101 IN" → "30101" */
+export function portDisplayName(name: string): string {
+  return name.replace(/\s+(IN|OUT)$/i, '').trim()
+}
+
+export function isPortNameVerticalLayout(dir: 'N' | 'E' | 'S' | 'W'): boolean {
+  return dir === 'E' || dir === 'W'
+}
+
+function fitVerticalPortNameFontSize(innerSize: number, text: string): number {
+  const chars = [...text]
+  if (chars.length === 0 || innerSize <= 0) return 0
+
+  const byHeight = innerSize / (chars.length * LABEL_LINE_HEIGHT)
+  const byWidth = innerSize / charWidthFactor(chars[0], true)
+  return Math.max(minimapMinFont(innerSize), Math.min(byHeight, byWidth))
+}
+
+/** 포트 이름 — 좌·우 절반(E/W)은 세로, 상·하(N/S)는 가로 */
+export function pickMinimapPortName(
+  innerSize: number,
+  unitName: string,
+  dir: 'N' | 'E' | 'S' | 'W',
+): { displayName: string; fontSize: number; vertical: boolean } {
+  const displayName = portDisplayName(unitName)
+  if (!displayName || innerSize <= 0) {
+    return { displayName: '', fontSize: 0, vertical: false }
+  }
+
+  if (isPortNameVerticalLayout(dir)) {
+    return {
+      displayName,
+      fontSize: fitVerticalPortNameFontSize(innerSize, displayName),
+      vertical: true,
+    }
+  }
+
+  const { fontSize } = pickMinimapLabelLines(innerSize, [displayName])
+  return { displayName, fontSize, vertical: false }
+}
+
 /** 포트 미니맵 SVG text — viewBox(100) 기준 */
 export function portMinimapSvgFontSize(
   cellSize: number,
@@ -111,26 +151,7 @@ export function buildUnitLabelLines(
     Math.min(spanWidth, spanHeight) - CELL_INSET,
   ) * scale
 
-  const candidates: string[] = [unit.name]
-  if (isPortUnit(unit)) {
-    candidates.push(unit.portDirection ?? 'IN')
-  } else if (!isStorageUnit(unit)) {
-    if (showsTypeLabelInCell(unit.type)) {
-      candidates.push(typeLabel(unit.type))
-    }
-    if (showsRotation(unit.type)) {
-      candidates.push(formatRotationDisplay(unit))
-    }
-  }
-
-  let lines = [candidates[0]]
-  for (let i = 1; i < candidates.length; i += 1) {
-    const next = [...lines, candidates[i]]
-    if (fitVisualFontSize(effectiveInner, next) >= MIN_VISUAL_FONT) {
-      lines = next
-    }
-  }
-
+  const lines = [unit.name]
   const visualFont = fitVisualFontSize(effectiveInner, lines)
 
   return {

@@ -22,6 +22,27 @@ export function getTurnOpenings(rotation: Rotation): readonly [FlowDir, FlowDir]
   return TURN_OPENINGS[rotation]
 }
 
+/** 시계방향 나침반 각도 — N=0°, E=90°, S=180°, W=270° */
+export const FLOW_DIR_COMPASS_CW: Record<FlowDir, number> = {
+  N: 0,
+  E: 90,
+  S: 180,
+  W: 270,
+}
+
+/** 입고(in) 방향을 0°로 한 시계방향 출고 각도 */
+export function turnRelativeAngleDegrees(inDir: FlowDir, outDir: FlowDir): number {
+  return (FLOW_DIR_COMPASS_CW[outDir] - FLOW_DIR_COMPASS_CW[inDir] + 360) % 360
+}
+
+export function formatTurnFlowAngleLabel(
+  inDir: FlowDir | null | undefined,
+  outDir: FlowDir | null | undefined,
+): string | null {
+  if (!inDir || !outDir) return null
+  return `${turnRelativeAngleDegrees(inDir, outDir)}°`
+}
+
 /** 짧은 1/4 호 (스크린 좌표, y↓) */
 const TURN_SWEEP: Record<string, 0 | 1> = {
   'S-E': 1,
@@ -48,6 +69,45 @@ const TURN_THROUGH: Record<string, string> = {
   'E-W': `M ${EDGE.E.x},${EDGE.E.y} L ${EDGE.W.x},${EDGE.W.y}`,
   'N-S': `M ${EDGE.N.x},${EDGE.N.y} L ${EDGE.S.x},${EDGE.S.y}`,
   'S-N': `M ${EDGE.S.x},${EDGE.S.y} L ${EDGE.N.x},${EDGE.N.y}`,
+}
+
+/** 180° 직통 + 화살촉 (네온이 몸통·촉 전체에 적용되도록 한 path) */
+const TURN_THROUGH_WITH_HEAD: Record<string, string> = {
+  'W-E': `M ${EDGE.W.x},${EDGE.W.y} L 75,50 M 75,44 L ${EDGE.E.x},${EDGE.E.y} L 75,56`,
+  'E-W': `M ${EDGE.E.x},${EDGE.E.y} L 25,50 M 25,44 L ${EDGE.W.x},${EDGE.W.y} L 25,56`,
+  'N-S': `M ${EDGE.N.x},${EDGE.N.y} L 50,75 M 44,75 L ${EDGE.S.x},${EDGE.S.y} L 56,75`,
+  'S-N': `M ${EDGE.S.x},${EDGE.S.y} L 50,25 M 44,25 L ${EDGE.N.x},${EDGE.N.y} L 56,25`,
+}
+
+export function arrowHeadSubpath(
+  tipX: number,
+  tipY: number,
+  dir: FlowDir,
+  size = 11,
+): string {
+  switch (dir) {
+    case 'E':
+      return `M ${tipX - size},${tipY - size * 0.55} L ${tipX},${tipY} L ${tipX - size},${tipY + size * 0.55}`
+    case 'W':
+      return `M ${tipX + size},${tipY - size * 0.55} L ${tipX},${tipY} L ${tipX + size},${tipY + size * 0.55}`
+    case 'S':
+      return `M ${tipX - size * 0.55},${tipY - size} L ${tipX},${tipY} L ${tipX + size * 0.55},${tipY - size}`
+    case 'N':
+      return `M ${tipX - size * 0.55},${tipY + size} L ${tipX},${tipY} L ${tipX + size * 0.55},${tipY + size}`
+  }
+}
+
+/** 네온용 — 몸통(호 또는 직통) + 화살촉을 단일 SVG path로 */
+export function buildTurnFlowPathFull(inDir: FlowDir, outDir: FlowDir): string | null {
+  const key = turnKey(inDir, outDir)
+
+  const throughWithHead = TURN_THROUGH_WITH_HEAD[key]
+  if (throughWithHead) return throughWithHead
+
+  const pathInfo = buildTurnFlowPath(inDir, outDir)
+  if (!pathInfo) return null
+
+  return `${pathInfo.d} ${arrowHeadSubpath(pathInfo.tip.x, pathInfo.tip.y, pathInfo.outDir)}`
 }
 
 export function isValidTurnThrough(inDir: FlowDir, outDir: FlowDir): boolean {
@@ -77,25 +137,15 @@ export function buildTurnFlowPath(
 }
 
 /**
- * 0° — 연결(물류) 방향 그대로.
- * 90/180/270° — 해당 각도의 개구부 쌍을 따르되, 실제 흐름(in→out)에 맞춤.
+ * 미니맵 곡선 — 물리 입고·출고 방향 그대로 사용 (입고측=0° 기준).
+ * 저장된 rotation 필드는 빌더 배치용이며 곡선 렌더에는 쓰지 않음.
  */
 export function resolveTurnFlowDirs(
   inDir: FlowDir | null,
   outDir: FlowDir | null,
-  rotation: Rotation,
+  _rotation?: Rotation,
 ): { inDir: FlowDir; outDir: FlowDir } | null {
   if (!inDir || !outDir) return null
-
-  if (rotation === 0) {
-    return { inDir, outDir }
-  }
-
-  const [openA, openB] = TURN_OPENINGS[rotation]
-  if (inDir === openA && outDir === openB) return { inDir, outDir }
-  if (inDir === openB && outDir === openA) return { inDir, outDir }
-
-  // 설정 각도와 연결이 다를 때는 물리 연결 우선
   return { inDir, outDir }
 }
 

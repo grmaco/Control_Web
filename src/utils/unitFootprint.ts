@@ -1,5 +1,5 @@
 import { WAREHOUSE_FOOTPRINT_SIZE } from '../constants/warehouseUnit'
-import { isStorage } from '../constants/conveyorTypes'
+import { isStorage, isStorageUnit } from '../constants/conveyorTypes'
 import type { ConveyorType, ConveyorUnit } from '../types/conveyor'
 
 export interface UnitFootprint {
@@ -36,29 +36,6 @@ export function getFootprintCells(
 
 export function isUnitAnchor(unit: ConveyorUnit, gridX: number, gridY: number): boolean {
   return unit.gridX === gridX && unit.gridY === gridY
-}
-
-/** 다칸 유닛(적재창고 등) — 내부 격자선 없이 외곽 테두리만 */
-export function footprintBorderClasses(
-  unit: ConveyorUnit,
-  gridX: number,
-  gridY: number,
-): string {
-  const footprint = getUnitFootprint(unit)
-  if (footprint.cols === 1 && footprint.rows === 1) return 'border'
-
-  const dx = gridX - unit.gridX
-  const dy = gridY - unit.gridY
-
-  return [
-    'border',
-    dy === 0 ? '' : 'border-t-transparent',
-    dy === footprint.rows - 1 ? '' : 'border-b-transparent',
-    dx === 0 ? '' : 'border-l-transparent',
-    dx === footprint.cols - 1 ? '' : 'border-r-transparent',
-  ]
-    .filter(Boolean)
-    .join(' ')
 }
 
 export function unitOccupiesCell(unit: ConveyorUnit, gridX: number, gridY: number): boolean {
@@ -102,4 +79,29 @@ export function isFootprintAvailable(
     if (!occupant) return true
     return excludeUnitId !== undefined && occupant.id === excludeUnitId
   })
+}
+
+/** 다칸 유닛 — 내부 격자선 없이 외곽 테두리만 */
+export function footprintBorderClasses(
+  unit: ConveyorUnit,
+  gridX: number,
+  gridY: number,
+): string {
+  // STK는 앵커 셀의 단일 외곽 프레임으로만 테두리를 그린다.
+  if (isStorageUnit(unit)) return ''
+
+  const footprint = getUnitFootprint(unit)
+  if (footprint.cols === 1 && footprint.rows === 1) return 'border-[0.5px]'
+
+  const localX = gridX - unit.gridX
+  const localY = gridY - unit.gridY
+  const classes: string[] = []
+
+  if (localY === 0) classes.push('border-t-[0.5px]')
+  if (localY === footprint.rows - 1) classes.push('border-b-[0.5px]')
+  if (localX === 0) classes.push('border-l-[0.5px]')
+  if (localX === footprint.cols - 1) classes.push('border-r-[0.5px]')
+
+  // 내부 셀은 테두리를 비워 STK 내부 분할선을 숨긴다.
+  return classes.length > 0 ? classes.join(' ') : ''
 }

@@ -6,10 +6,12 @@ import {
   minimapInnerSize,
   minimapPortNameHalfInner,
   pickMinimapLabelLines,
+  pickMinimapPortName,
+  portDisplayName,
 } from '../../utils/monitorLabel'
 import {
   buildTurnFlowPath,
-  resolveTurnFlowDirs,
+  buildTurnFlowPathFull,
   TURN_EDGE,
 } from '../../utils/turnArc'
 
@@ -22,17 +24,6 @@ const NEON = {
   badgeGlow: '#4ade80',
   badgeEndGlow: '#f87171',
 } as const
-
-const JUNCTION_PATH: Record<string, string> = {
-  'S-E': 'M 50,86 L 50,50 L 86,50',
-  'E-S': 'M 86,50 L 50,50 L 50,86',
-  'S-W': 'M 50,86 L 50,50 L 14,50',
-  'W-S': 'M 14,50 L 50,50 L 50,86',
-  'N-E': 'M 50,14 L 50,50 L 86,50',
-  'E-N': 'M 86,50 L 50,50 L 50,14',
-  'N-W': 'M 50,14 L 50,50 L 14,50',
-  'W-N': 'M 14,50 L 50,50 L 50,14',
-}
 
 function oppositeDir(dir: FlowDir): FlowDir {
   switch (dir) {
@@ -93,6 +84,7 @@ interface MinimapFlowArrowProps {
   flow: UnitFlowDirs
   rotation: Rotation
   unitName?: string
+  showUnitName?: boolean
   cellSize?: number
   hasMaterial: boolean
   filterId: string
@@ -151,106 +143,6 @@ function FlowSvg({
       {hasMaterial ? <NeonFilter id={filterId} /> : null}
       {children}
     </svg>
-  )
-}
-
-function StartBadge({ hasMaterial, filterId }: { hasMaterial: boolean; filterId: string }) {
-  return (
-    <g>
-      {hasMaterial ? (
-        <>
-          <rect
-            x="10"
-            y="28"
-            width="80"
-            height="44"
-            rx="9"
-            fill="none"
-            stroke={NEON.badgeGlow}
-            strokeWidth={6}
-            opacity={0.45}
-            filter={`url(#${neonHaloId(filterId)})`}
-            className="minimap-neon-halo"
-          />
-          <rect
-            x="14"
-            y="32"
-            width="72"
-            height="36"
-            rx="7"
-            fill="none"
-            stroke={NEON.badgeGlow}
-            strokeWidth={4}
-            opacity={0.95}
-            filter={`url(#${filterId})`}
-            className="minimap-neon-glow"
-          />
-        </>
-      ) : null}
-      <rect
-        x="18"
-        y="36"
-        width="64"
-        height="28"
-        rx="5"
-        fill="#16a34a"
-        stroke="#fff"
-        strokeWidth={1.5}
-      />
-      <text x="50" y="55" textAnchor="middle" fontSize="13" fontWeight="bold" fill="#fff">
-        시작
-      </text>
-    </g>
-  )
-}
-
-function EndBadge({ hasMaterial, filterId }: { hasMaterial: boolean; filterId: string }) {
-  return (
-    <g>
-      {hasMaterial ? (
-        <>
-          <rect
-            x="10"
-            y="28"
-            width="80"
-            height="44"
-            rx="9"
-            fill="none"
-            stroke={NEON.badgeEndGlow}
-            strokeWidth={6}
-            opacity={0.45}
-            filter={`url(#${neonHaloId(filterId)})`}
-            className="minimap-neon-halo"
-          />
-          <rect
-            x="14"
-            y="32"
-            width="72"
-            height="36"
-            rx="7"
-            fill="none"
-            stroke={NEON.badgeEndGlow}
-            strokeWidth={4}
-            opacity={0.95}
-            filter={`url(#${filterId})`}
-            className="minimap-neon-glow"
-          />
-        </>
-      ) : null}
-      <rect
-        x="18"
-        y="36"
-        width="64"
-        height="28"
-        rx="5"
-        fill="#dc2626"
-        stroke="#fff"
-        strokeWidth={1.5}
-      />
-      <text x="50" y="55" textAnchor="middle" fontSize="13" fontWeight="bold" fill="#fff">
-        종료
-      </text>
-    </g>
   )
 }
 
@@ -481,37 +373,6 @@ function StraightFlowArrow({
 
 function TurnFlowArrow({
   flow,
-  rotation,
-  hasMaterial,
-  filterId,
-}: {
-  flow: UnitFlowDirs
-  rotation: Rotation
-  hasMaterial: boolean
-  filterId: string
-}) {
-  const dirs = resolveTurnFlowDirs(flow.inDir, flow.outDir, rotation)
-  if (!dirs) return null
-
-  const pathInfo = buildTurnFlowPath(dirs.inDir, dirs.outDir)
-  if (!pathInfo) return null
-
-  return (
-    <g>
-      <FlowPath d={pathInfo.d} hasMaterial={hasMaterial} filterId={filterId} />
-      <FlowHead
-        tipX={pathInfo.tip.x}
-        tipY={pathInfo.tip.y}
-        dir={pathInfo.outDir}
-        hasMaterial={hasMaterial}
-        filterId={filterId}
-      />
-    </g>
-  )
-}
-
-function JunctionFlowArrow({
-  flow,
   hasMaterial,
   filterId,
 }: {
@@ -519,27 +380,46 @@ function JunctionFlowArrow({
   hasMaterial: boolean
   filterId: string
 }) {
-  if (!flow.inDir || !flow.outDir) return null
-  const path = JUNCTION_PATH[`${flow.inDir}-${flow.outDir}`]
-  if (!path) return null
+  const { inDir, outDir } = flow
 
-  const tip = EDGE[flow.outDir]
+  if (inDir && outDir) {
+    const pathInfo = buildTurnFlowPath(inDir, outDir)
+    if (pathInfo) {
+      if (hasMaterial) {
+        const neonPath = buildTurnFlowPathFull(inDir, outDir)
+        if (neonPath) {
+          return <FlowPath d={neonPath} hasMaterial filterId={filterId} />
+        }
+      }
+
+      return (
+        <g>
+          <FlowPath d={pathInfo.d} hasMaterial={false} filterId={filterId} />
+          <FlowHead
+            tipX={pathInfo.tip.x}
+            tipY={pathInfo.tip.y}
+            dir={pathInfo.outDir}
+            hasMaterial={false}
+            filterId={filterId}
+          />
+        </g>
+      )
+    }
+  }
+
+  const fallbackDir = outDir ?? (inDir ? oppositeDir(inDir) : null)
+  if (!fallbackDir) return null
 
   return (
-    <g>
-      <FlowPath d={path} hasMaterial={hasMaterial} filterId={filterId} />
-      <FlowHead
-        tipX={tip.x}
-        tipY={tip.y}
-        dir={flow.outDir}
-        hasMaterial={hasMaterial}
-        filterId={filterId}
-      />
-    </g>
+    <StraightFlowArrow
+      dir={fallbackDir}
+      hasMaterial={hasMaterial}
+      filterId={filterId}
+    />
   )
 }
 
-/** 포트 전용 — 방향 삼각형 + IN/OUT·이름 (CV 화살표와 별도) */
+/** 포트 전용 — 방향 삼각형 + 이름 (CV 화살표와 별도) */
 const PORT_DIRECTION_TRIANGLE: Record<FlowDir, string> = {
   E: 'M 50,0 L 100,50 L 50,100 Z',
   W: 'M 50,0 L 0,50 L 50,100 Z',
@@ -560,20 +440,21 @@ function portNameHalfStyle(dir: FlowDir): CSSProperties {
   }
 }
 
-function portLabelCandidates(unitName: string, direction: string): string[] {
-  return [direction, unitName]
-}
-
 function PortNameHalf({
   dir,
-  lines,
-  fontSize,
+  unitName,
+  cellSize,
 }: {
   dir: FlowDir
-  lines: string[]
-  fontSize: number
+  unitName: string
+  cellSize: number
 }) {
-  if (lines.length === 0 || fontSize <= 0) return null
+  const { displayName, fontSize, vertical } = pickMinimapPortName(
+    minimapPortNameHalfInner(cellSize, dir),
+    unitName,
+    dir,
+  )
+  if (!displayName || fontSize <= 0) return null
 
   return (
     <div
@@ -581,15 +462,19 @@ function PortNameHalf({
       style={{
         ...portNameHalfStyle(dir),
         fontSize,
-        lineHeight: LABEL_LINE_HEIGHT,
+        lineHeight: vertical ? 1 : LABEL_LINE_HEIGHT,
         textShadow: '0 1px 2px rgba(0,0,0,0.85)',
       }}
     >
-      {lines.map((line, index) => (
-        <span key={index} className="block max-w-full truncate leading-none">
-          {line}
-        </span>
-      ))}
+      {vertical ? (
+        [...displayName].map((char, index) => (
+          <span key={index} className="block leading-none">
+            {char}
+          </span>
+        ))
+      ) : (
+        <span className="block max-w-full truncate leading-none">{displayName}</span>
+      )}
     </div>
   )
 }
@@ -642,12 +527,14 @@ function PortTriangleHalf({
 function MinimapPortFlow({
   flow,
   unitName,
+  showUnitName = true,
   cellSize,
   hasMaterial,
   filterId,
 }: {
   flow: UnitFlowDirs
   unitName: string
+  showUnitName?: boolean
   cellSize: number
   hasMaterial: boolean
   filterId: string
@@ -656,11 +543,6 @@ function MinimapPortFlow({
   if (!dir) return null
 
   const neonId = hasMaterial ? filterId : 'neon'
-  const direction = flow.portDirection ?? 'IN'
-  const { lines, fontSize } = pickMinimapLabelLines(
-    minimapPortNameHalfInner(cellSize, dir),
-    portLabelCandidates(unitName, direction),
-  )
 
   return (
     <div
@@ -672,7 +554,11 @@ function MinimapPortFlow({
       <FlowSvg filterId={neonId} hasMaterial={hasMaterial}>
         <PortTriangleHalf dir={dir} flow={flow} hasMaterial={hasMaterial} filterId={neonId} />
       </FlowSvg>
-      <PortNameHalf dir={dir} lines={lines} fontSize={fontSize} />
+      <PortNameHalf
+        dir={dir}
+        unitName={showUnitName ? unitName : ''}
+        cellSize={cellSize}
+      />
     </div>
   )
 }
@@ -681,16 +567,17 @@ function MinimapPortFlow({
 export function MinimapPortFallback({
   unit,
   cellSize,
+  showName = true,
 }: {
   unit: ConveyorUnit
   cellSize: number
+  showName?: boolean
 }) {
-  const direction = unit.portDirection ?? 'IN'
-  const { lines, fontSize } = pickMinimapLabelLines(
-    minimapInnerSize(cellSize, 1, 1),
-    portLabelCandidates(unit.name, direction),
-  )
-  if (lines.length === 0 || fontSize <= 0) return null
+  if (!showName) return null
+
+  const displayName = portDisplayName(unit.name)
+  const { fontSize } = pickMinimapLabelLines(minimapInnerSize(cellSize, 1, 1), [displayName])
+  if (!displayName || fontSize <= 0) return null
 
   return (
     <div
@@ -702,11 +589,7 @@ export function MinimapPortFallback({
       }}
       aria-hidden
     >
-      {lines.map((line, index) => (
-        <span key={index} className="block max-w-full truncate leading-none">
-          {line}
-        </span>
-      ))}
+      <span className="block max-w-full truncate leading-none">{displayName}</span>
     </div>
   )
 }
@@ -752,8 +635,9 @@ export function MinimapStorageLabel({
 export function MinimapFlowArrow({
   unitType,
   flow,
-  rotation,
+  rotation: _rotation,
   unitName = '',
+  showUnitName = true,
   cellSize = 40,
   hasMaterial,
   filterId,
@@ -763,6 +647,7 @@ export function MinimapFlowArrow({
       <MinimapPortFlow
         flow={flow}
         unitName={unitName}
+        showUnitName={showUnitName}
         cellSize={cellSize}
         hasMaterial={hasMaterial}
         filterId={filterId}
@@ -772,36 +657,27 @@ export function MinimapFlowArrow({
 
   const neonId = hasMaterial ? filterId : 'neon'
 
-  if (flow.role === 'start') {
-    return (
-      <FlowSvg filterId={neonId} hasMaterial={hasMaterial}>
-        <StartBadge hasMaterial={hasMaterial} filterId={neonId} />
-      </FlowSvg>
-    )
+  if (flow.role === 'start' && !flow.outDir) {
+    return null
   }
 
-  if (flow.role === 'end') {
-    return (
-      <FlowSvg filterId={neonId} hasMaterial={hasMaterial}>
-        <EndBadge hasMaterial={hasMaterial} filterId={neonId} />
-      </FlowSvg>
-    )
+  if (flow.role === 'end' && !flow.inDir) {
+    return null
   }
 
   const dir = flowDir(flow)
   if (!dir) return null
 
+  const isTurnLike = unitType === 'turn' || unitType === 'junction'
+
   return (
     <FlowSvg filterId={neonId} hasMaterial={hasMaterial}>
-      {unitType === 'turn' ? (
+      {isTurnLike ? (
         <TurnFlowArrow
           flow={flow}
-          rotation={rotation}
           hasMaterial={hasMaterial}
           filterId={neonId}
         />
-      ) : unitType === 'junction' ? (
-        <JunctionFlowArrow flow={flow} hasMaterial={hasMaterial} filterId={neonId} />
       ) : (
         <StraightFlowArrow dir={dir} hasMaterial={hasMaterial} filterId={neonId} />
       )}

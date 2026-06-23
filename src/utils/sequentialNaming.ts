@@ -1,4 +1,5 @@
 import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
+import { getEntryUnits } from './flowEntries'
 
 export const DEFAULT_CV_NAME_PREFIX = 'CV'
 export const DEFAULT_CV_PAD_WIDTH = 2
@@ -209,6 +210,72 @@ export interface SequentialNamingResult {
   disconnectedUnitIds: string[]
 }
 
+export function assignSequentialNamesFromEntries(
+  line: ConveyorLine,
+): SequentialNamingResult {
+  const entries = getEntryUnits(line)
+  if (entries.length === 0) {
+    throw new Error('시작점(투입) 컨베이어를 1개 이상 지정하세요.')
+  }
+
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  const nameById = new Map<string, string>()
+  const allOrdered: string[] = []
+  const disconnectedSet = new Set<string>()
+
+  for (const entry of entries) {
+    const { orderedUnitIds, disconnectedUnitIds } = computeFlowOrder(line, entry.id)
+    const template = resolveNamingTemplate(entry, line.units)
+    let nextNumber = template.number
+
+    for (const id of orderedUnitIds) {
+      if (!allOrdered.includes(id)) allOrdered.push(id)
+
+      const unit = unitMap.get(id)!
+      if (!receivesCvSequentialName(unit)) continue
+      if (nameById.has(id)) continue
+
+      nameById.set(id, formatSequentialName(template, nextNumber))
+      nextNumber += 1
+    }
+
+    for (const id of disconnectedUnitIds) {
+      disconnectedSet.add(id)
+    }
+  }
+
+  for (const unit of line.units) {
+    if (!allOrdered.includes(unit.id) && receivesCvSequentialName(unit)) {
+      disconnectedSet.add(unit.id)
+    }
+  }
+
+  const disconnectedUnitIds = [...disconnectedSet]
+
+  const now = new Date().toISOString()
+  const units = line.units.map((unit) => {
+    const sequentialName = receivesCvSequentialName(unit)
+      ? nameById.get(unit.id)
+      : undefined
+    if (!sequentialName) {
+      return { ...unit, updatedAt: now }
+    }
+    return {
+      ...unit,
+      name: sequentialName,
+      code: sequentialName,
+      updatedAt: now,
+    }
+  })
+
+  return {
+    line: { ...line, units, updatedAt: now, baseUnitId: null },
+    orderedUnitIds: allOrdered,
+    disconnectedUnitIds,
+  }
+}
+
+/** @deprecated assignSequentialNamesFromEntries 사용 */
 export function assignSequentialNamesFromBase(
   line: ConveyorLine,
   baseUnitId: string,
@@ -219,30 +286,17 @@ export function assignSequentialNamesFromBase(
     throw new Error('기준 컨베이어를 찾을 수 없습니다.')
   }
 
-  const { orderedUnitIds, disconnectedUnitIds } = computeFlowOrder(line, baseUnitId)
-  const template = resolveNamingTemplate(baseUnit, line.units)
-  let nextNumber = template.number
-  const nameById = new Map<string, string>()
-
-  for (const id of orderedUnitIds) {
-    const unit = unitMap.get(id)!
-    if (!receivesCvSequentialName(unit)) continue
-    nameById.set(id, formatSequentialName(template, nextNumber))
-    nextNumber += 1
+  const withEntry: ConveyorLine = {
+    ...line,
+    units: line.units.map((unit) =>
+      unit.id === baseUnitId
+        ? { ...unit, flowRole: 'entry' as const }
+        : unit.flowRole === 'entry' && unit.id !== baseUnitId
+          ? { ...unit, flowRole: null }
+          : unit,
+    ),
+    baseUnitId: null,
   }
 
-  const now = new Date().toISOString()
-  const units = line.units.map((unit) => ({
-    ...unit,
-    name: receivesCvSequentialName(unit)
-      ? (nameById.get(unit.id) ?? unit.name)
-      : unit.name,
-    updatedAt: now,
-  }))
-
-  return {
-    line: { ...line, units, updatedAt: now },
-    orderedUnitIds,
-    disconnectedUnitIds,
-  }
+  return assignSequentialNamesFromEntries(withEntry)
 }

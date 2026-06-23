@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { DEFAULT_SEMICNV_SETTINGS } from '../constants/semicnv'
 import { mergeLiveLine, mergeLiveLines } from '../semicnv/mergeLiveLine'
 import { useConveyorStore } from '../store/useConveyorStore'
@@ -41,8 +41,10 @@ export function useLiveLine(line: ConveyorLine): ConveyorLine {
   const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
   const isLive = useSemiCnvStore((s) => s.isLive)
 
-  if (!isLive) return line
-  return mergeLiveLine(line, unitStatuses, unitRuntime)
+  return useMemo(() => {
+    if (!isLive) return line
+    return mergeLiveLine(line, unitStatuses, unitRuntime)
+  }, [line, isLive, unitStatuses, unitRuntime])
 }
 
 export function useLiveLines(lines: ConveyorLine[]): ConveyorLine[] {
