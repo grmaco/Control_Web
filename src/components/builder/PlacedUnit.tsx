@@ -2,6 +2,9 @@ import { useDraggable } from '@dnd-kit/core'
 import type { ConveyorUnit, FlowRole } from '../../types/conveyor'
 import type { TurnFlowDisplay } from '../../constants/conveyorTypes'
 import { STATUS_COLORS } from '../../constants/statusColors'
+import { RollerConveyorCell } from '../monitor/RollerConveyorCell'
+import { TurnConveyorCell } from '../monitor/TurnConveyorCell'
+import { StorageConveyorCell } from '../monitor/StorageConveyorCell'
 import {
   isPortUnit,
   isStorageUnit,
@@ -56,10 +59,14 @@ export function PlacedUnit({
   const colors = STATUS_COLORS[unit.status]
   const isPort = isPortUnit(unit)
   const isStorage = isStorageUnit(unit)
+  const isTurn = unit.type === 'turn' || unit.type === 'junction'
   const spanWidth = footprint.cols * cellSize
   const spanHeight = footprint.rows * cellSize
   const flowRole = unit.flowRole ?? null
   const flowRoleLabel = formatFlowRoleLabel(flowRole)
+  const useRollerSvg  = !isStorage && !isTurn
+  const useTurnSvg    = isTurn
+  const useStorageSvg = isStorage
 
   return (
     <button
@@ -75,7 +82,7 @@ export function PlacedUnit({
         width: spanWidth,
         height: spanHeight,
       }}
-      className={`absolute top-0 left-0 flex cursor-grab flex-col items-center justify-center border p-1 text-[10px] leading-tight active:cursor-grabbing ${colors.bg} ${colors.border} ${selected ? 'ring-2 ring-inset ring-white' : ''} ${
+      className={`absolute top-0 left-0 flex cursor-grab flex-col items-center justify-center border p-1 text-[10px] leading-tight active:cursor-grabbing relative overflow-hidden ${(useRollerSvg || useTurnSvg || useStorageSvg) ? colors.border : `${colors.bg} ${colors.border}`} ${selected ? 'ring-2 ring-inset ring-white' : ''} ${
         pickHighlight === 'source'
           ? 'ring-2 ring-inset ring-cyan-300 brightness-125'
           : pickHighlight === 'target'
@@ -97,6 +104,35 @@ export function PlacedUnit({
           : unitTitle(unit, flow))
       }
     >
+      {useRollerSvg && (
+        <RollerConveyorCell
+          width={spanWidth}
+          height={spanHeight}
+          status={unit.status}
+          rotation={unit.rotation ?? 0}
+          isRunning={unit.status === 'running'}
+          uid={`builder-${unit.id}`}
+        />
+      )}
+      {useTurnSvg && (
+        <TurnConveyorCell
+          width={spanWidth}
+          height={spanHeight}
+          status={unit.status}
+          rotation={unit.rotation ?? 0}
+          isRunning={unit.status === 'running'}
+          uid={`builder-${unit.id}`}
+          isJunction={unit.type === 'junction'}
+        />
+      )}
+      {useStorageSvg && (
+        <StorageConveyorCell
+          width={spanWidth}
+          height={spanHeight}
+          status={unit.status}
+          uid={`builder-${unit.id}`}
+        />
+      )}
       {flowRole && showLabels && (
         <span
           className={`absolute top-0.5 left-0.5 rounded px-0.5 text-[8px] font-bold text-white ${flowRoleBadgeClass(flowRole)}`}
@@ -105,7 +141,7 @@ export function PlacedUnit({
         </span>
       )}
       {showLabels ? (
-        <>
+        <div className="relative z-10 flex flex-col items-center text-center">
           <span className="font-semibold text-white">{unit.name}</span>
           {isPort ? (
             <span className="text-white/70">{unit.portDirection ?? 'IN'}</span>
@@ -119,7 +155,7 @@ export function PlacedUnit({
               )}
             </>
           )}
-        </>
+        </div>
       ) : null}
     </button>
   )

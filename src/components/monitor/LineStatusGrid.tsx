@@ -19,6 +19,9 @@ import { unitHasMaterial } from '../../utils/unitMaterial'
 import { MinimapFlowArrow, MinimapPortFallback, MinimapStorageLabel } from './MinimapFlowArrow'
 import { FlowCalloutOverlay } from './FlowCalloutLayer'
 import { computeFlowCallouts } from '../../utils/flowCallouts'
+import { RollerConveyorCell } from './RollerConveyorCell'
+import { TurnConveyorCell } from './TurnConveyorCell'
+import { StorageConveyorCell } from './StorageConveyorCell'
 
 interface LineStatusGridProps {
   line: ConveyorLine
@@ -154,8 +157,8 @@ export function LineStatusGrid({
   const minY = viewport?.minY ?? 0
   const cols = viewport?.cols ?? line.gridSize.cols
   const rows = viewport?.rows ?? line.gridSize.rows
+  // 롤러 방향 애니메이션에도 필요하므로 항상 계산
   const flowByUnitId = useMemo(() => {
-    if (!showFlowArrows && !showFlowCallouts) return new Map()
     let result = computeMinimapFlowMap(line)
     if (simulationLoads.length === 0) return result
     for (const load of simulationLoads) {
@@ -167,7 +170,7 @@ export function LineStatusGrid({
       )
     }
     return result
-  }, [layoutSignature, line, showFlowArrows, showFlowCallouts, simulationLoads])
+  }, [layoutSignature, line, simulationLoads])
   const unitById = useMemo(
     () => new Map(line.units.map((unit) => [unit.id, unit])),
     [layoutSignature, line.units],
@@ -254,6 +257,11 @@ export function LineStatusGrid({
             (isSimActive || unitHasMaterial(unit, unitRuntime)),
         )
 
+        const isTurn = unit?.type === 'turn' || unit?.type === 'junction'
+        const useRollerSvg   = Boolean(unit && isAnchor && !isStorage && !isTurn)
+        const useTurnSvg     = Boolean(unit && isAnchor && isTurn)
+        const useStorageSvg  = Boolean(unit && isAnchor && isStorage)
+
         return (
           <div
             key={`${gridX}-${gridY}`}
@@ -266,15 +274,11 @@ export function LineStatusGrid({
                 : showGridLines
                   ? 'border-[0.5px]'
                   : ''
-            } ${
-              isMultiCellAnchor || flow || showMinimapPortOverlay
-                ? 'relative'
-                : ''
-            } ${
+            } relative ${
               isMultiCellAnchor
-                ? 'relative z-10 overflow-visible'
+                ? 'z-10 overflow-visible'
                 : isMultiCell && unit
-                  ? 'relative z-0 overflow-hidden'
+                  ? 'z-0 overflow-hidden'
                   : flow && !isPort
                     ? 'overflow-visible'
                     : 'overflow-hidden'
@@ -288,13 +292,51 @@ export function LineStatusGrid({
                 : ''
             } ${
               unit
-                ? `${colors!.bg} ${colors!.border} text-white`
+                ? (useRollerSvg || useTurnSvg || useStorageSvg)
+                  ? `${colors!.border} text-white`
+                  : `${colors!.bg} ${colors!.border} text-white`
                 : showGridLines
                   ? 'border-slate-800 bg-slate-900/60 text-slate-600'
                   : 'bg-slate-900/60 text-slate-600'
             }`}
             title={isAnchor && unit ? unitTitle(unit) : undefined}
           >
+            {useRollerSvg && unit && (
+              <RollerConveyorCell
+                width={spanWidth}
+                height={spanHeight}
+                status={unit.status}
+                rotation={unit.rotation ?? 0}
+                flowOutDir={
+                  (() => {
+                    const f = flowByUnitId.get(unit.id)
+                    // end 유닛은 outDir=null → inDir로 폴백
+                    return f?.outDir ?? f?.inDir ?? null
+                  })()
+                }
+                isRunning={unit.status === 'running'}
+                uid={`${unit.id}-${gridX}-${gridY}`}
+              />
+            )}
+            {useTurnSvg && unit && (
+              <TurnConveyorCell
+                width={spanWidth}
+                height={spanHeight}
+                status={unit.status}
+                rotation={unit.rotation ?? 0}
+                isRunning={unit.status === 'running'}
+                uid={`${unit.id}-${gridX}-${gridY}`}
+                isJunction={unit.type === 'junction'}
+              />
+            )}
+            {useStorageSvg && unit && (
+              <StorageConveyorCell
+                width={spanWidth}
+                height={spanHeight}
+                status={unit.status}
+                uid={`${unit.id}-${gridX}-${gridY}`}
+              />
+            )}
             {flow && unit && !isStorageUnit(unit) ? (
               <MinimapFlowArrow
                 unitType={unit.type}
@@ -340,7 +382,7 @@ export function LineStatusGrid({
                 className={`flex flex-col items-center justify-center overflow-hidden ${
                   isMultiCellAnchor
                     ? 'absolute top-0 left-0 z-10'
-                    : 'h-full w-full min-h-0 min-w-0 max-w-full'
+                    : 'relative z-10 h-full w-full min-h-0 min-w-0 max-w-full'
                 }`}
                 style={{
                   width: isMultiCellAnchor ? spanWidth : undefined,

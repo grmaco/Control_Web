@@ -32,14 +32,14 @@ export function LineMinimapPanel({ line }: { line: ConveyorLine }) {
       : 0
 
   return (
-    <div className="flex min-h-[280px] flex-col rounded border border-slate-700 bg-slate-900/80 p-4">
-      <h3 className="text-xs font-semibold tracking-wide text-slate-400">
+    <div className="flex min-h-[280px] flex-col rounded border border-slate-700 bg-slate-900/80 px-2 pt-2 pb-1">
+      <h3 className="px-1 text-xs font-semibold tracking-wide text-slate-400">
         LINE MINIMAP
       </h3>
 
       <div
         ref={containerRef}
-        className="mt-4 flex flex-1 items-center justify-center overflow-hidden"
+        className="mt-1 flex flex-1 items-center justify-center overflow-hidden"
       >
         {viewport && cellSize > 0 ? (
           <LineStatusGrid
