@@ -1,56 +1,79 @@
 import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
 import type { SemiCnvConveyorStatusItem } from '../types/semicnv'
 
-function normalizeUnitName(name: string): string {
-  return name.trim().toUpperCase().replace(/\s+/g, '')
+function normalize(name: string | undefined | null): string {
+  return (name ?? '').trim().toUpperCase().replace(/\s+/g, '')
 }
 
-/** Semi C/V numeric id → CV-012 형태 후보 */
+/** "CV01", "CV-01", "1", "001" 같은 표현에서 숫자 추출 */
+function extractNumericId(s: string | undefined | null): number | null {
+  if (!s) return null
+  const m = (s ?? '').match(/(\d+)$/)
+  return m ? parseInt(m[1], 10) : null
+}
+
+/** V3 numeric id → 가능한 이름 후보 */
 function idNameCandidates(id: number): string[] {
-  const padded = String(id).padStart(2, '0')
-  return [`CV-${padded}`, `CV-${id}`, `CV${padded}`, `CV${id}`]
+  const pad = String(id).padStart(2, '0')
+  return [`CV-${pad}`, `CV-${id}`, `CV${pad}`, `CV${id}`, String(id), pad]
+}
+
+/** unit의 name 또는 code 가 V3 item 과 매칭되는지 확인 */
+function unitMatchesItem(unit: ConveyorUnit, item: SemiCnvConveyorStatusItem): boolean {
+  // 1. semiCnvId 직접 매핑 (명시적으로 설정된 경우)
+  if (unit.semiCnvId != null && unit.semiCnvId === item.id) return true
+
+  const normalizedItemName = normalize(item.name)
+  const unitName = normalize(unit.name)
+  const unitCode = normalize(unit.code)
+
+  // 2. 이름 완전 일치
+  if (unitName && unitName === normalizedItemName) return true
+  if (unitCode && unitCode === normalizedItemName) return true
+
+  // 3. 후보명과 비교 (CV01, CV1 등 변형)
+  const candidates = idNameCandidates(item.id)
+  if (unitName && candidates.some((c) => unitName === c)) return true
+  if (unitCode && candidates.some((c) => unitCode === c)) return true
+
+  // 4. 숫자 ID 매칭 (name/code 끝 숫자만 동일하면 매칭)
+  const unitNameId = extractNumericId(unit.name)
+  const unitCodeId = extractNumericId(unit.code)
+  if (unitNameId != null && unitNameId === item.id) return true
+  if (unitCodeId != null && unitCodeId === item.id) return true
+
+  // 5. 접두사 포함 매칭
+  if (
+    unitName &&
+    normalizedItemName &&
+    (unitName.startsWith(normalizedItemName) || normalizedItemName.startsWith(unitName))
+  )
+    return true
+  if (
+    unitCode &&
+    normalizedItemName &&
+    (unitCode.startsWith(normalizedItemName) || normalizedItemName.startsWith(unitCode))
+  )
+    return true
+
+  return false
 }
 
 export function findUnitForSemiCnvStatus(
   lines: ConveyorLine[],
   item: SemiCnvConveyorStatusItem,
 ): { line: ConveyorLine; unit: ConveyorUnit } | null {
+  // 1차: lineId 가 설정된 라인 우선 탐색
   for (const line of lines) {
-    if (line.semiCnvLineId != null && line.semiCnvLineId !== item.lineId) {
-      continue
-    }
-
-    const byId = line.units.find((u) => u.semiCnvId === item.id)
-    if (byId) return { line, unit: byId }
-
-    const normalizedTarget = normalizeUnitName(item.name)
-    const byName = line.units.find(
-      (u) => normalizeUnitName(u.name) === normalizedTarget,
-    )
-    if (byName) return { line, unit: byName }
-
-    const byPrefix = line.units.find((u) => {
-      const normalized = normalizeUnitName(u.name)
-      return idNameCandidates(item.id).some(
-        (candidate) =>
-          normalized === candidate ||
-          normalized.startsWith(candidate) ||
-          normalizedTarget.startsWith(normalizeUnitName(u.name)),
-      )
-    })
-    if (byPrefix) return { line, unit: byPrefix }
+    if (line.semiCnvLineId != null && line.semiCnvLineId !== item.lineId) continue
+    const unit = line.units.find((u) => unitMatchesItem(u, item))
+    if (unit) return { line, unit }
   }
 
-  // lineId 매핑 없을 때 전체 라인에서 id/name 재탐색
+  // 2차: lineId 무시하고 전체에서 재탐색 (lineId 미설정 라인 포함)
   for (const line of lines) {
-    const byId = line.units.find((u) => u.semiCnvId === item.id)
-    if (byId) return { line, unit: byId }
-
-    const normalizedTarget = normalizeUnitName(item.name)
-    const byName = line.units.find(
-      (u) => normalizeUnitName(u.name) === normalizedTarget,
-    )
-    if (byName) return { line, unit: byName }
+    const unit = line.units.find((u) => unitMatchesItem(u, item))
+    if (unit) return { line, unit }
   }
 
   return null
@@ -60,10 +83,17 @@ export function findLineForSemiCnvLineId(
   lines: ConveyorLine[],
   semiCnvLineId: number,
 ): ConveyorLine | null {
+  // 명시적으로 semiCnvLineId 가 설정된 라인 우선
   const mapped = lines.find((line) => line.semiCnvLineId === semiCnvLineId)
   if (mapped) return mapped
 
+  // 단일 라인이면 무조건 반환
   if (lines.length === 1) return lines[0]
+
+  // semiCnvLineId 가 하나도 설정 안 된 경우 → V3 라인 인덱스 순서로 매핑
+  const noneSet = lines.every((l) => l.semiCnvLineId == null)
+  if (noneSet) return lines[semiCnvLineId] ?? null
+
   return null
 }
 
@@ -73,9 +103,12 @@ export function findUnitBySemiCnvId(
   semiCnvLineId?: number,
 ): { line: ConveyorLine; unit: ConveyorUnit } | null {
   for (const line of lines) {
-    if (semiCnvLineId != null && line.semiCnvLineId != null && line.semiCnvLineId !== semiCnvLineId) {
+    if (
+      semiCnvLineId != null &&
+      line.semiCnvLineId != null &&
+      line.semiCnvLineId !== semiCnvLineId
+    )
       continue
-    }
     const unit = line.units.find((u) => u.semiCnvId === semiCnvId)
     if (unit) return { line, unit }
   }

@@ -4,6 +4,7 @@ import { useConveyorStore } from '../../store/useConveyorStore'
 const navItems = [
   { to: '/', label: '주화면', end: true },
   { to: '/monitor', label: '모니터링' },
+  { to: '/cv-status', label: 'CV 현황' },
   { to: '/builder', label: '라인 빌더' },
   { to: '/history', label: '이력' },
 ]

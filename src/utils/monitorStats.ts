@@ -9,6 +9,7 @@ export interface LineMonitorStats {
   manualUnits: number
   errorUnits: number
   onCstUnits: number
+  /** V3 런타임 데이터가 연결된 유닛 수 */
   linkedUnits: number
   bufferUtilization: number
 }
@@ -19,14 +20,39 @@ export function computeLineStats(
 ): LineMonitorStats {
   const units = line.units
   const totalUnits = units.length
-  const runUnits = units.filter((u) => u.status === 'running').length
-  const idleUnits = units.filter((u) => u.status === 'idle').length
-  const manualUnits = units.filter((u) => u.status === 'maintenance').length
-  const errorUnits = units.filter((u) => u.status === 'error').length
-  const linkedUnits = units.filter((u) => u.interfaceUnit !== null).length
+
+  let runUnits = 0
+  let idleUnits = 0
+  let manualUnits = 0
+  let errorUnits = 0
+  let linkedUnits = 0
+
+  for (const u of units) {
+    const rt = unitRuntime[u.id]
+
+    if (rt) {
+      // V3 실시간 데이터 기준
+      linkedUnits++
+      if (rt.alarm) {
+        errorUnits++
+      } else if (rt.operationStatus === 'Manual') {
+        manualUnits++
+      } else if (rt.runStatus === 'Run') {
+        runUnits++
+      } else {
+        idleUnits++
+      }
+    } else {
+      // V3 미연결 — 빌더 설정값 폴백
+      if (u.status === 'running') runUnits++
+      else if (u.status === 'maintenance') manualUnits++
+      else if (u.status === 'error') errorUnits++
+      else idleUnits++
+    }
+  }
+
   const onCstUnits = countLineMaterialUnits(line, unitRuntime)
   const cvUnitCount = countCvUnits(line)
-
   const bufferUtilization =
     cvUnitCount === 0 ? 0 : Math.round((onCstUnits / cvUnitCount) * 100)
 

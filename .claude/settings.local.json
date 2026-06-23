@@ -3,7 +3,12 @@
     "allow": [
       "Bash(where nuget *)",
       "Bash(where dotnet *)",
-      "Bash(powershell -Command \"Test-Path 'C:\\\\Users\\\\170509\\\\Documents\\\\Semi_Conv_V3\\\\V3\\\\packages'\")"
+      "Bash(powershell -Command \"Test-Path 'C:\\\\Users\\\\170509\\\\Documents\\\\Semi_Conv_V3\\\\V3\\\\packages'\")",
+      "Bash(npm run *)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(xargs grep -ln \"all_Lines\\\\|all_Conveyors\")",
+      "PowerShell(\\(Get-Content \"C:\\\\Users\\\\170509\\\\Documents\\\\Semi_Conv_V3\\\\V3\\\\Synustech\\\\Synustech.csproj\"\\) | Select-String \"Fleck|Web\" | Select-Object LineNumber, Line)",
+      "PowerShell(\\(Get-Content \"C:\\\\Users\\\\170509\\\\Documents\\\\Semi_Conv_V3\\\\V3\\\\Synustech\\\\Synustech.csproj\"\\) | Select-Object -Index \\(90..105\\) | ForEach-Object { $_.ToString\\(\\) })"
     ]
   }
 }

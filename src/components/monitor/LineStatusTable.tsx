@@ -3,6 +3,7 @@ import { flowModeLabel } from '../../utils/monitorStats'
 import type { LineMonitorStats } from '../../utils/monitorStats'
 import { useLineCommStatuses } from '../../hooks/useLineCommStatus'
 import { formatLastReceived } from '../../semicnv/lineCommStatus'
+import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import { LineCommIndicator } from './LineCommIndicator'
 
 interface LineStatusTableProps {
@@ -21,6 +22,7 @@ export function LineStatusTable({
   powerOnByLineId,
 }: LineStatusTableProps) {
   const commByLineId = useLineCommStatuses(lines)
+  const lineRuntime = useSemiCnvStore((s) => s.lineRuntime)
 
   const columns = [
     'Line',
@@ -66,8 +68,14 @@ export function LineStatusTable({
                 linkedUnits: 0,
                 bufferUtilization: 0,
               }
-              const powerOn = powerOnByLineId[line.id] ?? false
-              const autoRun = autoRunByLineId[line.id] ?? false
+              const rt = lineRuntime[line.id]
+              // V3 런타임 우선, 없으면 로컬 컨트롤 상태 폴백
+              const powerOn = rt
+                ? rt.operationStatus === 'Auto' || rt.runningConveyors > 0
+                : (powerOnByLineId[line.id] ?? false)
+              const autoRun = rt
+                ? rt.keyStatus === 'Auto' && rt.operationStatus === 'Auto'
+                : (autoRunByLineId[line.id] ?? false)
               const selected = line.id === selectedLineId
               const comm = commByLineId[line.id]
 

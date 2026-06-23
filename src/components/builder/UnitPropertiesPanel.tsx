@@ -213,6 +213,31 @@ export function UnitPropertiesPanel({
       </div>
 
       <div>
+        <label className="mb-1 block text-xs text-slate-400">
+          V3 컨베이어 ID
+          <span className="ml-1 text-slate-600">(V3 연동 매칭용)</span>
+        </label>
+        <input
+          type="number"
+          min={0}
+          placeholder="V3 Conveyor.ID (예: 1)"
+          value={unit.semiCnvId ?? ''}
+          onChange={(e) => {
+            const val = e.target.value
+            onChange(
+              updateUnitInLine(line, unit.id, {
+                semiCnvId: val === '' ? undefined : parseInt(val, 10),
+              }),
+            )
+          }}
+          className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+        />
+        <p className="mt-1 text-xs text-slate-600">
+          설정 시 이름 매칭보다 우선 적용됩니다.
+        </p>
+      </div>
+
+      <div>
         <label className="mb-1 block text-xs text-slate-400">타입</label>
         {isPort || isStorage ? (
           <p className="rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm text-slate-200">
