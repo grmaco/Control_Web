@@ -168,9 +168,60 @@ export function UnitPropertiesPanel({
 
   if (!unit) {
     return (
-      <p className="text-sm text-slate-500">
-        유닛을 클릭해 선택하세요. 팔레트에서 그리드로 드래그해 배치할 수 있습니다.
-      </p>
+      <div className="space-y-4">
+        <p className="text-sm text-slate-500">
+          유닛을 클릭해 선택하세요. 팔레트에서 그리드로 드래그해 배치할 수 있습니다.
+        </p>
+
+        {/* ── 라인 V3 연결 설정 ── */}
+        <div className="rounded border border-slate-700 bg-slate-800/50 p-3 space-y-3">
+          <p className="text-xs font-semibold text-slate-400 tracking-wide">V3 연결 설정</p>
+
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">
+              V3 WebSocket URL
+              <span className="ml-1 text-slate-600">(이 라인 전용)</span>
+            </label>
+            <input
+              type="text"
+              placeholder="ws://10.200.30.99:8765/ws/dashboard/"
+              value={line.semiCnvWsUrl ?? ''}
+              onChange={(e) => {
+                const val = e.target.value.trim()
+                onChange({ ...line, semiCnvWsUrl: val || undefined })
+              }}
+              className="w-full rounded border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-200 placeholder-slate-600 outline-none focus:border-cyan-600"
+            />
+            <p className="mt-1 text-[10px] text-slate-600">
+              비우면 전역 설정 URL 사용
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-slate-400">
+              V3 Line ID
+              <span className="ml-1 text-slate-600">(LINE_STATUS 매핑)</span>
+            </label>
+            <input
+              type="number"
+              min={0}
+              placeholder="V3의 Line 인덱스 (0부터)"
+              value={line.semiCnvLineId ?? ''}
+              onChange={(e) => {
+                const val = e.target.value
+                onChange({
+                  ...line,
+                  semiCnvLineId: val === '' ? undefined : parseInt(val, 10),
+                })
+              }}
+              className="w-full rounded border border-slate-700 bg-slate-800 px-2 py-1.5 text-xs text-slate-200 placeholder-slate-600 outline-none focus:border-cyan-600"
+            />
+            <p className="mt-1 text-[10px] text-slate-600">
+              V3 라인 인덱스 (0, 1, 2…). 비우면 순서 자동 매핑
+            </p>
+          </div>
+        </div>
+      </div>
     )
   }
 

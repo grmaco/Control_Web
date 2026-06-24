@@ -6,6 +6,7 @@ export type SemiCnvMessageType =
   | 'LINE_STATUS'
   | 'ALARM_EVENT'
   | 'CST_TRACKING'
+  | 'IO_STATUS'
   | 'HEARTBEAT'
   | 'COMMAND'
 
@@ -96,6 +97,38 @@ export interface SemiCnvHeartbeatData {
   status: 'ALIVE'
 }
 
+/** IO_STATUS 메시지 — V3 Safety/Auto/Program 상세 데이터 */
+export interface SemiCnvIOConditionItem {
+  no: number
+  name: string
+  status: boolean
+}
+
+export interface SemiCnvProgramStatusItem {
+  item: string
+  value: string
+}
+
+export interface SemiCnvIOStatusData {
+  safetyOk: boolean
+  safetyConditions: SemiCnvIOConditionItem[]
+  autoConditionOk: boolean
+  autoConditions: SemiCnvIOConditionItem[]
+  currentStatus: string
+  programStatus: SemiCnvProgramStatusItem[]
+}
+
+/** 스토어에 저장되는 IO 상태 */
+export interface SemiCnvIOStatus {
+  safetyOk: boolean
+  safetyConditions: SemiCnvIOConditionItem[]
+  autoConditionOk: boolean
+  autoConditions: SemiCnvIOConditionItem[]
+  currentStatus: string
+  programStatus: SemiCnvProgramStatusItem[]
+  updatedAt: string
+}
+
 /** Web 대시보드 설정 (AppSettings.semiCnv) */
 export interface SemiCnvMonitorSettings {
   /** WebSocket 연동 활성화 */
@@ -178,4 +211,5 @@ export type SemiCnvMessage =
   | SemiCnvEnvelope<SemiCnvLineStatusItem[]>
   | SemiCnvEnvelope<SemiCnvAlarmEventData>
   | SemiCnvEnvelope<SemiCnvCstTrackingItem[]>
+  | SemiCnvEnvelope<SemiCnvIOStatusData>
   | SemiCnvEnvelope<SemiCnvHeartbeatData>

@@ -15,17 +15,21 @@ import { LineMinimapPanel } from './LineMinimapPanel'
 import { LineStatusTable } from './LineStatusTable'
 import { MonitorControlBar } from './MonitorControlBar'
 import { MonitorStatusPanels } from './MonitorStatusPanels'
+import { IOStatusPanels } from './IOStatusPanel'
 
 interface MonitorDashboardProps {
   line: ConveyorLine
   lines: ConveyorLine[]
   selectedLineId: string | null
+  /** true: 중간 3패널을 Safety/Auto/Program I/O 패널로 교체 */
+  showIOPanels?: boolean
 }
 
 export function MonitorDashboard({
   line,
   lines,
   selectedLineId,
+  showIOPanels = false,
 }: MonitorDashboardProps) {
   const etherCatConnected = useMonitorStore((s) => s.etherCatConnected)
   const toggleEtherCat = useMonitorStore((s) => s.toggleEtherCat)
@@ -34,6 +38,7 @@ export function MonitorDashboard({
   const getLineControl = useMonitorStore((s) => s.getLineControl)
   const lineControls = useMonitorStore((s) => s.lineControls)
   const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
+  const ioStatus = useSemiCnvStore((s) => s.ioStatus)
   const logApplication = useConveyorStore((s) => s.logApplication)
 
   const control = getLineControl(line.id)
@@ -108,11 +113,15 @@ export function MonitorDashboard({
         currentStatus={currentStatus}
       />
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <BufferStoragePanel utilization={stats.bufferUtilization} />
-        <LineMinimapPanel line={line} />
-        <AlarmHistoryPanel line={line} />
-      </div>
+      {showIOPanels ? (
+        <IOStatusPanels ioStatus={ioStatus} />
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-3">
+          <BufferStoragePanel utilization={stats.bufferUtilization} />
+          <LineMinimapPanel line={line} />
+          <AlarmHistoryPanel line={line} />
+        </div>
+      )}
 
       <LineStatusTable
         lines={lines}

@@ -8,7 +8,10 @@
       "mcp__Claude_Preview__preview_start",
       "Bash(xargs grep -ln \"all_Lines\\\\|all_Conveyors\")",
       "PowerShell(\\(Get-Content \"C:\\\\Users\\\\170509\\\\Documents\\\\Semi_Conv_V3\\\\V3\\\\Synustech\\\\Synustech.csproj\"\\) | Select-String \"Fleck|Web\" | Select-Object LineNumber, Line)",
-      "PowerShell(\\(Get-Content \"C:\\\\Users\\\\170509\\\\Documents\\\\Semi_Conv_V3\\\\V3\\\\Synustech\\\\Synustech.csproj\"\\) | Select-Object -Index \\(90..105\\) | ForEach-Object { $_.ToString\\(\\) })"
+      "PowerShell(\\(Get-Content \"C:\\\\Users\\\\170509\\\\Documents\\\\Semi_Conv_V3\\\\V3\\\\Synustech\\\\Synustech.csproj\"\\) | Select-Object -Index \\(90..105\\) | ForEach-Object { $_.ToString\\(\\) })",
+      "PowerShell(netstat -ano)",
+      "Bash(sleep 5 && cat /tmp/vite.log)",
+      "Bash(npx tsc *)"
     ]
   }
 }

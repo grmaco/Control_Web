@@ -87,6 +87,8 @@ export interface ConveyorLine {
   semiCnvLineId?: number
   /** Semi C/V 현장(Site) ID — 다중 Fab 구분용 */
   semiCnvSiteId?: string
+  /** 이 라인 전용 V3 WebSocket URL (비우면 전역 설정 사용) */
+  semiCnvWsUrl?: string
   gridSize: { cols: number; rows: number }
   units: ConveyorUnit[]
   /** @deprecated flowRole=entry 사용 — 로드 시 자동 마이그레이션 */
