@@ -142,7 +142,7 @@ export function SemiCnvConnectionBar() {
             onClick={() => setShowConfig(false)}
           />
           <div className="absolute left-0 top-6 z-50 w-80 rounded-lg border border-slate-600 bg-slate-800 p-4 shadow-xl">
-            <p className="mb-3 text-sm font-medium text-slate-200">V3 서버 연결 설정</p>
+            <p className="mb-3 text-sm font-medium text-slate-200">전역 서버 연결 설정</p>
 
             <label className="mb-1 block text-xs text-slate-400">
               WebSocket URL (V3 PC의 IP 입력)
@@ -156,8 +156,7 @@ export function SemiCnvConnectionBar() {
               className="w-full rounded border border-slate-600 bg-slate-900 px-3 py-1.5 text-xs text-slate-100 placeholder-slate-600 focus:border-blue-500 focus:outline-none"
             />
             <p className="mt-1 text-xs text-slate-500">
-              V3와 Web이 같은 PC면 <code className="text-slate-400">localhost</code>
-              , 다른 PC면 V3 PC의 IP 주소
+              라인별 URL이 없는 경우 이 URL로 연결됩니다. 같은 PC면 <code className="text-slate-400">localhost</code>, 다른 PC면 해당 PC의 IP 주소
             </p>
 
             <div className="mt-3 flex items-center justify-between">
