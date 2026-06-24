@@ -56,81 +56,79 @@ export function PlacementToolbar({
     exitUnits.length > 0 ? exitUnits.map((unit) => unit.name).join(', ') : '미지정'
 
   return (
-    <div className="mb-3 space-y-2 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="space-y-1 text-sm">
-          <div>
-            <span className="text-slate-400">투입점</span>
-            <span className="ml-2 font-medium text-amber-300">{entryLabel}</span>
-          </div>
-          <div>
-            <span className="text-slate-400">출고점</span>
-            <span className="ml-2 font-medium text-emerald-300">{exitLabel}</span>
-          </div>
+    <div className="mb-3 space-y-3 rounded-lg border border-slate-800 bg-slate-950/50 p-3">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        <div>
+          <span className="text-slate-400">투입점</span>
+          <span className="ml-2 font-medium text-amber-300">{entryLabel}</span>
         </div>
+        <div>
+          <span className="text-slate-400">출고점</span>
+          <span className="ml-2 font-medium text-emerald-300">{exitLabel}</span>
+        </div>
+      </div>
 
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={line.units.length === 0}
-            onClick={allSelected ? onClearSelection : onSelectAll}
-            className="rounded-md border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {allSelected ? '선택 해제' : '전체 선택'}
-          </button>
-          <button
-            type="button"
-            disabled={!canSetFlowRole}
-            onClick={() =>
-              selectedUnit &&
-              onSetFlowRole(
-                selectedUnit.id,
-                selectedUnit.flowRole === 'entry' ? null : 'entry',
-              )
-            }
-            className="rounded-md border border-amber-800/60 px-3 py-1.5 text-xs text-amber-200 hover:bg-amber-950/40 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {selectedUnit?.flowRole === 'entry' ? '투입 해제' : '투입 지정'}
-          </button>
-          <button
-            type="button"
-            disabled={!canSetFlowRole}
-            onClick={() =>
-              selectedUnit &&
-              onSetFlowRole(
-                selectedUnit.id,
-                selectedUnit.flowRole === 'exit' ? null : 'exit',
-              )
-            }
-            className="rounded-md border border-emerald-800/60 px-3 py-1.5 text-xs text-emerald-200 hover:bg-emerald-950/40 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            {selectedUnit?.flowRole === 'exit' ? '출고 해제' : '출고 지정'}
-          </button>
-          <button
-            type="button"
-            disabled={!canRoutingSimulation}
-            onClick={onRoutingSimulation}
-            className="rounded-md border border-violet-800/60 px-3 py-1.5 text-xs text-violet-200 hover:bg-violet-950/40 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            STK 라우팅 시뮬레이션
-          </button>
-          <button
-            type="button"
-            disabled={!routingSimulationMessage}
-            onClick={onClearRoutingSimulation}
-            className="rounded-md border border-slate-600 px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            시뮬레이션 해제
-          </button>
-          <button
-            type="button"
-            disabled={!canComplete}
-            onClick={onComplete}
-            className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            배치 완료
-          </button>
-        </div>
+      <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+        <button
+          type="button"
+          disabled={line.units.length === 0}
+          onClick={allSelected ? onClearSelection : onSelectAll}
+          className="min-h-[44px] rounded-md border border-slate-600 px-3 py-2.5 text-sm text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {allSelected ? '선택 해제' : '전체 선택'}
+        </button>
+        <button
+          type="button"
+          disabled={!canSetFlowRole}
+          onClick={() =>
+            selectedUnit &&
+            onSetFlowRole(
+              selectedUnit.id,
+              selectedUnit.flowRole === 'entry' ? null : 'entry',
+            )
+          }
+          className="min-h-[44px] rounded-md border border-amber-800/60 px-3 py-2.5 text-sm text-amber-200 hover:bg-amber-950/40 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {selectedUnit?.flowRole === 'entry' ? '투입 해제' : '투입 지정'}
+        </button>
+        <button
+          type="button"
+          disabled={!canSetFlowRole}
+          onClick={() =>
+            selectedUnit &&
+            onSetFlowRole(
+              selectedUnit.id,
+              selectedUnit.flowRole === 'exit' ? null : 'exit',
+            )
+          }
+          className="col-span-2 min-h-[44px] rounded-md border border-emerald-800/60 px-3 py-2.5 text-sm text-emerald-200 hover:bg-emerald-950/40 disabled:cursor-not-allowed disabled:opacity-40 sm:col-auto"
+        >
+          {selectedUnit?.flowRole === 'exit' ? '출고 해제' : '출고 지정'}
+        </button>
+        <button
+          type="button"
+          disabled={!canRoutingSimulation}
+          onClick={onRoutingSimulation}
+          className="col-span-2 min-h-[44px] rounded-md border border-violet-800/60 px-3 py-2.5 text-sm text-violet-200 hover:bg-violet-950/40 disabled:cursor-not-allowed disabled:opacity-40 sm:col-auto"
+        >
+          STK 라우팅 시뮬레이션
+        </button>
+        <button
+          type="button"
+          disabled={!routingSimulationMessage}
+          onClick={onClearRoutingSimulation}
+          className="min-h-[44px] rounded-md border border-slate-600 px-3 py-2.5 text-sm text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          시뮬레이션 해제
+        </button>
+        <button
+          type="button"
+          disabled={!canComplete}
+          onClick={onComplete}
+          className="min-h-[44px] rounded-md bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          배치 완료
+        </button>
       </div>
 
       <p className="text-xs leading-relaxed text-slate-500">

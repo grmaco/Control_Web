@@ -146,7 +146,7 @@ export function HistoryPage() {
             <button
               type="button"
               onClick={resetFilters}
-              className="w-full rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-700"
+              className="w-full min-h-[44px] rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 hover:bg-slate-700"
             >
               필터 초기화
             </button>

@@ -20,7 +20,7 @@ export function BuilderPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold">라인 빌더</h2>
           <p className="mt-1 text-sm text-slate-400">

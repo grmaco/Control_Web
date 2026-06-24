@@ -30,14 +30,14 @@ export function MonitorTabView({ line, lines, selectedLineId }: MonitorTabViewPr
 
   return (
     <div className="space-y-0">
-      {/* 탭 헤더 */}
-      <div className="flex border-b border-slate-700">
+      {/* 탭 헤더 — 모바일에서 가로 스크롤 */}
+      <div className="flex overflow-x-auto border-b border-slate-700 scrollbar-none">
         {TABS.map(({ key, label }) => (
           <button
             key={key}
             type="button"
             onClick={() => setActiveTab(key)}
-            className={`relative px-5 py-2.5 text-sm font-medium transition-colors ${
+            className={`relative flex-shrink-0 px-4 py-3 text-sm font-medium transition-colors sm:px-5 sm:py-2.5 ${
               activeTab === key
                 ? 'text-cyan-400 after:absolute after:bottom-0 after:left-0 after:right-0 after:h-0.5 after:bg-cyan-500'
                 : 'text-slate-400 hover:text-slate-200'

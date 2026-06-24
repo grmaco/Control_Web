@@ -81,6 +81,7 @@ export function PlacedUnit({
       style={{
         width: spanWidth,
         height: spanHeight,
+        touchAction: 'none',
       }}
       className={`absolute top-0 left-0 flex cursor-grab flex-col items-center justify-center border p-1 text-[10px] leading-tight active:cursor-grabbing relative overflow-hidden ${(useRollerSvg || useTurnSvg || useStorageSvg) ? colors.border : `${colors.bg} ${colors.border}`} ${selected ? 'ring-2 ring-inset ring-white' : ''} ${
         pickHighlight === 'source'

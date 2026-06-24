@@ -96,3 +96,9 @@ export interface MultiPathSimulationPlan {
 }
 
 export const PATH_SIMULATION_STEP_MS = 500
+/** 시작 시 출발→목적지 순차 점등 간격 */
+export const PATH_REVEAL_STEP_MS = 120
+/** 목적지 도달 후 네온 유지 시간 (시작 점등) */
+export const PATH_REVEAL_FINAL_HOLD_MS = 500
+/** 종료점 도착 후 CST On 유지 시간 */
+export const PATH_SIMULATION_END_HOLD_MS = 500

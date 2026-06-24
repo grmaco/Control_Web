@@ -38,7 +38,9 @@ interface LineStatusGridProps {
   showGridLines?: boolean
   /** 적재창고(STK) 제외 모듈 이름 숨김 */
   hideModuleNames?: boolean
-  /** 경로 시뮬레이션 — 자재(CST) 위치 (복수) */
+  /** 경로 시뮬 — 화살표 네온 점등 대상 (시작 점등 또는 현재 자재 위치) */
+  simulationNeonUnitIds?: string[]
+  /** 경로 시뮬레이션 — 자재(CST) 현재 위치 (셀 링 하이라이트) */
   simulationActiveUnitIds?: string[]
   /** 경로 시뮬레이션 — 자재별 진행 (flow 오버레이) */
   simulationLoads?: Array<{ pathUnitIds: string[]; stepIndex: number }>
@@ -125,6 +127,7 @@ export function LineStatusGrid({
   scale = 1,
   showGridLines = false,
   hideModuleNames = false,
+  simulationNeonUnitIds = [],
   simulationActiveUnitIds = [],
   simulationLoads = [],
   simulationPathUnitIds = [],
@@ -148,6 +151,10 @@ export function LineStatusGrid({
   const simulationPathSet = useMemo(
     () => new Set(simulationPathUnitIds),
     [simulationPathUnitIds],
+  )
+  const simulationNeonSet = useMemo(
+    () => new Set(simulationNeonUnitIds),
+    [simulationNeonUnitIds],
   )
   const simulationActiveSet = useMemo(
     () => new Set(simulationActiveUnitIds),
@@ -254,7 +261,7 @@ export function LineStatusGrid({
           isStorage && isMultiCellAnchor && unit != null && footprint != null
         const showSimMaterial = Boolean(
           unit &&
-            (isSimActive || unitHasMaterial(unit, unitRuntime)),
+            (simulationNeonSet.has(unit.id) || unitHasMaterial(unit, unitRuntime)),
         )
 
         const isTurn = unit?.type === 'turn' || unit?.type === 'junction'

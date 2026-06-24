@@ -53,7 +53,7 @@ function ControlButton({ label, active, onClick, onLongPress, longPressMs = 1000
       onMouseLeave={cancel}
       onTouchStart={startPress}
       onTouchEnd={endPress}
-      className={`relative min-w-[120px] rounded border px-4 py-2 text-sm font-semibold transition-colors select-none ${
+      className={`relative min-w-[120px] rounded border px-4 py-3 text-sm font-semibold transition-colors select-none sm:py-2 ${
         active
           ? 'border-blue-500 bg-blue-600 text-white shadow-[0_0_12px_rgba(37,99,235,0.45)]'
           : 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600'

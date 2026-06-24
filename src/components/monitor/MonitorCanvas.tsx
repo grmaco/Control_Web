@@ -155,11 +155,11 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
 
   return (
     <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900">
-      <div className="flex items-center justify-between border-b border-slate-800 px-4 py-2">
+      <div className="flex flex-col gap-1.5 border-b border-slate-800 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:px-4">
         <p className="text-sm text-slate-400">
           {line.name} · {viewport.cols}×{viewport.rows} · 유닛 {line.units.length}개
         </p>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-0.5 sm:gap-1">
           <ZoomButton
             label={hideModuleNames ? '이름 보기' : '이름 숨기기'}
             active={hideModuleNames}
@@ -275,7 +275,8 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             hideModuleNames={hideModuleNames}
             showFlowArrows={line.units.length > 0}
             showFlowCallouts={line.units.length > 0}
-            simulationActiveUnitIds={simulation.activeUnitIds}
+            simulationNeonUnitIds={simulation.neonUnitIds}
+            simulationActiveUnitIds={simulation.cstUnitIds}
             simulationLoads={simulation.loads.map((load) => ({
               pathUnitIds: load.pathUnitIds,
               stepIndex: load.stepIndex,
@@ -315,7 +316,7 @@ function ZoomButton({
         active
           ? 'border-cyan-500/70 text-cyan-200'
           : 'border-slate-700 text-slate-200'
-      } ${wide ? 'px-2.5 py-1' : 'h-7 w-7'}`}
+      } ${wide ? 'px-2 py-3 sm:px-2.5 sm:py-1' : 'h-11 w-11 sm:h-7 sm:w-7'}`}
     >
       {label}
     </button>

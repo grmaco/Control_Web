@@ -44,13 +44,19 @@ export function PathSimulationBar({
   onStepForward,
 }: PathSimulationBarProps) {
   const statusText =
-    status === 'playing'
-      ? '재생 중'
-      : status === 'paused'
-        ? '일시정지'
-        : status === 'complete'
-          ? '완료'
-          : '대기'
+    status === 'revealing'
+      ? '경로 점등'
+      : status === 'endHold'
+        ? '종료점 유지'
+        : status === 'playing'
+          ? '재생 중'
+          : status === 'paused'
+            ? '일시정지'
+            : status === 'complete'
+              ? '완료'
+              : '대기'
+
+  const isBusy = status === 'playing' || status === 'revealing' || status === 'endHold'
 
   const sourceLabel = mode === 'inbound' ? '투입점 (동시 출발)' : 'OUT 포트 (동시 출발)'
   const emptyHint =
@@ -78,13 +84,13 @@ export function PathSimulationBar({
         <ModeButton
           label="투입 (IN)"
           active={mode === 'inbound'}
-          disabled={status === 'playing'}
+          disabled={isBusy}
           onClick={() => onModeChange('inbound')}
         />
         <ModeButton
           label="출고 (OUT)"
           active={mode === 'outbound'}
-          disabled={status === 'playing'}
+          disabled={isBusy}
           onClick={() => onModeChange('outbound')}
         />
       </div>
@@ -107,12 +113,12 @@ export function PathSimulationBar({
                           ? 'border-amber-600/70 bg-amber-950/40 text-amber-100'
                           : 'border-cyan-600/70 bg-cyan-950/40 text-cyan-100'
                         : 'border-slate-700 bg-slate-800 text-slate-300'
-                    } ${status === 'playing' ? 'pointer-events-none opacity-50' : ''}`}
+                    } ${isBusy ? 'pointer-events-none opacity-50' : ''}`}
                   >
                     <input
                       type="checkbox"
                       checked={checked}
-                      disabled={status === 'playing'}
+                      disabled={isBusy}
                       onChange={() => onToggleSource(source.id)}
                       className={mode === 'outbound' ? 'accent-amber-400' : 'accent-cyan-400'}
                     />
@@ -127,11 +133,11 @@ export function PathSimulationBar({
         <div className="flex flex-wrap gap-1">
           <SimButton
             label="시작"
-            disabled={!canSimulate || status === 'playing'}
+            disabled={!canSimulate || isBusy}
             onClick={onStart}
             accent
           />
-          {status === 'playing' ? (
+          {isBusy ? (
             <SimButton label="일시정지" onClick={onPause} />
           ) : (
             <SimButton

@@ -2,7 +2,8 @@ import {
   DndContext,
   DragOverlay,
   MeasuringStrategy,
-  PointerSensor,
+  MouseSensor,
+  TouchSensor,
   pointerWithin,
   useSensor,
   useSensors,
@@ -10,6 +11,7 @@ import {
   type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
+import { TransformComponent, TransformWrapper } from 'react-zoom-pan-pinch'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BUILDER_PALETTE_TYPES,
@@ -110,7 +112,8 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   }, [line.id, line.name])
 
   const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } }),
   )
 
   const persist = useCallback(
@@ -452,15 +455,15 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
       onDragEnd={handleDragEnd}
       onDragCancel={handleDragCancel}
     >
-      <div className="grid gap-4 lg:grid-cols-[200px_1fr_240px]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[200px_1fr_240px]">
         <aside className="rounded-lg border border-slate-800 bg-slate-900 p-4">
           <h3 className="mb-3 text-sm font-medium text-slate-300">팔레트</h3>
-          <ul className="space-y-2">
+          <ul className="grid grid-cols-2 gap-2 lg:block lg:space-y-2">
             {PALETTE_TYPES.map((type) => (
               <PaletteItem key={type} type={type} />
             ))}
           </ul>
-          <ul className="mt-3 space-y-1 text-xs text-slate-500">
+          <ul className="mt-3 hidden space-y-1 text-xs text-slate-500 lg:block">
             {PALETTE_TYPES.map((type) => (
               <li key={type}>
                 <span className="text-slate-400">{typeLabel(type)}</span> —{' '}
@@ -503,20 +506,30 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
               출고구 CV 선택 중 — 캔버스에서 CV를 클릭하세요 (Esc 취소)
             </p>
           ) : null}
-          <div className="max-h-[520px] overflow-auto rounded border border-slate-800">
-            <div
-              className="inline-grid gap-0 select-none"
-              style={{
-                gridTemplateColumns: `repeat(${viewport.cols}, ${BUILDER_CELL_SIZE}px)`,
-                gridTemplateRows: `repeat(${viewport.rows}, ${BUILDER_CELL_SIZE}px)`,
-              }}
-              onClick={() => {
-                if (outputDestinationPickPortId) {
-                  setOutputDestinationPickPortId(null)
-                }
-                setSelectedUnitIds([])
-              }}
+          <div className="h-[520px] overflow-hidden rounded border border-slate-800 bg-slate-950">
+            <TransformWrapper
+              limitToBounds={false}
+              minScale={0.2}
+              maxScale={4}
+              smooth
+              wheel={{ step: 0.004 }}
+              panning={{ velocityDisabled: true }}
+              doubleClick={{ disabled: true }}
             >
+              <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }}>
+                <div
+                  className="inline-grid gap-0 select-none"
+                  style={{
+                    gridTemplateColumns: `repeat(${viewport.cols}, ${BUILDER_CELL_SIZE}px)`,
+                    gridTemplateRows: `repeat(${viewport.rows}, ${BUILDER_CELL_SIZE}px)`,
+                  }}
+                  onClick={() => {
+                    if (outputDestinationPickPortId) {
+                      setOutputDestinationPickPortId(null)
+                    }
+                    setSelectedUnitIds([])
+                  }}
+                >
             {Array.from({ length: viewport.cols * viewport.rows }).map((_, index) => {
               const localX = index % viewport.cols
               const localY = Math.floor(index / viewport.cols)
@@ -595,7 +608,9 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                 </GridCell>
               )
             })}
-            </div>
+                </div>
+              </TransformComponent>
+            </TransformWrapper>
           </div>
           <p className="mt-2 text-xs text-slate-500">
             배치된 영역 중심 작업 화면 · 저장 맵 {draft.gridSize.cols}×

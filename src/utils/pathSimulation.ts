@@ -7,6 +7,7 @@ import type {
 } from '../types/unitProperties'
 import { isStorageUnit } from '../constants/conveyorTypes'
 import { getEntryUnits, getExitUnits, isFlowCapableUnit } from './flowEntries'
+import { computeMinimapFlowMap, type UnitFlowDirs } from './flowDirection'
 import { computeFlowOrder } from './sequentialNaming'
 import { stkRoutingService } from '../services/StkRoutingService'
 import {
@@ -99,7 +100,58 @@ function resolveStkWithPath(
   return null
 }
 
-/** 출고점 후보 — flowRole=exit, 없으면 투입점 기준 물류 순서 꼬리 */
+/** 종료점 — flowRole=exit 또는 물류 화살표 역할 end */
+export function isSimulationEndUnit(
+  unit: ConveyorUnit | undefined,
+  flow?: UnitFlowDirs | null,
+): boolean {
+  if (!unit) return false
+  if (unit.flowRole === 'exit') return true
+  return flow?.role === 'end'
+}
+
+/** 경로를 종료점 역할 모듈에서 잘라냄 (이후 STK 등은 시뮬 제외) */
+export function truncatePathAtEndRole(
+  line: ConveyorLine,
+  pathUnitIds: string[],
+): string[] {
+  if (pathUnitIds.length === 0) return pathUnitIds
+
+  const flowMap = computeMinimapFlowMap(line)
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+
+  for (let i = 0; i < pathUnitIds.length; i += 1) {
+    const unitId = pathUnitIds[i]!
+    const unit = unitMap.get(unitId)
+    const flow = flowMap.get(unitId) ?? null
+    if (isSimulationEndUnit(unit, flow)) {
+      return pathUnitIds.slice(0, i + 1)
+    }
+  }
+
+  return pathUnitIds
+}
+
+function finalizeSimulationPath(
+  line: ConveyorLine,
+  pathUnitIds: string[],
+): string[] {
+  return truncatePathAtEndRole(line, pathUnitIds)
+}
+
+function resolvePathExitId(
+  line: ConveyorLine,
+  pathUnitIds: string[],
+): string | null {
+  if (pathUnitIds.length === 0) return null
+  const flowMap = computeMinimapFlowMap(line)
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  const lastId = pathUnitIds[pathUnitIds.length - 1]!
+  const last = unitMap.get(lastId)
+  const flow = flowMap.get(lastId) ?? null
+  return isSimulationEndUnit(last, flow) ? lastId : null
+}
+
 function resolveExitTargetIds(
   line: ConveyorLine,
   entryUnitId: string,
@@ -228,8 +280,10 @@ export function planInboundLoadPath(
     if (!resolved) continue
 
     const { stk, tail } = resolved
-    const pathUnitIds =
-      tail.length > 0 ? [...head, ...tail.slice(1)] : [...head, stk.id]
+    const pathUnitIds = finalizeSimulationPath(
+      line,
+      tail.length > 0 ? [...head, ...tail.slice(1)] : [...head, stk.id],
+    )
 
     const policy = getStkRoutingProperties(turn)?.targetStkPolicy ?? 'MANUAL_ORDER'
     const primary = stkRoutingService.resolveTargetStk(turn, line.units)
@@ -240,6 +294,7 @@ export function planInboundLoadPath(
       entryUnitId,
       routingUnitId: turn.id,
       targetStkId: stk.id,
+      targetExitId: resolvePathExitId(line, pathUnitIds),
       pathUnitIds,
       message: `${unitDisplayCode(entry)} → ${unitDisplayCode(turn)} → ${unitDisplayCode(stk)} (${policy})${altStkNote}`,
     }
@@ -247,17 +302,18 @@ export function planInboundLoadPath(
 
   if (!lineHasEnabledStk(line)) {
     const exitPlan = buildEntryToExitPath(entryUnitId, line, unitMap)
+    const pathUnitIds = finalizeSimulationPath(line, exitPlan.pathUnitIds)
     return {
       entryUnitId,
       routingUnitId: null,
       targetStkId: null,
-      targetExitId: exitPlan.exitId,
-      pathUnitIds: exitPlan.pathUnitIds,
+      targetExitId: exitPlan.exitId ?? resolvePathExitId(line, pathUnitIds),
+      pathUnitIds,
       message: exitPlan.message,
     }
   }
 
-  const pathUnitIds = buildFlowChain(entryUnitId, line, unitMap)
+  const pathUnitIds = finalizeSimulationPath(line, buildFlowChain(entryUnitId, line, unitMap))
   const last = pathUnitIds[pathUnitIds.length - 1]
   const lastUnit = last ? unitMap.get(last) : null
 
@@ -313,13 +369,14 @@ export function planOutboundLoadPath(
     bfsPath,
     isSimulationTransitPassable,
   )
+  const pathUnitIds = finalizeSimulationPath(line, built.pathUnitIds)
 
   return {
     entryUnitId: portUnitId,
     routingUnitId: null,
     targetStkId: built.stkId,
-    targetExitId: built.exitId,
-    pathUnitIds: built.pathUnitIds,
+    targetExitId: built.exitId ?? resolvePathExitId(line, pathUnitIds),
+    pathUnitIds,
     message: built.message,
     direction: 'outbound',
   }
@@ -539,4 +596,55 @@ export function activeSimulationUnitIds(loads: PathSimulationLoad[]): string[] {
     .filter((load) => !load.complete && load.pathUnitIds.length > 0)
     .map((load) => load.pathUnitIds[load.stepIndex]!)
     .filter(Boolean)
+}
+
+/** CST On 표시 — 진행 중·완료 후 종료점에 자재 위치 */
+export function simulationCstUnitIds(loads: PathSimulationLoad[]): string[] {
+  const seen = new Set<string>()
+  const ordered: string[] = []
+  for (const load of loads) {
+    if (load.pathUnitIds.length === 0) continue
+    const index = load.complete ? load.pathUnitIds.length - 1 : load.stepIndex
+    const unitId = load.pathUnitIds[index]!
+    if (!seen.has(unitId)) {
+      seen.add(unitId)
+      ordered.push(unitId)
+    }
+  }
+  return ordered
+}
+
+/** 경로 시뮬 시작 — 출발부터 revealStep까지 누적 점등 */
+export function simulationRevealUnitIds(
+  loads: PathSimulationLoad[],
+  revealSteps: Record<string, number>,
+): string[] {
+  const seen = new Set<string>()
+  const ordered: string[] = []
+  for (const load of loads) {
+    const step = revealSteps[load.id] ?? 0
+    for (let i = 0; i <= step && i < load.pathUnitIds.length; i += 1) {
+      const unitId = load.pathUnitIds[i]!
+      if (!seen.has(unitId)) {
+        seen.add(unitId)
+        ordered.push(unitId)
+      }
+    }
+  }
+  return ordered
+}
+
+/** 경로 시뮬 시작 — 각 load의 최종 유닛 ID */
+export function simulationFinalUnitIds(loads: PathSimulationLoad[]): string[] {
+  const seen = new Set<string>()
+  const ordered: string[] = []
+  for (const load of loads) {
+    if (load.pathUnitIds.length === 0) continue
+    const finalId = load.pathUnitIds[load.pathUnitIds.length - 1]!
+    if (!seen.has(finalId)) {
+      seen.add(finalId)
+      ordered.push(finalId)
+    }
+  }
+  return ordered
 }
