@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { LineSelectorPanel, useInitializeStore } from '../components/common/LineSelector'
+import { LineV3UrlSetting } from '../components/monitor/LineV3UrlSetting'
 import { MonitorTabView } from '../components/monitor/MonitorTabView'
 import { useLiveLines } from '../hooks/useSemiCnvMonitor'
 import { useConveyorStore } from '../store/useConveyorStore'
@@ -27,7 +28,10 @@ export function LineStatusPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold">라인 현황</h2>
-        <LineSelectorPanel />
+        <div className="flex items-center gap-2">
+          {selectedLine && <LineV3UrlSetting line={selectedLine} />}
+          <LineSelectorPanel />
+        </div>
       </div>
 
       {!selectedLine ? (

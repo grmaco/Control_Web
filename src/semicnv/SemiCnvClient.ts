@@ -1,4 +1,5 @@
 import {
+  SEMICNV_HEARTBEAT_TIMEOUT_MS,
   SEMICNV_RECONNECT_INITIAL_MS,
   SEMICNV_RECONNECT_MAX_MS,
 } from '../constants/semicnv'
@@ -14,8 +15,10 @@ export class SemiCnvClient {
   private url = ''
   private reconnectDelay = SEMICNV_RECONNECT_INITIAL_MS
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private heartbeatTimer: ReturnType<typeof setTimeout> | null = null
   private intentionalClose = false
   private handlers: SemiCnvClientHandlers
+  public currentState: SemiCnvConnectionState = 'disconnected'
 
   constructor(handlers: SemiCnvClientHandlers) {
     this.handlers = handlers
@@ -31,6 +34,7 @@ export class SemiCnvClient {
   disconnect(): void {
     this.intentionalClose = true
     this.clearReconnect()
+    this.clearHeartbeatTimer()
     if (this.ws) {
       this.ws.onclose = null
       this.ws.close()
@@ -59,16 +63,16 @@ export class SemiCnvClient {
 
       ws.onopen = () => {
         this.reconnectDelay = SEMICNV_RECONNECT_INITIAL_MS
+        this.currentState = 'connected'
         this.handlers.onStateChange('connected')
+        this.resetHeartbeatTimer()
       }
 
       ws.onmessage = (event) => {
+        this.resetHeartbeatTimer()
         try {
           const message = JSON.parse(String(event.data)) as SemiCnvMessage
           if (message?.type && message.siteId) {
-            if (message.type === 'LOG_EVENT') {
-              console.debug('[SemiCnv] LOG_EVENT received', message.data)
-            }
             this.handlers.onMessage(message)
           }
         } catch {
@@ -77,11 +81,14 @@ export class SemiCnvClient {
       }
 
       ws.onerror = () => {
+        this.currentState = 'error'
         this.handlers.onStateChange('error')
       }
 
       ws.onclose = () => {
         this.ws = null
+        this.clearHeartbeatTimer()
+        this.currentState = 'disconnected'
         if (this.intentionalClose) {
           this.handlers.onStateChange('disconnected')
           return
@@ -92,6 +99,30 @@ export class SemiCnvClient {
     } catch {
       this.handlers.onStateChange('error')
       this.scheduleReconnect()
+    }
+  }
+
+  // 마지막 메시지로부터 HEARTBEAT_TIMEOUT_MS 이상 무소식이면 강제 재연결
+  private resetHeartbeatTimer(): void {
+    this.clearHeartbeatTimer()
+    this.heartbeatTimer = setTimeout(() => {
+      if (this.intentionalClose) return
+      // 소켓이 살아있어도 강제 닫기 후 재연결
+      if (this.ws) {
+        this.ws.onclose = null
+        this.ws.close()
+        this.ws = null
+      }
+      this.clearHeartbeatTimer()
+      this.handlers.onStateChange('disconnected')
+      this.scheduleReconnect()
+    }, SEMICNV_HEARTBEAT_TIMEOUT_MS)
+  }
+
+  private clearHeartbeatTimer(): void {
+    if (this.heartbeatTimer) {
+      clearTimeout(this.heartbeatTimer)
+      this.heartbeatTimer = null
     }
   }
 

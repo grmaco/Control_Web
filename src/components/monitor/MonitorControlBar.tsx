@@ -6,11 +6,13 @@ interface ControlButtonProps {
   onClick?: () => void
   onLongPress?: () => void
   longPressMs?: number
+  debounceMs?: number
 }
 
-function ControlButton({ label, active, onClick, onLongPress, longPressMs = 1000 }: ControlButtonProps) {
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const firedRef = useRef(false)
+function ControlButton({ label, active, onClick, onLongPress, longPressMs = 1000, debounceMs = 1000 }: ControlButtonProps) {
+  const timerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const firedRef    = useRef(false)
+  const lastClickAt = useRef(0)
 
   const startPress = useCallback(() => {
     firedRef.current = false
@@ -28,9 +30,12 @@ function ControlButton({ label, active, onClick, onLongPress, longPressMs = 1000
       timerRef.current = null
     }
     if (!firedRef.current) {
+      const now = Date.now()
+      if (now - lastClickAt.current < debounceMs) return  // 연속 클릭 무시
+      lastClickAt.current = now
       onClick?.()
     }
-  }, [onClick])
+  }, [onClick, debounceMs])
 
   const cancel = useCallback(() => {
     if (timerRef.current) {

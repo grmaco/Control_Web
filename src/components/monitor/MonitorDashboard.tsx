@@ -87,8 +87,23 @@ export function MonitorDashboard({
     ? lrt.operationStatus === 'Auto' || lrt.runningConveyors > 0
     : control.powerOn && stats.totalUnits > 0 && stats.idleUnits === 0
 
+  // 라인에 속한 CV가 하나라도 Manual이면 All Auto Run 꺼짐
+  const allCvRuntime = useSemiCnvStore((s) => s.allCvRuntime)
+  const lineUnitSemiIds = useMemo(
+    () => new Set(line.units.map((u) => u.semiCnvId).filter((id): id is number => id != null)),
+    [line.units],
+  )
+  const allCvsAreAuto = useMemo(() => {
+    if (Object.keys(allCvRuntime).length === 0) return false
+    const lineRuntimes = Object.entries(allCvRuntime)
+      .filter(([id]) => lineUnitSemiIds.size === 0 || lineUnitSemiIds.has(Number(id)))
+      .map(([, rt]) => rt)
+    if (lineRuntimes.length === 0) return false
+    return lineRuntimes.every((rt) => rt.operationStatus === 'Auto')
+  }, [allCvRuntime, lineUnitSemiIds])
+
   const allAutoRun = lrt
-    ? lrt.keyStatus === 'Auto' && lrt.operationStatus === 'Auto'
+    ? lrt.keyStatus === 'Auto' && lrt.operationStatus === 'Auto' && allCvsAreAuto
     : control.autoRun
 
   return (

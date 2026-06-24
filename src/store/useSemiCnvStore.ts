@@ -150,12 +150,11 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
     const allLines = useConveyorStore.getState().lines
     const { settings } = get()
 
-    // sourceUrl 이 라인 전용 URL이면 → 그 라인만 대상, 아니면 전체
-    const targetLines = sourceUrl && sourceUrl !== settings.wsUrl
-      ? allLines.filter(
-          (l) => !l.semiCnvWsUrl?.trim() || l.semiCnvWsUrl.trim() === sourceUrl
-        )
-      : allLines
+    // 라인 전용 URL → 그 URL이 지정된 라인만, 전역 URL → 전용 URL 없는 라인만
+    const isPerLineUrl = sourceUrl && sourceUrl !== settings.wsUrl
+    const targetLines = isPerLineUrl
+      ? allLines.filter((l) => l.semiCnvWsUrl?.trim() === sourceUrl)
+      : allLines.filter((l) => !l.semiCnvWsUrl?.trim())
 
     applyBuffer = mergeApplyResult(
       applyBuffer,
@@ -269,16 +268,27 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
         const c = new SemiCnvClient({
           onMessage: (message) => processMessage(message, capturedUrl),
           onStateChange: (state) => {
-            // 하나라도 connected면 connected로 표시
-            const allStates = [...clients.values()].map((cl) => {
-              try { return (cl as any)._state ?? state } catch { return state }
-            })
-            const connected = state === 'connected' || allStates.some((s) => s === 'connected')
-            set({ connectionState: connected ? 'connected' : state })
+            // 클라이언트별 currentState 기준으로 전체 상태 결정
+            const anyConnected = [...clients.values()].some(
+              (cl) => cl.currentState === 'connected',
+            )
+            const anyConnecting = [...clients.values()].some(
+              (cl) => cl.currentState === 'connecting',
+            )
+            const nextConn = anyConnected
+              ? 'connected'
+              : anyConnecting
+              ? 'connecting'
+              : state  // 마지막 상태 그대로
 
+            set({ connectionState: nextConn })
+
+            // 모든 클라이언트가 끊겼을 때만 런타임 초기화
             if (state === 'disconnected') {
-              clients.delete(url)
-              if (clients.size === 0) {
+              const allDisconnected = [...clients.values()].every(
+                (cl) => cl.currentState === 'disconnected',
+              )
+              if (allDisconnected) {
                 set(clearRuntime())
                 applyBuffer = createEmptyApplyResult()
                 commTrack = createEmptyCommTrackState()

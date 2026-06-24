@@ -39,48 +39,66 @@ type FilterStatus = 'all' | 'run' | 'stop' | 'alarm' | 'manual'
 export function CvStatusPanel({
   lines,
   unitRuntime,
+  selectedLine,
 }: {
   lines: ConveyorLine[]
   unitRuntime: Record<string, SemiCnvUnitRuntime> | Record<number, SemiCnvUnitRuntime>
+  selectedLine?: ConveyorLine | null
 }) {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
   const [searchCst, setSearchCst] = useState('')
   const [searchName, setSearchName] = useState('')
 
-  // semiCnvId → { unitName, lineName, type } 역매핑 (Web 빌더에 매핑된 경우)
-  const webUnitBySemiId = useMemo(() => {
-    const map = new Map<number, { name: string; lineName: string; type: string }>()
-    for (const line of lines) {
-      for (const unit of line.units) {
-        if (unit.semiCnvId != null) {
-          map.set(unit.semiCnvId, { name: unit.name, lineName: line.name, type: unit.type })
+  // 선택 라인의 유닛을 직접 순회 → Web UUID 기반 unitRuntime 참조
+  // (두 V3가 같은 semiCnvId를 쓰더라도 Web UUID로 분리되어 충돌 없음)
+  const lineName = selectedLine?.name ?? '-'
+
+  const rows = useMemo<CvRow[]>(() => {
+    const result: CvRow[] = []
+
+    if (selectedLine) {
+      // 선택 라인: 해당 라인 유닛만 표시
+      for (const unit of selectedLine.units) {
+        const rt = (unitRuntime as Record<string, SemiCnvUnitRuntime>)[unit.id]
+        if (!rt) continue
+        result.push({
+          cvId: rt.semiCnvId,
+          name: unit.name,
+          lineName,
+          type: unit.type,
+          runStatus: rt.runStatus,
+          operationStatus: rt.operationStatus,
+          autoStatus: rt.autoStatus,
+          alarm: rt.alarm,
+          cstId: rt.cstId,
+          destination: rt.destination,
+        })
+      }
+    } else {
+      // 라인 미선택: 전체 라인 유닛 표시
+      for (const line of lines) {
+        for (const unit of line.units) {
+          const rt = (unitRuntime as Record<string, SemiCnvUnitRuntime>)[unit.id]
+          if (!rt) continue
+          result.push({
+            cvId: rt.semiCnvId,
+            name: unit.name,
+            lineName: line.name,
+            type: unit.type,
+            runStatus: rt.runStatus,
+            operationStatus: rt.operationStatus,
+            autoStatus: rt.autoStatus,
+            alarm: rt.alarm,
+            cstId: rt.cstId,
+            destination: rt.destination,
+          })
         }
       }
     }
-    return map
-  }, [lines])
 
-  // V3 unitRuntime 전체를 기준으로 행 구성
-  const rows = useMemo<CvRow[]>(() => {
-    const result: CvRow[] = []
-    for (const rt of Object.values(unitRuntime)) {
-      const web = webUnitBySemiId.get(rt.semiCnvId)
-      result.push({
-        cvId: rt.semiCnvId,
-        name: web?.name ?? `CV ${rt.semiCnvId}`,
-        lineName: web?.lineName ?? '-',
-        type: web?.type ?? '-',
-        runStatus: rt.runStatus,
-        operationStatus: rt.operationStatus,
-        autoStatus: rt.autoStatus,
-        alarm: rt.alarm,
-        cstId: rt.cstId,
-        destination: rt.destination,
-      })
-    }
     result.sort((a, b) => a.cvId - b.cvId)
     return result
-  }, [unitRuntime, webUnitBySemiId])
+  }, [unitRuntime, selectedLine, lines, lineName])
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {

@@ -24,7 +24,7 @@ interface MonitorTabViewProps {
 
 export function MonitorTabView({ line, lines, selectedLineId }: MonitorTabViewProps) {
   const [activeTab, setActiveTab] = useState<Tab>('canvas')
-  const allCvRuntime = useSemiCnvStore((s) => s.allCvRuntime)
+  const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
   const v3Logs = useSemiCnvStore((s) => s.v3Logs)
   const newLogCount = useMemo(() => v3Logs.length, [v3Logs])
 
@@ -77,7 +77,7 @@ export function MonitorTabView({ line, lines, selectedLineId }: MonitorTabViewPr
         )}
 
         {activeTab === 'cv' && (
-          <CvStatusPanel lines={lines} unitRuntime={allCvRuntime} />
+          <CvStatusPanel lines={lines} unitRuntime={unitRuntime} selectedLine={line} />
         )}
 
         {activeTab === 'v3log' && (
