@@ -17,15 +17,8 @@ export function mapSemiCnvToConveyorStatus(item: {
   if (item.alarm) return 'error'
   if (item.operationStatus === 'Manual') return 'maintenance'
   if (item.power === 'Off') return 'idle'
-  if (
-    item.runStatus === 'Run' &&
-    (item.autoStatus === 'Busy' ||
-      item.autoStatus === 'Load' ||
-      item.autoStatus === 'Unload')
-  ) {
-    return 'running'
-  }
-  if (item.autoStatus === 'Compt' && item.runStatus === 'Run') return 'running'
+  // Auto 모드이면 모터 구동 여부와 무관하게 running으로 표시
+  if (item.operationStatus === 'Auto') return 'running'
   return 'idle'
 }
 

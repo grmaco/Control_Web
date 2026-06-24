@@ -6,6 +6,7 @@ import type {
   SemiCnvIOStatus,
   SemiCnvLineCommRecord,
   SemiCnvLineRuntime,
+  SemiCnvLogEntry,
   SemiCnvMonitorSettings,
   SemiCnvMessage,
   SemiCnvSiteStatus,
@@ -28,6 +29,8 @@ import { SemiCnvMockFeed } from '../semicnv/SemiCnvMockFeed'
 import { useConveyorStore } from './useConveyorStore'
 import { useMonitorStore } from './useMonitorStore'
 
+const V3_LOG_MAX = 2000
+
 interface SemiCnvState {
   settings: SemiCnvMonitorSettings
   connectionState: SemiCnvConnectionState
@@ -36,9 +39,11 @@ interface SemiCnvState {
   commTick: number
   unitStatuses: Record<string, ConveyorStatus>
   unitRuntime: Record<string, SemiCnvUnitRuntime>
+  allCvRuntime: Record<number, SemiCnvUnitRuntime>
   lineRuntime: Record<string, SemiCnvLineRuntime>
   ioStatus: SemiCnvIOStatus | null
   liveAlarms: AlarmEntry[]
+  v3Logs: SemiCnvLogEntry[]
   isLive: boolean
 
   configure: (settings: Partial<SemiCnvMonitorSettings>) => void
@@ -46,6 +51,7 @@ interface SemiCnvState {
   disconnect: () => void
   handleMessage: (message: SemiCnvMessage) => void
   refreshCommStale: () => void
+  sendCommand: (cmd: string, extra?: Record<string, unknown>) => void
 }
 
 // url → 클라이언트 (라인별 다중 V3 연결 지원)
@@ -60,6 +66,7 @@ function mergeApplyResult(
   return {
     unitStatuses: { ...prev.unitStatuses, ...next.unitStatuses },
     unitRuntime: { ...prev.unitRuntime, ...next.unitRuntime },
+    allCvRuntime: { ...prev.allCvRuntime, ...next.allCvRuntime },
     lineRuntime: { ...prev.lineRuntime, ...next.lineRuntime },
     liveAlarms: next.liveAlarms.length > 0 ? next.liveAlarms : prev.liveAlarms,
     siteId: next.siteId ?? prev.siteId,
@@ -95,9 +102,11 @@ function clearRuntime(): Partial<SemiCnvState> {
   return {
     unitStatuses: {},
     unitRuntime: {},
+    allCvRuntime: {},
     lineRuntime: {},
     ioStatus: null,
     liveAlarms: [],
+    v3Logs: [],
     siteStatus: {},
     lineCommRecords: {},
     commTick: 0,
@@ -122,6 +131,22 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
   let commTrack: CommTrackState = createEmptyCommTrackState()
 
   const processMessage = (message: SemiCnvMessage, sourceUrl?: string) => {
+    // LOG_EVENT는 applyBuffer와 무관 — 별도 처리 후 즉시 반환
+    if (message.type === 'LOG_EVENT') {
+      const d = message.data as import('../types/semicnv').SemiCnvLogEventData
+      const entry: SemiCnvLogEntry = {
+        id: `${d.logTime}-${d.logType}-${d.title}-${Math.random()}`,
+        logTime: d.logTime,
+        logType: d.logType,
+        logLevel: d.logLevel,
+        title: d.title,
+        description: d.description,
+        receivedAt: new Date().toISOString(),
+      }
+      set((s) => ({ v3Logs: [entry, ...s.v3Logs].slice(0, V3_LOG_MAX) }))
+      return
+    }
+
     const allLines = useConveyorStore.getState().lines
     const { settings } = get()
 
@@ -141,6 +166,7 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
     const nextState: Partial<SemiCnvState> = {
       unitStatuses: applyBuffer.unitStatuses,
       unitRuntime: applyBuffer.unitRuntime,
+      allCvRuntime: applyBuffer.allCvRuntime,
       lineRuntime: applyBuffer.lineRuntime,
       liveAlarms: applyBuffer.liveAlarms,
       siteStatus: markStaleSites(commTrack.sites),
@@ -190,9 +216,11 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
     commTick: 0,
     unitStatuses: {},
     unitRuntime: {},
+    allCvRuntime: {},
     lineRuntime: {},
     ioStatus: null,
     liveAlarms: [],
+    v3Logs: [],
     isLive: false,
 
     configure: (partial) => {
@@ -282,6 +310,13 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
 
     handleMessage: (message) => {
       processMessage(message)
+    },
+
+    sendCommand: (cmd, extra = {}) => {
+      const payload = { data: { cmd, ...extra } }
+      for (const c of clients.values()) {
+        c.sendCommand(payload)
+      }
     },
   }
 })

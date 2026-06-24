@@ -63,16 +63,22 @@ export function findUnitForSemiCnvStatus(
   lines: ConveyorLine[],
   item: SemiCnvConveyorStatusItem,
 ): { line: ConveyorLine; unit: ConveyorUnit } | null {
-  // 1차: lineId 가 설정된 라인 우선 탐색
+  // 1차: semiCnvId 직접 매핑 — 전체 라인에서 가장 우선
   for (const line of lines) {
-    if (line.semiCnvLineId != null && line.semiCnvLineId !== item.lineId) continue
-    const unit = line.units.find((u) => unitMatchesItem(u, item))
+    const unit = line.units.find((u) => u.semiCnvId != null && u.semiCnvId === item.id)
     if (unit) return { line, unit }
   }
 
-  // 2차: lineId 무시하고 전체에서 재탐색 (lineId 미설정 라인 포함)
+  // 2차: lineId 가 설정된 라인에서 이름 매칭
   for (const line of lines) {
-    const unit = line.units.find((u) => unitMatchesItem(u, item))
+    if (line.semiCnvLineId != null && line.semiCnvLineId !== item.lineId) continue
+    const unit = line.units.find((u) => u.semiCnvId == null && unitMatchesItem(u, item))
+    if (unit) return { line, unit }
+  }
+
+  // 3차: lineId 무시하고 전체에서 이름 매칭
+  for (const line of lines) {
+    const unit = line.units.find((u) => u.semiCnvId == null && unitMatchesItem(u, item))
     if (unit) return { line, unit }
   }
 

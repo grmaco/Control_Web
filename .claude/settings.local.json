@@ -11,7 +11,9 @@
       "PowerShell(\\(Get-Content \"C:\\\\Users\\\\170509\\\\Documents\\\\Semi_Conv_V3\\\\V3\\\\Synustech\\\\Synustech.csproj\"\\) | Select-Object -Index \\(90..105\\) | ForEach-Object { $_.ToString\\(\\) })",
       "PowerShell(netstat -ano)",
       "Bash(sleep 5 && cat /tmp/vite.log)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(xargs cat)",
+      "Bash(xargs grep -l \"class Log\\\\b\")"
     ]
   }
 }

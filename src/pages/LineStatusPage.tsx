@@ -1,28 +1,18 @@
 import { useMemo } from 'react'
 import { LineSelectorPanel, useInitializeStore } from '../components/common/LineSelector'
-import { MonitorCanvas } from '../components/monitor/MonitorCanvas'
-import { STATUS_COLORS } from '../constants/statusColors'
-import { useLiveLine } from '../hooks/useSemiCnvMonitor'
+import { MonitorTabView } from '../components/monitor/MonitorTabView'
+import { useLiveLines } from '../hooks/useSemiCnvMonitor'
 import { useConveyorStore } from '../store/useConveyorStore'
 
-export function MonitorPage() {
+export function LineStatusPage() {
   const { isLoading, error } = useInitializeStore()
   const lines = useConveyorStore((s) => s.lines)
   const selectedLineId = useConveyorStore((s) => s.selectedLineId)
+  const liveLines = useLiveLines(lines)
 
   const selectedLine = useMemo(
-    () => lines.find((line) => line.id === selectedLineId),
-    [lines, selectedLineId],
-  )
-  const liveLine = useLiveLine(
-    selectedLine ?? {
-      id: '',
-      name: '',
-      gridSize: { cols: 0, rows: 0 },
-      units: [],
-      createdAt: '',
-      updatedAt: '',
-    },
+    () => liveLines.find((line) => line.id === selectedLineId),
+    [liveLines, selectedLineId],
   )
 
   if (isLoading) {
@@ -36,25 +26,18 @@ export function MonitorPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-semibold">모니터링</h2>
+        <h2 className="text-xl font-semibold">라인 현황</h2>
         <LineSelectorPanel />
       </div>
 
       {!selectedLine ? (
         <EmptyPanel message="표시할 라인이 없습니다. 라인 빌더에서 라인을 구성하세요." />
       ) : (
-        <>
-          <div className="flex flex-wrap gap-3 text-xs">
-            {Object.entries(STATUS_COLORS).map(([status, colors]) => (
-              <span key={status} className="flex items-center gap-1.5 text-slate-400">
-                <span className={`h-3 w-3 rounded-sm ${colors.bg}`} />
-                {colors.label}
-              </span>
-            ))}
-          </div>
-
-          <MonitorCanvas line={liveLine} />
-        </>
+        <MonitorTabView
+          line={selectedLine}
+          lines={liveLines}
+          selectedLineId={selectedLineId}
+        />
       )}
     </div>
   )

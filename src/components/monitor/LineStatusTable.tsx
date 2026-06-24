@@ -91,7 +91,7 @@ export function LineStatusTable({
                     {comm ? <LineCommIndicator comm={comm} compact /> : '-'}
                   </td>
                   <td className="px-3 py-2.5 text-slate-400">
-                    {comm?.siteId ?? line.semiCnvSiteId ?? '-'}
+                    {rt?.lineName ?? comm?.siteId ?? line.semiCnvSiteId ?? '-'}
                   </td>
                   <td className="whitespace-nowrap px-3 py-2.5 text-slate-400">
                     {formatLastReceived(comm?.lastMessageAt ?? null)}

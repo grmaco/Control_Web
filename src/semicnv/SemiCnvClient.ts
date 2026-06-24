@@ -43,6 +43,11 @@ export class SemiCnvClient {
     return this.ws?.readyState === WebSocket.OPEN
   }
 
+  sendCommand(payload: Record<string, unknown>): void {
+    if (this.ws?.readyState !== WebSocket.OPEN) return
+    this.ws.send(JSON.stringify({ type: 'COMMAND', ...payload }))
+  }
+
   private openSocket(): void {
     if (!this.url) return
 
@@ -61,6 +66,9 @@ export class SemiCnvClient {
         try {
           const message = JSON.parse(String(event.data)) as SemiCnvMessage
           if (message?.type && message.siteId) {
+            if (message.type === 'LOG_EVENT') {
+              console.debug('[SemiCnv] LOG_EVENT received', message.data)
+            }
             this.handlers.onMessage(message)
           }
         } catch {

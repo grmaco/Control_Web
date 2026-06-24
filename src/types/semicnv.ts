@@ -7,6 +7,7 @@ export type SemiCnvMessageType =
   | 'ALARM_EVENT'
   | 'CST_TRACKING'
   | 'IO_STATUS'
+  | 'LOG_EVENT'
   | 'HEARTBEAT'
   | 'COMMAND'
 
@@ -205,6 +206,26 @@ export interface SemiCnvLineRuntime {
   updatedAt: string
 }
 
+/** LOG_EVENT 메시지 — V3 로그 실시간 스트리밍 */
+export interface SemiCnvLogEventData {
+  logTime: string       // 로컬 시각 ISO8601
+  logType: string       // Application / Conveyor 1 / Master / ...
+  logLevel: string      // Normal / Warning / Error
+  title: string
+  description: string
+}
+
+/** 스토어에 저장되는 V3 로그 엔트리 */
+export interface SemiCnvLogEntry {
+  id: string            // 중복 방지용 고유 키
+  logTime: string
+  logType: string
+  logLevel: string
+  title: string
+  description: string
+  receivedAt: string
+}
+
 export type SemiCnvMessage =
   | SemiCnvEnvelope<SemiCnvSiteConnectData>
   | SemiCnvEnvelope<SemiCnvConveyorStatusItem[]>
@@ -212,4 +233,5 @@ export type SemiCnvMessage =
   | SemiCnvEnvelope<SemiCnvAlarmEventData>
   | SemiCnvEnvelope<SemiCnvCstTrackingItem[]>
   | SemiCnvEnvelope<SemiCnvIOStatusData>
+  | SemiCnvEnvelope<SemiCnvLogEventData>
   | SemiCnvEnvelope<SemiCnvHeartbeatData>

@@ -38,11 +38,16 @@ export function MonitorDashboard({
   const getLineControl = useMonitorStore((s) => s.getLineControl)
   const lineControls = useMonitorStore((s) => s.lineControls)
   const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
+  const lineRuntime = useSemiCnvStore((s) => s.lineRuntime)
   const ioStatus = useSemiCnvStore((s) => s.ioStatus)
   const logApplication = useConveyorStore((s) => s.logApplication)
 
   const control = getLineControl(line.id)
-  const stats = useMemo(() => computeLineStats(line, unitRuntime), [line, unitRuntime])
+  const lrt = lineRuntime[line.id]
+  const stats = useMemo(
+    () => computeLineStats(line, unitRuntime, lrt),
+    [line, unitRuntime, lrt],
+  )
   const safetyOk = isSafetyOk(etherCatConnected, stats)
   const autoEnabled = isAutoEnabled(safetyOk, control.powerOn, stats)
   const currentStatus = resolveCurrentStatus(stats, control.autoRun, control.powerOn)
@@ -50,68 +55,132 @@ export function MonitorDashboard({
   const statsByLineId = useMemo(
     () =>
       Object.fromEntries(
-        lines.map((item) => [item.id, computeLineStats(item, unitRuntime)]),
+        lines.map((item) => [item.id, computeLineStats(item, unitRuntime, lineRuntime[item.id])]),
       ),
-    [lines, unitRuntime],
+    [lines, unitRuntime, lineRuntime],
   )
 
   const autoRunByLineId = useMemo(
     () =>
       Object.fromEntries(
-        lines.map((item) => [item.id, lineControls[item.id]?.autoRun ?? false]),
+        lines.map((item) => {
+          const lrt2 = lineRuntime[item.id]
+          return [item.id, lrt2 ? lrt2.operationStatus === 'Auto' : (lineControls[item.id]?.autoRun ?? false)]
+        }),
       ),
-    [lines, lineControls],
+    [lines, lineRuntime, lineControls],
   )
 
   const powerOnByLineId = useMemo(
     () =>
       Object.fromEntries(
-        lines.map((item) => [item.id, lineControls[item.id]?.powerOn ?? false]),
+        lines.map((item) => {
+          const lrt2 = lineRuntime[item.id]
+          return [item.id, lrt2 ? lrt2.operationStatus === 'Auto' || lrt2.runningConveyors > 0 : (lineControls[item.id]?.powerOn ?? false)]
+        }),
       ),
-    [lines, lineControls],
+    [lines, lineRuntime, lineControls],
   )
 
-  const allPowerOn =
-    control.powerOn &&
-    stats.totalUnits > 0 &&
-    stats.idleUnits === 0
+  // V3 lineRuntime 우선, 없으면 로컬 control 폴백
+  const allPowerOn = lrt
+    ? lrt.operationStatus === 'Auto' || lrt.runningConveyors > 0
+    : control.powerOn && stats.totalUnits > 0 && stats.idleUnits === 0
+
+  const allAutoRun = lrt
+    ? lrt.keyStatus === 'Auto' && lrt.operationStatus === 'Auto'
+    : control.autoRun
 
   return (
     <div className="space-y-4">
-      <MonitorControlBar
-        etherCatConnected={etherCatConnected}
-        allPowerOn={allPowerOn}
-        onToggleEtherCat={() => {
-          toggleEtherCat()
-          void logApplication({
-            title: 'Button Click',
-            comment: `HOME: EtherCAT ${etherCatConnected ? 'OFF' : 'ON'}`,
-            lineId: line.id,
-          })
-        }}
-        onToggleAllPower={() => {
-          toggleAllPower(line.id)
-          void logApplication({
-            title: 'Button Click',
-            comment: `HOME: All Power On ${allPowerOn ? 'OFF' : 'ON'}`,
-            lineId: line.id,
-          })
-        }}
-        onAllAutoRun={() => {
-          setAllAutoRun(line.id)
-          void logApplication({
-            title: 'Button Click',
-            comment: 'HOME: All Auto Run',
-            lineId: line.id,
-          })
-        }}
-      />
+      {!showIOPanels && (
+        <MonitorControlBar
+          etherCatConnected={etherCatConnected}
+          allPowerOn={allPowerOn}
+          allAutoRun={allAutoRun}
+          onToggleEtherCat={() => {
+            toggleEtherCat()
+            void logApplication({
+              title: 'Button Click',
+              comment: `HOME: EtherCAT ${etherCatConnected ? 'OFF' : 'ON'}`,
+              lineId: line.id,
+            })
+          }}
+          onToggleAllPower={() => {
+            const isLive = useSemiCnvStore.getState().isLive
+            if (!allPowerOn && isLive) {
+              // V3 연결 상태 + OFF → V3로 Power On 명령
+              useSemiCnvStore.getState().sendCommand('all_power_on')
+              void logApplication({
+                title: 'Button Click',
+                comment: 'HOME: All Power On → V3 command',
+                lineId: line.id,
+              })
+            } else {
+              // 로컬 토글 (V3 미연결 or 이미 ON인 경우)
+              toggleAllPower(line.id)
+              void logApplication({
+                title: 'Button Click',
+                comment: `HOME: All Power On ${allPowerOn ? 'OFF' : 'ON'} (local)`,
+                lineId: line.id,
+              })
+            }
+          }}
+          onAllPowerOn={() => {
+            useSemiCnvStore.getState().sendCommand('all_power_on')
+            void logApplication({
+              title: 'Button Click',
+              comment: 'HOME: All Power On (long press)',
+              lineId: line.id,
+            })
+          }}
+          onAllAutoRun={() => {
+            const isLive = useSemiCnvStore.getState().isLive
+            if (!allAutoRun && isLive) {
+              // V3 연결 상태 + OFF → V3로 Auto Run 명령
+              useSemiCnvStore.getState().sendCommand('all_auto_run')
+              void logApplication({
+                title: 'Button Click',
+                comment: 'HOME: All Auto Run → V3 command',
+                lineId: line.id,
+              })
+            } else {
+              // 로컬 토글 (V3 미연결)
+              setAllAutoRun(line.id)
+              void logApplication({
+                title: 'Button Click',
+                comment: 'HOME: All Auto Run (local)',
+                lineId: line.id,
+              })
+            }
+          }}
+          onAllAutoStop={() => {
+            useSemiCnvStore.getState().sendCommand('all_auto_stop')
+            void logApplication({
+              title: 'Button Click',
+              comment: 'HOME: All Auto Stop (long press)',
+              lineId: line.id,
+            })
+          }}
+          onAlarmReset={() => {
+            useSemiCnvStore.getState().sendCommand('alarm_reset')
+            void logApplication({
+              title: 'Button Click',
+              comment: 'HOME: Alarm Reset',
+              lineId: line.id,
+            })
+          }}
+        />
+      )}
 
-      <MonitorStatusPanels
-        safetyOk={safetyOk}
-        autoEnabled={autoEnabled}
-        currentStatus={currentStatus}
-      />
+      {!showIOPanels && (
+        <MonitorStatusPanels
+          ioStatus={ioStatus}
+          safetyOk={safetyOk}
+          autoEnabled={autoEnabled}
+          currentStatus={currentStatus}
+        />
+      )}
 
       {showIOPanels ? (
         <IOStatusPanels ioStatus={ioStatus} />

@@ -234,6 +234,8 @@ export function assignSequentialNamesFromEntries(
       const unit = unitMap.get(id)!
       if (!receivesCvSequentialName(unit)) continue
       if (nameById.has(id)) continue
+      // V3 ID가 수동 지정된 유닛은 자동 순번 대상에서 제외
+      if (unit.semiCnvId != null) continue
 
       nameById.set(id, formatSequentialName(template, nextNumber))
       nextNumber += 1

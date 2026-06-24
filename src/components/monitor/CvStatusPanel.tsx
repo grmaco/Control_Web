@@ -41,45 +41,46 @@ export function CvStatusPanel({
   unitRuntime,
 }: {
   lines: ConveyorLine[]
-  unitRuntime: Record<string, SemiCnvUnitRuntime>
+  unitRuntime: Record<string, SemiCnvUnitRuntime> | Record<number, SemiCnvUnitRuntime>
 }) {
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
   const [searchCst, setSearchCst] = useState('')
   const [searchName, setSearchName] = useState('')
 
-  // unitRuntime을 semiCnvId → runtime 으로 인덱싱
-  const runtimeBySemiId = useMemo(() => {
-    const map = new Map<number, SemiCnvUnitRuntime>()
-    for (const rt of Object.values(unitRuntime)) {
-      map.set(rt.semiCnvId, rt)
-    }
-    return map
-  }, [unitRuntime])
-
-  const rows = useMemo<CvRow[]>(() => {
-    const result: CvRow[] = []
+  // semiCnvId → { unitName, lineName, type } 역매핑 (Web 빌더에 매핑된 경우)
+  const webUnitBySemiId = useMemo(() => {
+    const map = new Map<number, { name: string; lineName: string; type: string }>()
     for (const line of lines) {
       for (const unit of line.units) {
-        if (unit.semiCnvId == null) continue
-        const rt = runtimeBySemiId.get(unit.semiCnvId)
-        if (!rt) continue
-        result.push({
-          cvId: rt.semiCnvId,
-          name: unit.name,
-          lineName: line.name,
-          type: unit.type,
-          runStatus: rt.runStatus,
-          operationStatus: rt.operationStatus,
-          autoStatus: rt.autoStatus,
-          alarm: rt.alarm,
-          cstId: rt.cstId,
-          destination: rt.destination,
-        })
+        if (unit.semiCnvId != null) {
+          map.set(unit.semiCnvId, { name: unit.name, lineName: line.name, type: unit.type })
+        }
       }
+    }
+    return map
+  }, [lines])
+
+  // V3 unitRuntime 전체를 기준으로 행 구성
+  const rows = useMemo<CvRow[]>(() => {
+    const result: CvRow[] = []
+    for (const rt of Object.values(unitRuntime)) {
+      const web = webUnitBySemiId.get(rt.semiCnvId)
+      result.push({
+        cvId: rt.semiCnvId,
+        name: web?.name ?? `CV ${rt.semiCnvId}`,
+        lineName: web?.lineName ?? '-',
+        type: web?.type ?? '-',
+        runStatus: rt.runStatus,
+        operationStatus: rt.operationStatus,
+        autoStatus: rt.autoStatus,
+        alarm: rt.alarm,
+        cstId: rt.cstId,
+        destination: rt.destination,
+      })
     }
     result.sort((a, b) => a.cvId - b.cvId)
     return result
-  }, [lines, runtimeBySemiId])
+  }, [unitRuntime, webUnitBySemiId])
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {

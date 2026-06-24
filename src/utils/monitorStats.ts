@@ -1,5 +1,5 @@
 import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
-import type { SemiCnvUnitRuntime } from '../types/semicnv'
+import type { SemiCnvLineRuntime, SemiCnvUnitRuntime } from '../types/semicnv'
 import { countCvUnits, countLineMaterialUnits } from './unitMaterial'
 
 export interface LineMonitorStats {
@@ -17,9 +17,14 @@ export interface LineMonitorStats {
 export function computeLineStats(
   line: ConveyorLine,
   unitRuntime: Record<string, SemiCnvUnitRuntime> = {},
+  lineRt?: SemiCnvLineRuntime | null,
 ): LineMonitorStats {
   const units = line.units
   const totalUnits = units.length
+  const onCstUnits = countLineMaterialUnits(line, unitRuntime)
+  const cvUnitCount = countCvUnits(line)
+  const bufferUtilization =
+    cvUnitCount === 0 ? 0 : Math.round((onCstUnits / cvUnitCount) * 100)
 
   let runUnits = 0
   let idleUnits = 0
@@ -31,7 +36,6 @@ export function computeLineStats(
     const rt = unitRuntime[u.id]
 
     if (rt) {
-      // V3 실시간 데이터 기준
       linkedUnits++
       if (rt.alarm) {
         errorUnits++
@@ -43,7 +47,6 @@ export function computeLineStats(
         idleUnits++
       }
     } else {
-      // V3 미연결 — 빌더 설정값 폴백
       if (u.status === 'running') runUnits++
       else if (u.status === 'maintenance') manualUnits++
       else if (u.status === 'error') errorUnits++
@@ -51,10 +54,8 @@ export function computeLineStats(
     }
   }
 
-  const onCstUnits = countLineMaterialUnits(line, unitRuntime)
-  const cvUnitCount = countCvUnits(line)
-  const bufferUtilization =
-    cvUnitCount === 0 ? 0 : Math.round((onCstUnits / cvUnitCount) * 100)
+  // V3 LINE_STATUS가 연결된 경우 Linked Unit은 전체로 표시
+  if (lineRt) linkedUnits = totalUnits
 
   return {
     totalUnits,

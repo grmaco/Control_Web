@@ -1,3 +1,4 @@
+import type { SemiCnvIOStatus } from '../../types/semicnv'
 import type { CurrentStatusMode } from '../../utils/monitorStats'
 
 function StatusPanel({
@@ -25,20 +26,27 @@ function StatusPanel({
 }
 
 export function MonitorStatusPanels({
-  safetyOk,
-  autoEnabled,
-  currentStatus,
+  ioStatus,
+  safetyOk: safetyOkFallback,
+  autoEnabled: autoEnabledFallback,
+  currentStatus: currentStatusFallback,
 }: {
+  ioStatus?: SemiCnvIOStatus | null
   safetyOk: boolean
   autoEnabled: boolean
   currentStatus: CurrentStatusMode
 }) {
+  // V3에서 IO_STATUS를 받은 경우 해당 값 우선 사용
+  const safetyOk   = ioStatus != null ? ioStatus.safetyOk        : safetyOkFallback
+  const autoEnabled = ioStatus != null ? ioStatus.autoConditionOk : autoEnabledFallback
+  const currentStatusLabel = ioStatus?.currentStatus ?? currentStatusFallback
+
   const currentStatusClass =
-    currentStatus === 'Error'
-      ? 'text-red-400'
-      : currentStatus === 'Auto Run'
+    currentStatusLabel === 'Error' || currentStatusLabel === 'Idle'
+      ? currentStatusLabel === 'Error' ? 'text-red-400' : 'text-slate-300'
+      : currentStatusLabel === 'Auto Run'
         ? 'text-blue-400'
-        : currentStatus === 'Manual Mode'
+        : currentStatusLabel === 'Manual Mode'
           ? 'text-amber-400'
           : 'text-slate-300'
 
@@ -58,7 +66,7 @@ export function MonitorStatusPanels({
       />
       <StatusPanel
         title="CURRENT STATUS"
-        value={currentStatus}
+        value={currentStatusLabel}
         valueClass={currentStatusClass}
         checks={['RUN Check, IN/OUT Mode Check']}
       />

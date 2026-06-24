@@ -21,6 +21,8 @@ import {
 export interface SemiCnvApplyResult {
   unitStatuses: Record<string, ConveyorStatus>
   unitRuntime: Record<string, SemiCnvUnitRuntime>
+  /** V3에서 받은 모든 CV 런타임 — semiCnvId 기준, 매칭 여부 무관 */
+  allCvRuntime: Record<number, SemiCnvUnitRuntime>
   lineRuntime: Record<string, SemiCnvLineRuntime>
   liveAlarms: AlarmEntry[]
   siteId: string | null
@@ -35,6 +37,7 @@ export function createEmptyApplyResult(): SemiCnvApplyResult {
   return {
     unitStatuses: {},
     unitRuntime: {},
+    allCvRuntime: {},
     lineRuntime: {},
     liveAlarms: [],
     siteId: null,
@@ -103,17 +106,21 @@ function applyConveyorStatus(
 ): SemiCnvApplyResult {
   const unitStatuses = { ...prev.unitStatuses }
   const unitRuntime = { ...prev.unitRuntime }
+  const allCvRuntime = { ...prev.allCvRuntime }
 
   for (const item of message.data) {
+    const { status, runtime } = toUnitRuntime(item)
+
+    // 매칭 여부와 무관하게 semiCnvId 기준으로 전체 저장
+    allCvRuntime[item.id] = runtime
+
     const matched = findUnitForSemiCnvStatus(lines, item)
     if (!matched) continue
-
-    const { status, runtime } = toUnitRuntime(item)
     unitStatuses[matched.unit.id] = status
     unitRuntime[matched.unit.id] = runtime
   }
 
-  return { ...prev, unitStatuses, unitRuntime }
+  return { ...prev, unitStatuses, unitRuntime, allCvRuntime }
 }
 
 function applyLineStatus(
