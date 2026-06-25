@@ -10,12 +10,13 @@ import {
   flowEntryDir,
   flowExitDir,
   overlaySimulationPathOnFlowMap,
+  simulationPathFlowRole,
   type UnitFlowDirs,
 } from '../../utils/flowDirection'
 import { getUnitFootprint, footprintBorderClasses, isUnitAnchor } from '../../utils/unitFootprint'
 import { lineLayoutSignature } from '../../utils/lineLayoutSignature'
 import { buildUnitLabelLines, LABEL_LINE_HEIGHT } from '../../utils/monitorLabel'
-import { unitHasMaterial } from '../../utils/unitMaterial'
+import { unitShowsMinimapMaterial } from '../../utils/unitMaterial'
 import { MinimapFlowArrow, MinimapPortFallback, MinimapStorageLabel } from './MinimapFlowArrow'
 import { FlowCalloutOverlay } from './FlowCalloutLayer'
 import { computeFlowCallouts } from '../../utils/flowCallouts'
@@ -42,6 +43,9 @@ interface LineStatusGridProps {
   simulationNeonUnitIds?: string[]
   /** 경로 시뮬레이션 — 자재(CST) 현재 위치 (셀 링 하이라이트) */
   simulationActiveUnitIds?: string[]
+  /** 시뮬 중 출발 칸에만 남는 테스트 자재 (이동 시작 후 제외) */
+  simulationStaticTestMaterialUnitIds?: string[]
+  simulationInProgress?: boolean
   /** 경로 시뮬레이션 — 자재별 진행 (flow 오버레이) */
   simulationLoads?: Array<{ pathUnitIds: string[]; stepIndex: number }>
   /** 경로 시뮬레이션 — 계획 경로 하이라이트 */
@@ -59,13 +63,13 @@ function resolveSimulationUnitFlow(
   simulationLoads: Array<{ pathUnitIds: string[]; stepIndex: number }>,
   flowMap: Map<string, UnitFlowDirs>,
 ): UnitFlowDirs | null {
-  const activeLoad = simulationLoads.find(
-    (load) => load.pathUnitIds[load.stepIndex] === unitId,
-  )
+  const activeLoad = [...simulationLoads]
+    .reverse()
+    .find((load) => load.pathUnitIds[load.stepIndex] === unitId)
   if (!activeLoad) return flowMap.get(unitId) ?? null
 
-  const pathIndex = activeLoad.pathUnitIds.indexOf(unitId)
-  if (pathIndex < 0 || pathIndex > activeLoad.stepIndex) {
+  const pathIndex = activeLoad.stepIndex
+  if (activeLoad.pathUnitIds[pathIndex] !== unitId) {
     return flowMap.get(unitId) ?? null
   }
 
@@ -88,17 +92,12 @@ function resolveSimulationUnitFlow(
   const outDir = next ? flowExitDir(unit, next) : null
   if (!inDir && !outDir) return flowMap.get(unitId) ?? null
 
-  let role: UnitFlowDirs['role'] = 'single'
-  if (inDir && outDir) role = 'through'
-  else if (!inDir && outDir) role = 'start'
-  else if (inDir && !outDir) role = 'end'
-
   const existing = flowMap.get(unitId)
   return {
     inDir,
     outDir,
     cvNumber: existing?.cvNumber ?? null,
-    role,
+    role: simulationPathFlowRole(unit, inDir, outDir, existing),
     portDirection: existing?.portDirection,
   }
 }
@@ -129,6 +128,8 @@ export function LineStatusGrid({
   hideModuleNames = false,
   simulationNeonUnitIds = [],
   simulationActiveUnitIds = [],
+  simulationStaticTestMaterialUnitIds = [],
+  simulationInProgress = false,
   simulationLoads = [],
   simulationPathUnitIds = [],
   onCalloutPanLockChange,
@@ -160,6 +161,10 @@ export function LineStatusGrid({
     () => new Set(simulationActiveUnitIds),
     [simulationActiveUnitIds],
   )
+  const staticTestMaterialSet = useMemo(
+    () => new Set(simulationStaticTestMaterialUnitIds),
+    [simulationStaticTestMaterialUnitIds],
+  )
   const minX = viewport?.minX ?? 0
   const minY = viewport?.minY ?? 0
   const cols = viewport?.cols ?? line.gridSize.cols
@@ -168,7 +173,8 @@ export function LineStatusGrid({
   const flowByUnitId = useMemo(() => {
     let result = computeMinimapFlowMap(line)
     if (simulationLoads.length === 0) return result
-    for (const load of simulationLoads) {
+    const sortedLoads = [...simulationLoads].sort((a, b) => a.stepIndex - b.stepIndex)
+    for (const load of sortedLoads) {
       result = overlaySimulationPathOnFlowMap(
         line,
         result,
@@ -229,7 +235,9 @@ export function LineStatusGrid({
         const isPort = unit != null && isPortUnit(unit)
         const flow =
           unit && isAnchor && showFlowArrows
-            ? resolveSimulationUnitFlow(line, unit.id, simulationLoads, flowByUnitId)
+            ? resolveSimulationUnitFlow(line, unit.id, simulationLoads, flowByUnitId) ??
+              flowByUnitId.get(unit.id) ??
+              null
             : null
         const showMinimapPortOverlay =
           showFlowArrows && isAnchor && isPort
@@ -261,7 +269,11 @@ export function LineStatusGrid({
           isStorage && isMultiCellAnchor && unit != null && footprint != null
         const showSimMaterial = Boolean(
           unit &&
-            (simulationNeonSet.has(unit.id) || unitHasMaterial(unit, unitRuntime)),
+            unitShowsMinimapMaterial(unit, unitRuntime, {
+              simulating: simulationInProgress,
+              simulationCstActive: simulationNeonSet.has(unit.id),
+              staticTestAtOrigin: staticTestMaterialSet.has(unit.id),
+            }),
         )
 
         const isTurn = unit?.type === 'turn' || unit?.type === 'junction'
@@ -336,6 +348,12 @@ export function LineStatusGrid({
                 isJunction={unit.type === 'junction'}
               />
             )}
+            {useTurnSvg && unit && showSimMaterial && !flow ? (
+              <div
+                className="pointer-events-none absolute inset-1 z-[6] rounded-sm ring-2 ring-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.75)]"
+                aria-hidden
+              />
+            ) : null}
             {useStorageSvg && unit && (
               <StorageConveyorCell
                 width={spanWidth}
@@ -432,6 +450,8 @@ export function LineStatusGrid({
           onPanLockChange={onCalloutPanLockChange}
           deselectToken={calloutDeselectToken}
           activeUnitIds={simulationActiveSet}
+          staticTestMaterialUnitIds={staticTestMaterialSet}
+          simulating={simulationInProgress}
         />
       ) : null}
     </div>

@@ -23,6 +23,23 @@ export interface UnitFlowDirs {
   portDirection?: PortDirection | null
 }
 
+/** 시뮬 경로 구간 역할 — flowRole=entry/exit만 시작·종료점 배지 */
+export function simulationPathFlowRole(
+  unit: ConveyorUnit,
+  inDir: FlowDir | null,
+  outDir: FlowDir | null,
+  existing?: UnitFlowDirs | null,
+): UnitFlowDirs['role'] {
+  if (inDir && outDir) return 'through'
+  if (!inDir && outDir) {
+    return unit.flowRole === 'entry' ? 'start' : (existing?.role ?? 'through')
+  }
+  if (inDir && !outDir) {
+    return unit.flowRole === 'exit' ? 'end' : (existing?.role ?? 'through')
+  }
+  return existing?.role ?? 'single'
+}
+
 const FLOW_ARROW_TYPES = new Set<ConveyorType>([
   'straight',
   'turn',
@@ -749,10 +766,7 @@ export function overlaySimulationPathOnFlowMap(
     if (!inDir && !outDir) continue
 
     const existing = base.get(unitId)
-    let role: UnitFlowDirs['role'] = 'single'
-    if (inDir && outDir) role = 'through'
-    else if (!inDir && outDir) role = 'start'
-    else if (inDir && !outDir) role = 'end'
+    const role = simulationPathFlowRole(unit, inDir, outDir, existing)
 
     result.set(unitId, {
       inDir,

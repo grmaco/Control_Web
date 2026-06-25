@@ -28,6 +28,8 @@ interface FlowCalloutOverlayProps {
   onSavePositions: (positions: Record<string, FlowCalloutPosition>) => void
   onPanLockChange?: (locked: boolean) => void
   activeUnitIds?: Set<string>
+  staticTestMaterialUnitIds?: Set<string>
+  simulating?: boolean
   /** 증가 시 선택 해제 (시뮬레이션 초기화 등) */
   deselectToken?: number
 }
@@ -44,6 +46,8 @@ export function FlowCalloutOverlay({
   onSavePositions,
   onPanLockChange,
   activeUnitIds,
+  staticTestMaterialUnitIds,
+  simulating = false,
   deselectToken = 0,
 }: FlowCalloutOverlayProps) {
   const [positions, setPositions] = useState<Record<string, FlowCalloutPosition>>(() =>
@@ -142,6 +146,11 @@ export function FlowCalloutOverlay({
                 flow,
                 unitRuntime,
                 activeUnitIds?.has(callout.unitId) ?? false,
+                {
+                  simulating,
+                  staticTestAtOrigin:
+                    staticTestMaterialUnitIds?.has(callout.unitId) ?? false,
+                },
               )
             : null
         const pos = positions[callout.unitId] ?? {

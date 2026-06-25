@@ -22,6 +22,27 @@ export function unitHasMaterial(
   return Boolean(cstId && cstId.trim())
 }
 
+/** 미니맵 자재(CST) 네온 — 시뮬 중 테스트 자재는 이동 위치만 표시 */
+export function unitShowsMinimapMaterial(
+  unit: Pick<ConveyorUnit, 'id' | 'testMaterial'>,
+  unitRuntime: Record<string, SemiCnvUnitRuntime>,
+  options: {
+    simulating: boolean
+    simulationCstActive: boolean
+    staticTestAtOrigin: boolean
+  },
+): boolean {
+  if (options.simulationCstActive) return true
+
+  if (unit.testMaterial === 1) {
+    if (options.simulating) return options.staticTestAtOrigin
+    return true
+  }
+
+  const cstId = unitRuntime[unit.id]?.cstId
+  return Boolean(cstId && cstId.trim())
+}
+
 /** 라인 내 CST(자재) 보유 모듈 수 */
 export function countLineMaterialUnits(
   line: ConveyorLine,

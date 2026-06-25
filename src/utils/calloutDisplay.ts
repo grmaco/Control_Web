@@ -4,7 +4,6 @@ import { STATUS_COLORS } from '../constants/statusColors'
 import type { UnitFlowDirs } from './flowDirection'
 import { formatTurnFlowAngleLabel } from './turnArc'
 import { collectCalloutTags } from './flowCallouts'
-import { unitHasMaterial } from './unitMaterial'
 
 export interface CalloutDisplayInfo {
   name: string
@@ -46,11 +45,21 @@ export function buildCalloutDisplayInfo(
   unit: ConveyorUnit,
   flow: UnitFlowDirs | undefined,
   unitRuntime: Record<string, SemiCnvUnitRuntime>,
-  simulationActive: boolean,
+  simulationCstActive: boolean,
+  options?: { staticTestAtOrigin?: boolean; simulating?: boolean },
 ): CalloutDisplayInfo {
   const tags = flow ? collectCalloutTags(unit, flow) : []
   const role = tags.length > 0 ? tags.map((tag) => tag.text).join(' · ') : '—'
-  const hasCst = simulationActive || unitHasMaterial(unit, unitRuntime)
+  const simulating = options?.simulating ?? false
+  const staticTestAtOrigin = options?.staticTestAtOrigin ?? unit.testMaterial === 1
+  const hasCst =
+    simulationCstActive ||
+    (unit.testMaterial === 1
+      ? simulating
+        ? staticTestAtOrigin
+        : true
+      : false) ||
+    Boolean(unitRuntime[unit.id]?.cstId?.trim())
   const cstId = unitRuntime[unit.id]?.cstId?.trim()
 
   return {

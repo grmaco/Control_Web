@@ -15,8 +15,14 @@ interface PathSimulationBarProps {
   status: PathSimulationStatus
   progressLabel: string | null
   canSimulate: boolean
+  testMaterialCount?: number
   activeUnitLabel: string | null
   waitingLabels: string[]
+  inputIntervalSec: number
+  dischargeIntervalSec: number
+  onInputIntervalSecChange: (value: number) => void
+  onDischargeIntervalSecChange: (value: number) => void
+  incompleteLoadCount?: number
   onStart: () => void
   onPause: () => void
   onResume: () => void
@@ -35,8 +41,14 @@ export function PathSimulationBar({
   status,
   progressLabel,
   canSimulate,
+  testMaterialCount = 0,
   activeUnitLabel,
   waitingLabels,
+  inputIntervalSec,
+  dischargeIntervalSec,
+  onInputIntervalSecChange,
+  onDischargeIntervalSecChange,
+  incompleteLoadCount = 0,
   onStart,
   onPause,
   onResume,
@@ -75,8 +87,25 @@ export function PathSimulationBar({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm font-medium text-slate-200">경로 시뮬레이션</div>
         <span className="text-xs text-slate-500">
-          모듈 이동 간격 {PATH_SIMULATION_STEP_MS / 1000}초 · 비가동(대기/점검/오류) 우회
+          이동 {PATH_SIMULATION_STEP_MS / 1000}초/모듈 · 비가동(대기/점검/오류) 우회
         </span>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-4">
+        <TimingField
+          label="투입 시간 (초)"
+          hint="시작점(출발 모듈) 체류만 적용"
+          value={inputIntervalSec}
+          disabled={isBusy}
+          onChange={onInputIntervalSecChange}
+        />
+        <TimingField
+          label="출고 시간 (초)"
+          hint="종료점(출고 모듈) 체류만 적용"
+          value={dischargeIntervalSec}
+          disabled={isBusy}
+          onChange={onDischargeIntervalSecChange}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -174,11 +203,26 @@ export function PathSimulationBar({
             · <span className="text-amber-300">{setupHint}</span>
           </>
         ) : null}
+        {testMaterialCount > 0 ? (
+          <>
+            {' '}
+            · <span className="text-cyan-300">
+              테스트 자재 {testMaterialCount}개 출고 포함
+            </span>
+          </>
+        ) : null}
         {activeUnitLabel ? (
           <>
             {' '}
             · <span className="text-slate-500">자재</span>{' '}
             <span className="text-emerald-300">{activeUnitLabel}</span>
+          </>
+        ) : null}
+        {incompleteLoadCount > 0 && status !== 'idle' ? (
+          <>
+            {' '}
+            · <span className="text-slate-500">잔여 자재</span>{' '}
+            <span className="text-violet-300">{incompleteLoadCount}개</span>
           </>
         ) : null}
         {waitingLabels.length > 0 ? (
@@ -190,6 +234,40 @@ export function PathSimulationBar({
         ) : null}
       </div>
     </div>
+  )
+}
+
+function TimingField({
+  label,
+  hint,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string
+  hint: string
+  value: number
+  disabled?: boolean
+  onChange: (value: number) => void
+}) {
+  return (
+    <label className="block text-xs text-slate-400">
+      <span className="mb-1 block">{label}</span>
+      <input
+        type="number"
+        min={0.1}
+        max={60}
+        step={0.1}
+        disabled={disabled}
+        value={value}
+        onChange={(e) => {
+          const next = Number(e.target.value)
+          if (Number.isFinite(next) && next >= 0.1) onChange(next)
+        }}
+        className="w-24 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100 disabled:opacity-50"
+      />
+      <span className="mt-0.5 block text-[10px] text-slate-600">{hint}</span>
+    </label>
   )
 }
 

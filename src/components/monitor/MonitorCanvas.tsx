@@ -62,7 +62,28 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   const hideModuleNames = useMonitorStore((s) => s.hideModuleNames)
   const toggleHideModuleNames = useMonitorStore((s) => s.toggleHideModuleNames)
   const logApplication = useConveyorStore((s) => s.logApplication)
-  const simulation = usePathSimulation(line)
+  const saveLine = useConveyorStore((s) => s.saveLine)
+  const simulation = usePathSimulation(line, {
+    onClearTestMaterial: useCallback(
+      (unitIds: string[]) => {
+        const clearSet = new Set(unitIds)
+        const hasMaterial = line.units.some(
+          (unit) => clearSet.has(unit.id) && unit.testMaterial === 1,
+        )
+        if (!hasMaterial) return
+
+        const now = new Date().toISOString()
+        void saveLine({
+          ...line,
+          units: line.units.map((unit) =>
+            clearSet.has(unit.id) ? { ...unit, testMaterial: 0, updatedAt: now } : unit,
+          ),
+          updatedAt: now,
+        })
+      },
+      [line, saveLine],
+    ),
+  })
 
   const initialTransform = useMemo(() => {
     if (isSavedViewValid(savedView, layoutSignature)) {
@@ -222,8 +243,14 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
         status={simulation.status}
         progressLabel={simulation.progressLabel}
         canSimulate={simulation.canSimulate}
+        testMaterialCount={simulation.testMaterialUnits.length}
         activeUnitLabel={simulation.activeUnitLabel}
         waitingLabels={simulation.waitingLabels}
+        inputIntervalSec={simulation.inputIntervalSec}
+        dischargeIntervalSec={simulation.dischargeIntervalSec}
+        onInputIntervalSecChange={simulation.setInputIntervalSec}
+        onDischargeIntervalSecChange={simulation.setDischargeIntervalSec}
+        incompleteLoadCount={simulation.incompleteLoadCount}
         onStart={() => {
           simulation.start()
           logButton('Path Simulation Start')
@@ -277,10 +304,28 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             showFlowCallouts={line.units.length > 0}
             simulationNeonUnitIds={simulation.neonUnitIds}
             simulationActiveUnitIds={simulation.cstUnitIds}
-            simulationLoads={simulation.loads.map((load) => ({
-              pathUnitIds: load.pathUnitIds,
-              stepIndex: load.stepIndex,
-            }))}
+            simulationStaticTestMaterialUnitIds={[
+              ...simulation.staticTestMaterialUnitIds,
+            ]}
+            simulationInProgress={
+              simulation.status !== 'idle' && simulation.status !== 'complete'
+            }
+            simulationLoads={
+              simulation.status === 'revealing' ||
+              simulation.status === 'playing' ||
+              simulation.status === 'paused' ||
+              simulation.status === 'endHold'
+                ? simulation.loads
+                    .filter(
+                      (load) =>
+                        !load.complete || simulation.status === 'endHold',
+                    )
+                    .map((load) => ({
+                      pathUnitIds: load.pathUnitIds,
+                      stepIndex: load.stepIndex,
+                    }))
+                : []
+            }
             simulationPathUnitIds={simulation.pathUnitIds}
             onCalloutPanLockChange={setCalloutPanLock}
             calloutDeselectToken={calloutDeselectToken}

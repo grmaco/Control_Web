@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ConveyorLine } from '../types/conveyor'
 import type { MultiPathSimulationPlan, PathSimulationLoad } from '../types/unitProperties'
 import {
+  DEFAULT_SIM_DISCHARGE_INTERVAL_SEC,
+  DEFAULT_SIM_INPUT_INTERVAL_SEC,
   PATH_REVEAL_FINAL_HOLD_MS,
   PATH_REVEAL_STEP_MS,
   PATH_SIMULATION_END_HOLD_MS,
@@ -9,14 +11,22 @@ import {
 } from '../types/unitProperties'
 import {
   activeSimulationUnitIds,
-  advanceSimulationLoads,
+  applySimulationStep,
+  areAllSimulationLoadsFinished,
+  countIncompleteSimulationLoads,
+  initializeParallelLoads,
+  isLoadFullyDischarged,
   listSimulatableEntries,
   listSimulatableOutboundPorts,
+  listTestMaterialUnits,
   lineHasEnabledStk,
+  mergeMultiPathSimulationPlans,
   planMultiInboundLoadPaths,
   planMultiOutboundLoadPaths,
+  planMultiTestMaterialLoadPaths,
   simulationCstUnitIds,
   simulationRevealUnitIds,
+  staticTestMaterialOriginUnitIds,
   unionSimulationPathUnitIds,
 } from '../utils/pathSimulation'
 
@@ -29,7 +39,15 @@ export type PathSimulationStatus =
   | 'complete'
 export type PathSimulationMode = 'inbound' | 'outbound'
 
-export function usePathSimulation(line: ConveyorLine) {
+interface UsePathSimulationOptions {
+  /** 테스트 자재 출고 완료 시 testMaterial 플래그 제거 */
+  onClearTestMaterial?: (unitIds: string[]) => void
+}
+
+export function usePathSimulation(
+  line: ConveyorLine,
+  options: UsePathSimulationOptions = {},
+) {
   const [mode, setMode] = useState<PathSimulationMode>('inbound')
   const inboundEntries = useMemo(() => listSimulatableEntries(line), [line])
   const conveyorOnlyLine = useMemo(() => !lineHasEnabledStk(line), [line])
@@ -50,6 +68,23 @@ export function usePathSimulation(line: ConveyorLine) {
   const revealTimerRef = useRef<number | null>(null)
   const finalHoldTimerRef = useRef<number | null>(null)
   const endHoldTimerRef = useRef<number | null>(null)
+  const clearedTestMaterialLoadIdsRef = useRef<Set<string>>(new Set())
+  const pendingTestMaterialClearRef = useRef<Set<string>>(new Set())
+  const sessionLoadIdsRef = useRef<string[]>([])
+  const [inputIntervalSec, setInputIntervalSec] = useState(DEFAULT_SIM_INPUT_INTERVAL_SEC)
+  const [dischargeIntervalSec, setDischargeIntervalSec] = useState(
+    DEFAULT_SIM_DISCHARGE_INTERVAL_SEC,
+  )
+
+  const stepTiming = useMemo(
+    () => ({ inputIntervalSec, dischargeIntervalSec }),
+    [dischargeIntervalSec, inputIntervalSec],
+  )
+
+  const sourceIdsKey = useMemo(
+    () => [...sourceIds].sort().join('|'),
+    [sourceIds],
+  )
 
   useEffect(() => {
     setSelectedSourceUnitIds((current) => {
@@ -57,13 +92,19 @@ export function usePathSimulation(line: ConveyorLine) {
       if (kept.length > 0) return kept
       return sourceIds
     })
+  }, [sourceIds, sourceIdsKey])
+
+  useEffect(() => {
     setPlan(null)
     setLoads([])
     setRevealSteps({})
     setFinalHoldActive(false)
     setEndHoldActive(false)
+    clearedTestMaterialLoadIdsRef.current = new Set()
+    pendingTestMaterialClearRef.current = new Set()
+    sessionLoadIdsRef.current = []
     setStatus('idle')
-  }, [line.id, mode, sourceIds])
+  }, [line.id, mode])
 
   const clearTimer = useCallback(() => {
     if (timerRef.current != null) {
@@ -100,15 +141,32 @@ export function usePathSimulation(line: ConveyorLine) {
     clearEndHoldTimer()
   }, [clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTimer])
 
+  const testMaterialUnits = useMemo(() => listTestMaterialUnits(line), [line])
+
   const rebuildPlan = useCallback((): MultiPathSimulationPlan | null => {
-    if (selectedSourceUnitIds.length === 0) return null
-    return mode === 'inbound'
-      ? planMultiInboundLoadPaths(line, selectedSourceUnitIds)
-      : planMultiOutboundLoadPaths(line, selectedSourceUnitIds)
+    const primary =
+      selectedSourceUnitIds.length === 0
+        ? { loads: [], message: '' }
+        : mode === 'inbound'
+          ? planMultiInboundLoadPaths(line, selectedSourceUnitIds)
+          : planMultiOutboundLoadPaths(line, selectedSourceUnitIds)
+
+    const testMaterialPlan = planMultiTestMaterialLoadPaths(line)
+    const merged = mergeMultiPathSimulationPlans(primary, testMaterialPlan)
+
+    if (merged.loads.length === 0) return null
+    return merged
   }, [line, mode, selectedSourceUnitIds])
 
   const allLoadsComplete = useCallback((nextLoads: PathSimulationLoad[]) => {
-    return nextLoads.length > 0 && nextLoads.every((load) => load.complete)
+    const sessionIds = sessionLoadIdsRef.current
+    if (sessionIds.length === 0) {
+      return areAllSimulationLoadsFinished(nextLoads)
+    }
+    return sessionIds.every((loadId) => {
+      const load = nextLoads.find((item) => item.id === loadId)
+      return load != null && isLoadFullyDischarged(load)
+    })
   }, [])
 
   const isRevealComplete = useCallback(
@@ -155,8 +213,12 @@ export function usePathSimulation(line: ConveyorLine) {
     }
     setEndHoldActive(false)
     setPlan(nextPlan)
-    setLoads(nextPlan.loads)
-    beginPathReveal(nextPlan.loads)
+    const initialized = initializeParallelLoads(nextPlan.loads)
+    sessionLoadIdsRef.current = initialized.map((load) => load.id)
+    setLoads(initialized)
+    beginPathReveal(initialized)
+    clearedTestMaterialLoadIdsRef.current = new Set()
+    pendingTestMaterialClearRef.current = new Set()
   }, [beginPathReveal, rebuildPlan])
 
   const pause = useCallback(() => {
@@ -198,6 +260,9 @@ export function usePathSimulation(line: ConveyorLine) {
     setRevealSteps({})
     setFinalHoldActive(false)
     setEndHoldActive(false)
+    clearedTestMaterialLoadIdsRef.current = new Set()
+    pendingTestMaterialClearRef.current = new Set()
+    sessionLoadIdsRef.current = []
     setStatus('idle')
   }, [clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTimer])
 
@@ -224,21 +289,23 @@ export function usePathSimulation(line: ConveyorLine) {
 
     if (loads.length === 0 && status === 'idle') {
       setPlan(nextPlan)
-      setLoads(nextPlan.loads)
+      const initialized = initializeParallelLoads(nextPlan.loads)
+      sessionLoadIdsRef.current = initialized.map((load) => load.id)
+      setLoads(initialized)
       setStatus('paused')
       return
     }
 
     setPlan(nextPlan)
-    const base = loads.length > 0 ? loads : nextPlan.loads
-    const advanced = advanceSimulationLoads(base, unitMap)
+    const base = loads.length > 0 ? loads : initializeParallelLoads(nextPlan.loads)
+    const advanced = applySimulationStep(base, unitMap, stepTiming)
     setLoads(advanced)
     if (allLoadsComplete(advanced)) {
       beginEndHold()
     } else {
       setStatus('paused')
     }
-  }, [allLoadsComplete, beginEndHold, clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTimer, loads, plan, rebuildPlan, status, unitMap])
+  }, [allLoadsComplete, beginEndHold, clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTimer, loads, plan, rebuildPlan, status, stepTiming, unitMap])
 
   useEffect(() => {
     if (status !== 'playing' || loads.length === 0) return
@@ -246,7 +313,7 @@ export function usePathSimulation(line: ConveyorLine) {
     clearTimer()
     timerRef.current = window.setInterval(() => {
       setLoads((current) => {
-        const advanced = advanceSimulationLoads(current, unitMap)
+        const advanced = applySimulationStep(current, unitMap, stepTiming)
         if (allLoadsComplete(advanced)) {
           clearTimer()
           beginEndHold()
@@ -256,7 +323,7 @@ export function usePathSimulation(line: ConveyorLine) {
     }, PATH_SIMULATION_STEP_MS)
 
     return clearTimer
-  }, [allLoadsComplete, beginEndHold, clearTimer, loads.length, status, unitMap])
+  }, [allLoadsComplete, beginEndHold, clearTimer, loads.length, status, stepTiming, unitMap])
 
   useEffect(() => {
     if (status !== 'revealing' || finalHoldActive || loads.length === 0) return
@@ -335,6 +402,40 @@ export function usePathSimulation(line: ConveyorLine) {
     setStatus('idle')
   }, [])
 
+  useEffect(() => {
+    const { onClearTestMaterial } = options
+    if (!onClearTestMaterial) return
+
+    for (const load of loads) {
+      if (
+        load.complete &&
+        load.clearsTestMaterial &&
+        !clearedTestMaterialLoadIdsRef.current.has(load.id)
+      ) {
+        clearedTestMaterialLoadIdsRef.current.add(load.id)
+        pendingTestMaterialClearRef.current.add(load.entryUnitId)
+      }
+    }
+  }, [loads, options])
+
+  useEffect(() => {
+    const { onClearTestMaterial } = options
+    if (!onClearTestMaterial) return
+    if (status !== 'complete') return
+
+    const pending = new Set(pendingTestMaterialClearRef.current)
+    for (const loadId of sessionLoadIdsRef.current) {
+      const load = loads.find((item) => item.id === loadId)
+      if (load?.clearsTestMaterial) {
+        pending.add(load.entryUnitId)
+      }
+    }
+    if (pending.size === 0) return
+
+    pendingTestMaterialClearRef.current = new Set()
+    onClearTestMaterial([...pending])
+  }, [loads, options, status])
+
   const isPathRevealPhase = useMemo(() => {
     if (status === 'revealing') return true
     if (status !== 'paused' || endHoldActive) return false
@@ -349,8 +450,14 @@ export function usePathSimulation(line: ConveyorLine) {
   const cstUnitIds = useMemo(() => {
     if (status === 'complete') return []
     if (isPathRevealPhase) return []
-    return simulationCstUnitIds(loads)
-  }, [isPathRevealPhase, loads, status])
+    const includeCompleted = status === 'endHold' || endHoldActive
+    const fromCst = simulationCstUnitIds(loads, { includeCompleted })
+    if (includeCompleted || status !== 'playing') {
+      return fromCst
+    }
+    // 재생 중: 다른 자재 출고 완료와 무관하게 이동 중 위치는 항상 표시
+    return [...new Set([...fromCst, ...activeSimulationUnitIds(loads)])]
+  }, [endHoldActive, isPathRevealPhase, loads, status])
   const neonUnitIds = useMemo(() => {
     if (finalHoldActive || status === 'revealing') {
       return simulationRevealUnitIds(loads, revealSteps)
@@ -370,13 +477,26 @@ export function usePathSimulation(line: ConveyorLine) {
     () => unionSimulationPathUnitIds(loads.length > 0 ? loads : (plan?.loads ?? [])),
     [loads, plan],
   )
-  const canSimulate = sources.length > 0 && selectedSourceUnitIds.length > 0
+  const staticTestMaterialUnitIds = useMemo(
+    () => staticTestMaterialOriginUnitIds(line, loads),
+    [line, loads],
+  )
+  const canSimulate =
+    (sources.length > 0 && selectedSourceUnitIds.length > 0) ||
+    testMaterialUnits.length > 0
   const waitingLabels = loads.filter((load) => load.waiting).map((load) => load.label)
+  const incompleteLoadCount = useMemo(
+    () => countIncompleteSimulationLoads(loads),
+    [loads],
+  )
   const progressLabel =
     loads.length > 0
-      ? loads
-          .map((load) => `${load.label} ${load.stepIndex + 1}/${load.pathUnitIds.length}`)
-          .join(' · ')
+      ? `${incompleteLoadCount > 0 ? `잔여 ${incompleteLoadCount}개 · ` : ''}${loads
+          .map(
+            (load) =>
+              `${load.label} ${load.stepIndex + 1}/${load.pathUnitIds.length}${isLoadFullyDischarged(load) ? ' ✓' : ''}`,
+          )
+          .join(' · ')}`
       : null
   const activeUnitLabel =
     cstUnitIds.length > 0
@@ -402,7 +522,9 @@ export function usePathSimulation(line: ConveyorLine) {
     neonUnitIds,
     activeUnitLabel,
     pathUnitIds,
+    staticTestMaterialUnitIds,
     waitingLabels,
+    testMaterialUnits,
     canSimulate,
     progressLabel,
     start,
@@ -410,6 +532,11 @@ export function usePathSimulation(line: ConveyorLine) {
     resume,
     reset,
     stepForward,
+    inputIntervalSec,
+    setInputIntervalSec,
+    dischargeIntervalSec,
+    setDischargeIntervalSec,
+    incompleteLoadCount,
     entries: sources,
     selectedEntryUnitIds: selectedSourceUnitIds,
     toggleEntryUnitId: toggleSourceUnitId,

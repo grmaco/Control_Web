@@ -87,6 +87,14 @@ export interface PathSimulationLoad {
   /** 이번 틱에 충돌로 대기 중 */
   waiting: boolean
   message: string
+  /** 완료 시 해당 출발 모듈의 테스트 자재(testMaterial) 제거 */
+  clearsTestMaterial?: boolean
+  /** 시뮬 시작 시 true — 동시 출발 */
+  released?: boolean
+  /** 출발 모듈(step 0) 체류 틱 — 투입 시간 반영 */
+  entryTicks?: number
+  /** 종료 모듈 체류 틱 — 출고 시간 반영 */
+  exitTicks?: number
 }
 
 /** 모니터 — 다중 투입점 동시 시뮬레이션 계획 */
@@ -96,6 +104,10 @@ export interface MultiPathSimulationPlan {
 }
 
 export const PATH_SIMULATION_STEP_MS = 500
+/** 기본 투입(시작점) 체류 (초) */
+export const DEFAULT_SIM_INPUT_INTERVAL_SEC = 0.5
+/** 기본 출고(종료점) 체류 (초) */
+export const DEFAULT_SIM_DISCHARGE_INTERVAL_SEC = 0.5
 /** 시작 시 출발→목적지 순차 점등 간격 */
 export const PATH_REVEAL_STEP_MS = 120
 /** 목적지 도달 후 네온 유지 시간 (시작 점등) */
