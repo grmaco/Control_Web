@@ -144,8 +144,14 @@ export function collectCalloutTags(unit: ConveyorUnit, flow: UnitFlowDirs): Flow
   return tags
 }
 
-function needsCallout(unit: ConveyorUnit, flow: UnitFlowDirs): boolean {
+function needsCallout(
+  unit: ConveyorUnit,
+  flow: UnitFlowDirs | undefined,
+  hasAlarm: boolean,
+): boolean {
   if (isStorageUnit(unit) || isPortUnit(unit)) return false
+  if (hasAlarm) return true
+  if (!flow) return false
   return collectCalloutTags(unit, flow).length > 0
 }
 
@@ -295,13 +301,27 @@ function placeCalloutPanel(
   return fallbackPlacement(bounds, panelWidth, panelHeight, unitRects, reservedPanels)
 }
 
+/** 알람 한 줄 표시용 패널 너비 추정 (7px 폰트 기준) */
+export function estimateAlarmCalloutPanelWidth(
+  alarmText: string | undefined,
+  minWidth: number,
+): number {
+  if (!alarmText) return minWidth
+  const labelCol = 40
+  const padding = 12
+  const charWidth = 4.2
+  return Math.max(minWidth, Math.ceil(labelCol + padding + alarmText.length * charWidth))
+}
+
 export function computeFlowCallouts(
   line: ConveyorLine,
   flowMap: Map<string, UnitFlowDirs>,
   viewport: LineViewport,
   cellSize: number,
+  alarmUnitIds?: Set<string>,
+  alarmTexts?: Record<string, string>,
 ): FlowCallout[] {
-  const panelWidth = Math.max(88, Math.round(cellSize * 3))
+  const panelMinWidth = Math.max(80, Math.round((cellSize * 7) / 3))
   const panelHeight = 50
   const unitRects = buildUnitRects(line, cellSize, viewport.minX, viewport.minY)
   const reservedPanels: PxRect[] = []
@@ -315,9 +335,14 @@ export function computeFlowCallouts(
 
   for (const unit of units) {
     const flow = flowMap.get(unit.id)
-    if (!flow || !needsCallout(unit, flow)) continue
+    const hasAlarm = alarmUnitIds?.has(unit.id) ?? false
+    if (!needsCallout(unit, flow, hasAlarm)) continue
 
     const bounds = unitBoundsPx(unit, cellSize, viewport.minX, viewport.minY)
+    const panelWidth = estimateAlarmCalloutPanelWidth(
+      alarmTexts?.[unit.id],
+      panelMinWidth,
+    )
     const placement = placeCalloutPanel(
       bounds,
       cellSize,
@@ -329,7 +354,7 @@ export function computeFlowCallouts(
     if (!placement) continue
 
     reservedPanels.push(placement.panel)
-    const tags = collectCalloutTags(unit, flow)
+    const tags = flow ? collectCalloutTags(unit, flow) : []
 
     callouts.push({
       unitId: unit.id,

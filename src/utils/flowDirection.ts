@@ -101,6 +101,15 @@ export function oppositeFlowDir(dir: FlowDir): FlowDir {
   }
 }
 
+/** 미니맵 — 자재 진행 방향 (화살표·롤러 공통). 종료점(in만 있음)은 inDir의 반대 */
+export function unitTravelDir(
+  flow: Pick<UnitFlowDirs, 'inDir' | 'outDir'>,
+): FlowDir | null {
+  if (flow.outDir) return flow.outDir
+  if (flow.inDir) return oppositeFlowDir(flow.inDir)
+  return null
+}
+
 function getUnitCenter(unit: ConveyorUnit): { x: number; y: number } {
   const footprint = getUnitFootprint(unit)
   return {

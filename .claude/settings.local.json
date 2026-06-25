@@ -14,7 +14,10 @@
       "Bash(npx tsc *)",
       "Bash(xargs cat)",
       "Bash(xargs grep -l \"class Log\\\\b\")",
-      "Bash(postcss\")"
+      "Bash(postcss\")",
+      "Skill(run)",
+      "Skill(run:*)",
+      "mcp__visualize__show_widget"
     ]
   }
 }

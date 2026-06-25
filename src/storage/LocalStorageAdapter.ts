@@ -1,4 +1,4 @@
-import { MAX_HISTORY_RECORDS, STORAGE_KEYS } from '../constants/storage'
+import { MAX_ALARM_HISTORY_RECORDS, MAX_HISTORY_RECORDS, STORAGE_KEYS } from '../constants/storage'
 import type {
   AppSettings,
   ConveyorLine,
@@ -6,6 +6,7 @@ import type {
   HistoryRecord,
 } from '../types/conveyor'
 import { normalizeLine } from '../constants/conveyorTypes'
+import type { StoredAlarmEntry } from '../utils/alarms'
 import type { StorageAdapter } from './StorageAdapter'
 
 function readJson<T>(key: string, fallback: T): T {
@@ -67,6 +68,20 @@ export class LocalStorageAdapter implements StorageAdapter {
     const history = readJson<HistoryRecord[]>(STORAGE_KEYS.history, [])
     const next = [record, ...history].slice(0, MAX_HISTORY_RECORDS)
     writeJson(STORAGE_KEYS.history, next)
+  }
+
+  async getAlarmHistory(lineId?: string): Promise<StoredAlarmEntry[]> {
+    const history = readJson<StoredAlarmEntry[]>(STORAGE_KEYS.alarmHistory, [])
+    return history
+      .filter((entry) => !lineId || entry.lineId === lineId)
+      .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+  }
+
+  async addAlarmHistory(entry: StoredAlarmEntry): Promise<void> {
+    const history = readJson<StoredAlarmEntry[]>(STORAGE_KEYS.alarmHistory, [])
+    if (history.some((item) => item.id === entry.id)) return
+    const next = [entry, ...history].slice(0, MAX_ALARM_HISTORY_RECORDS)
+    writeJson(STORAGE_KEYS.alarmHistory, next)
   }
 
   async getSettings(): Promise<AppSettings> {

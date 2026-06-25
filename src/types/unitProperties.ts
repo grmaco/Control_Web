@@ -95,6 +95,8 @@ export interface PathSimulationLoad {
   entryTicks?: number
   /** 종료 모듈 체류 틱 — 출고 시간 반영 */
   exitTicks?: number
+  /** 현재 모듈 체류 틱 — 다음 모듈 이송 전 대기 */
+  transitTicks?: number
 }
 
 /** 모니터 — 다중 투입점 동시 시뮬레이션 계획 */
@@ -108,6 +110,8 @@ export const PATH_SIMULATION_STEP_MS = 500
 export const DEFAULT_SIM_INPUT_INTERVAL_SEC = 0.5
 /** 기본 출고(종료점) 체류 (초) */
 export const DEFAULT_SIM_DISCHARGE_INTERVAL_SEC = 0.5
+/** 기본 모듈 간 이송 (초) — 다음 모듈로 이동 전 대기 */
+export const DEFAULT_SIM_TRANSIT_INTERVAL_SEC = 0.5
 /** 시작 시 출발→목적지 순차 점등 간격 */
 export const PATH_REVEAL_STEP_MS = 120
 /** 목적지 도달 후 네온 유지 시간 (시작 점등) */

@@ -4,6 +4,7 @@ import type { MultiPathSimulationPlan, PathSimulationLoad } from '../types/unitP
 import {
   DEFAULT_SIM_DISCHARGE_INTERVAL_SEC,
   DEFAULT_SIM_INPUT_INTERVAL_SEC,
+  DEFAULT_SIM_TRANSIT_INTERVAL_SEC,
   PATH_REVEAL_FINAL_HOLD_MS,
   PATH_REVEAL_STEP_MS,
   PATH_SIMULATION_END_HOLD_MS,
@@ -75,10 +76,13 @@ export function usePathSimulation(
   const [dischargeIntervalSec, setDischargeIntervalSec] = useState(
     DEFAULT_SIM_DISCHARGE_INTERVAL_SEC,
   )
+  const [transitIntervalSec, setTransitIntervalSec] = useState(
+    DEFAULT_SIM_TRANSIT_INTERVAL_SEC,
+  )
 
   const stepTiming = useMemo(
-    () => ({ inputIntervalSec, dischargeIntervalSec }),
-    [dischargeIntervalSec, inputIntervalSec],
+    () => ({ inputIntervalSec, dischargeIntervalSec, transitIntervalSec }),
+    [dischargeIntervalSec, inputIntervalSec, transitIntervalSec],
   )
 
   const sourceIdsKey = useMemo(
@@ -536,6 +540,8 @@ export function usePathSimulation(
     setInputIntervalSec,
     dischargeIntervalSec,
     setDischargeIntervalSec,
+    transitIntervalSec,
+    setTransitIntervalSec,
     incompleteLoadCount,
     entries: sources,
     selectedEntryUnitIds: selectedSourceUnitIds,

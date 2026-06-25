@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { SemiCnvAutoStatus, SemiCnvRunStatus } from '../../types/semicnv'
 import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import { useConveyorStore } from '../../store/useConveyorStore'
+import { resolveUnitAlarmDisplay } from '../../utils/unitAlarmDisplay'
 
 const AUTO_STATUS_STYLE: Record<SemiCnvAutoStatus, string> = {
   None:   'text-slate-500',
@@ -19,6 +20,8 @@ const RUN_STATUS_STYLE: Record<SemiCnvRunStatus, string> = {
 
 export function ConveyorUnitStatusTable() {
   const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
+  const unitAlarms = useSemiCnvStore((s) => s.unitAlarms)
+  const liveAlarms = useSemiCnvStore((s) => s.liveAlarms)
   const lines       = useConveyorStore((s) => s.lines)
   const isLive      = useSemiCnvStore((s) => s.isLive)
 
@@ -42,16 +45,26 @@ export function ConveyorUnitStatusTable() {
         .map((unitId) => {
           const rt = unitRuntime[unitId]
           const info = unitMap[unitId]
+          const unitName = info?.unitName ?? `CV${rt.semiCnvId ?? unitId}`
+          const alarmDisplay = resolveUnitAlarmDisplay(
+            unitId,
+            unitName,
+            rt,
+            unitAlarms,
+            liveAlarms,
+          )
           return {
             key:         unitId,
             lineName:    info?.lineName ?? '-',
-            name:        info?.unitName ?? `CV${rt.semiCnvId ?? unitId}`,
+            name:        unitName,
             semiCnvId:   rt.semiCnvId,
             cstId:       rt.cstId,
             hasCassette: rt.cstId !== null && rt.cstId !== '',
             autoStatus:  rt.autoStatus,
             runStatus:   rt.runStatus,
             alarm:       rt.alarm,
+            alarmCode:   alarmDisplay.alarmCode,
+            alarmText:   alarmDisplay.alarmText,
             updatedAt:   rt.updatedAt,
           }
         })
@@ -70,10 +83,12 @@ export function ConveyorUnitStatusTable() {
         autoStatus:  'None' as SemiCnvAutoStatus,
         runStatus:   'Stop' as SemiCnvRunStatus,
         alarm:       false,
+        alarmCode:   null as string | null,
+        alarmText:   null as string | null,
         updatedAt:   null as string | null,
       }))
     )
-  }, [unitRuntime, unitMap, lines])
+  }, [unitRuntime, unitMap, lines, unitAlarms, liveAlarms])
 
   return (
     <div className="overflow-x-auto rounded border border-slate-700 bg-slate-900/80">
@@ -87,13 +102,14 @@ export function ConveyorUnitStatusTable() {
             <th className="whitespace-nowrap px-3 py-2.5 font-semibold">CST 유무</th>
             <th className="whitespace-nowrap px-3 py-2.5 font-semibold">동작 상태</th>
             <th className="whitespace-nowrap px-3 py-2.5 font-semibold">Run</th>
-            <th className="whitespace-nowrap px-3 py-2.5 font-semibold">알람</th>
+            <th className="whitespace-nowrap px-3 py-2.5 font-semibold">ALARM</th>
+            <th className="whitespace-nowrap px-3 py-2.5 font-semibold">ALARM TEXT</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
+              <td colSpan={9} className="px-3 py-8 text-center text-slate-500">
                 라인 빌더에서 유닛을 배치하면 여기에 표시됩니다.
               </td>
             </tr>
@@ -154,13 +170,27 @@ export function ConveyorUnitStatusTable() {
                   </span>
                 </td>
 
-                {/* 알람 */}
+                {/* ALARM */}
                 <td className="px-3 py-2">
                   {row.alarm ? (
-                    <span className="font-semibold text-red-400">⚠ 알람</span>
+                    row.alarmCode ? (
+                      <span className="inline-block rounded bg-red-900/50 px-1.5 py-0.5 font-mono font-semibold text-red-300">
+                        {row.alarmCode}
+                      </span>
+                    ) : (
+                      <span className="font-semibold text-red-400">ALARM</span>
+                    )
                   ) : (
                     <span className="text-slate-700">—</span>
                   )}
+                </td>
+
+                {/* ALARM TEXT */}
+                <td
+                  className="max-w-[220px] truncate px-3 py-2 text-slate-300"
+                  title={row.alarmText ?? undefined}
+                >
+                  {row.alarmText ?? <span className="text-slate-700">—</span>}
                 </td>
               </tr>
             ))

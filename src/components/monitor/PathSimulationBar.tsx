@@ -20,8 +20,10 @@ interface PathSimulationBarProps {
   waitingLabels: string[]
   inputIntervalSec: number
   dischargeIntervalSec: number
+  transitIntervalSec: number
   onInputIntervalSecChange: (value: number) => void
   onDischargeIntervalSecChange: (value: number) => void
+  onTransitIntervalSecChange: (value: number) => void
   incompleteLoadCount?: number
   onStart: () => void
   onPause: () => void
@@ -46,8 +48,10 @@ export function PathSimulationBar({
   waitingLabels,
   inputIntervalSec,
   dischargeIntervalSec,
+  transitIntervalSec,
   onInputIntervalSecChange,
   onDischargeIntervalSecChange,
+  onTransitIntervalSecChange,
   incompleteLoadCount = 0,
   onStart,
   onPause,
@@ -87,26 +91,36 @@ export function PathSimulationBar({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm font-medium text-slate-200">경로 시뮬레이션</div>
         <span className="text-xs text-slate-500">
-          이동 {PATH_SIMULATION_STEP_MS / 1000}초/모듈 · 비가동(대기/점검/오류) 우회
+          틱 {PATH_SIMULATION_STEP_MS / 1000}초 · 비가동(대기/점검/오류) 우회
         </span>
       </div>
 
       <div className="flex flex-wrap items-end gap-4">
         <TimingField
           label="투입 시간 (초)"
-          hint="시작점(출발 모듈) 체류만 적용"
+          hint="시작점(출발 모듈) 체류"
           value={inputIntervalSec}
           disabled={isBusy}
           onChange={onInputIntervalSecChange}
         />
-        <TimingField
-          label="출고 시간 (초)"
-          hint="종료점(출고 모듈) 체류만 적용"
-          value={dischargeIntervalSec}
-          disabled={isBusy}
-          onChange={onDischargeIntervalSecChange}
-        />
+        <div className="flex items-end gap-4">
+          <TimingField
+            label="이송 시간 (초)"
+            hint="모듈 간 이동 시간"
+            value={transitIntervalSec}
+            disabled={isBusy}
+            onChange={onTransitIntervalSecChange}
+          />
+          <TimingField
+            label="출고 시간 (초)"
+            hint="종료점(출고 모듈) 체류"
+            value={dischargeIntervalSec}
+            disabled={isBusy}
+            onChange={onDischargeIntervalSecChange}
+          />
+        </div>
       </div>
+
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-slate-400">방향</span>

@@ -30,7 +30,7 @@ export function LineStatusPage() {
         <h2 className="text-xl font-semibold">라인 현황</h2>
         <div className="flex flex-wrap items-center gap-2">
           {selectedLine && <LineV3UrlSetting line={selectedLine} />}
-          <LineSelectorPanel />
+          <LineSelectorPanel selectOnly />
         </div>
       </div>
 

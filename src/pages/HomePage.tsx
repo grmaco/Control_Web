@@ -22,7 +22,7 @@ export function HomePage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-xl font-semibold">주화면</h2>
-        <LineSelectorPanel />
+        <LineSelectorPanel selectOnly />
       </div>
 
       {!selectedLine ? (

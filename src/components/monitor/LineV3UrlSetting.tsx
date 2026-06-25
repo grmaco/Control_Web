@@ -3,25 +3,18 @@ import type { ConveyorLine } from '../../types/conveyor'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import { useLineCommStatus } from '../../hooks/useLineCommStatus'
+import { COMM_STATE_DOT, COMM_STATE_LABEL } from '../../semicnv/lineCommStatus'
 
 interface Props {
   line: ConveyorLine
 }
 
-const STATE_DOT: Record<string, string> = {
-  connected:    'bg-emerald-500',
-  connecting:   'bg-amber-500 animate-pulse',
-  disconnected: 'bg-slate-600',
-  error:        'bg-red-500',
-}
-
 export function LineV3UrlSetting({ line }: Props) {
-  const saveLine        = useConveyorStore((s) => s.saveLine)
-  const connectionState = useSemiCnvStore((s) => s.connectionState)
-  const connect         = useSemiCnvStore((s) => s.connect)
-  const comm            = useLineCommStatus(line)
+  const saveLine = useConveyorStore((s) => s.saveLine)
+  const connect = useSemiCnvStore((s) => s.connect)
+  const comm = useLineCommStatus(line)
 
-  const [open, setOpen]       = useState(false)
+  const [open, setOpen] = useState(false)
   const [inputUrl, setInputUrl] = useState('')
 
   const currentUrl = line.semiCnvWsUrl?.trim() ?? ''
@@ -34,24 +27,12 @@ export function LineV3UrlSetting({ line }: Props) {
   async function apply() {
     const url = inputUrl.trim()
     await saveLine({ ...line, semiCnvWsUrl: url || undefined })
-    connect()   // 변경된 URL로 재연결
+    connect()
     setOpen(false)
   }
 
-  // 이 라인의 연결 상태
-  const dotClass = comm?.state === 'online'
-    ? 'bg-emerald-500'
-    : comm?.state === 'offline'
-    ? 'bg-red-500'
-    : STATE_DOT[connectionState] ?? 'bg-slate-600'
-
-  const statusLabel = comm?.state === 'online'
-    ? 'Online'
-    : comm?.state === 'offline'
-    ? 'Offline'
-    : comm?.state === 'waiting'
-    ? '연결 중…'
-    : '미설정'
+  const dotClass = comm ? COMM_STATE_DOT[comm.state] : 'bg-slate-600'
+  const statusLabel = comm ? COMM_STATE_LABEL[comm.state] : '미선택'
 
   return (
     <div className="relative">

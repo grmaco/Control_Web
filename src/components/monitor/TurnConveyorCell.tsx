@@ -1,22 +1,18 @@
 import type { ConveyorStatus } from '../../types/conveyor'
+import { oppositeFlowDir, unitTravelDir, type FlowDir } from '../../utils/flowDirection'
+import { isValidTurnThrough, turnFlowRotationSign } from '../../utils/turnArc'
 
 /**
  * 회전 컨베이어 셀 배경 SVG — 원형 턴테이블 디자인.
- * 원 안에 롤러 바가 배치되고, running 상태에서 전체가 회전합니다.
- *
- * TURN_OPENINGS 기준 개구부:
- *   0   → W(왼), S(아래)
- *   90  → N(위), W(왼)
- *   180 → E(오른), N(위)
- *   270 → S(아래), E(오른)
+ * running 시 물류 화살표(inDir→outDir)와 같은 방향으로 롤러 모션.
  */
 
-const S = 100  // 내부 정규화 좌표 크기
+const S = 100
 const CX = 50
 const CY = 50
-const R_OUTER = 46   // 바깥 원 반경
-const R_INNER = 38   // 롤러 클립 반경
-const R_NOTCH = 42   // 개구부 표시 반경
+const R_OUTER = 46
+const R_INNER = 38
+const R_NOTCH = 42
 
 const COLORS = {
   idle: {
@@ -41,12 +37,75 @@ const COLORS = {
   },
 }
 
-/** rotation 기준 개구부 2방향 — 단위 벡터 (SVG 좌표계: y 아래) */
+/** rotation 기준 개구부 — flow 없을 때 폴백 */
 const OPENINGS: Record<number, [[number, number], [number, number]]> = {
-  0:   [[-1, 0], [0, 1]],   // W, S
-  90:  [[0, -1], [-1, 0]],  // N, W
-  180: [[1, 0],  [0, -1]],  // E, N
-  270: [[0, 1],  [1, 0]],   // S, E
+  0: [[-1, 0], [0, 1]],
+  90: [[0, -1], [-1, 0]],
+  180: [[1, 0], [0, -1]],
+  270: [[0, 1], [1, 0]],
+}
+
+const DIR_VEC: Record<FlowDir, [number, number]> = {
+  N: [0, -1],
+  E: [1, 0],
+  S: [0, 1],
+  W: [-1, 0],
+}
+
+type MotionKind = 'arc' | 'linear' | 'default'
+
+interface ResolvedMotion {
+  kind: MotionKind
+  rotateSign?: 1 | -1
+  travelDir?: FlowDir
+}
+
+function resolveTurnMotion(
+  flowInDir?: FlowDir | null,
+  flowOutDir?: FlowDir | null,
+): ResolvedMotion {
+  if (flowInDir && flowOutDir) {
+    const sign = turnFlowRotationSign(flowInDir, flowOutDir)
+    if (sign != null) return { kind: 'arc', rotateSign: sign }
+    if (isValidTurnThrough(flowInDir, flowOutDir)) {
+      return { kind: 'linear', travelDir: flowOutDir }
+    }
+  }
+
+  const travelDir = unitTravelDir({
+    inDir: flowInDir ?? null,
+    outDir: flowOutDir ?? null,
+  })
+  if (travelDir) return { kind: 'linear', travelDir }
+
+  return { kind: 'default' }
+}
+
+function linearRollAnim(travelDir: FlowDir, step: number): { from: string; to: string } {
+  switch (travelDir) {
+    case 'E':
+      return { from: `${-step} 0`, to: '0 0' }
+    case 'W':
+      return { from: `${step} 0`, to: '0 0' }
+    case 'S':
+      return { from: `0 ${-step}`, to: '0 0' }
+    case 'N':
+      return { from: `0 ${step}`, to: '0 0' }
+  }
+}
+
+function resolveOpeningDirs(
+  rotation: number,
+  flowInDir?: FlowDir | null,
+  flowOutDir?: FlowDir | null,
+): [[number, number], [number, number]] {
+  if (flowInDir && flowOutDir) {
+    return [DIR_VEC[flowInDir], DIR_VEC[flowOutDir]]
+  }
+  if (flowInDir) {
+    return [DIR_VEC[flowInDir], DIR_VEC[oppositeFlowDir(flowInDir)]]
+  }
+  return OPENINGS[rotation] ?? OPENINGS[0]
 }
 
 interface TurnConveyorCellProps {
@@ -54,6 +113,9 @@ interface TurnConveyorCellProps {
   height: number
   status: ConveyorStatus
   rotation?: number
+  /** 물류 화살표 방향 — 있으면 롤러 모션이 화살표와 일치 */
+  flowInDir?: FlowDir | null
+  flowOutDir?: FlowDir | null
   isRunning?: boolean
   uid: string
   isJunction?: boolean
@@ -64,13 +126,16 @@ export function TurnConveyorCell({
   height,
   status,
   rotation = 0,
+  flowInDir = null,
+  flowOutDir = null,
   isRunning = false,
   uid,
   isJunction = false,
 }: TurnConveyorCellProps) {
   const cfg = COLORS[status]
+  const motion = resolveTurnMotion(flowInDir, flowOutDir)
+  const openingDirs = resolveOpeningDirs(rotation, flowInDir, flowOutDir)
 
-  // 롤러 바 (수직 줄 — 원 안에 클립됨)
   const rollerThickness = 4.5
   const rollerGap = 4
   const rollerStep = rollerThickness + rollerGap
@@ -79,12 +144,14 @@ export function TurnConveyorCell({
     rollerPositions.push(x)
   }
 
-  // 개구부 방향 (노치 표시)
-  const openingDirs = OPENINGS[rotation] ?? OPENINGS[0]
+  const linearAnim =
+    motion.kind === 'linear' && motion.travelDir
+      ? linearRollAnim(motion.travelDir, rollerStep)
+      : null
 
-  const clipId  = `tc-clip-${uid}`
-  const filtId  = `tc-flt-${uid}`
-  const gradId  = `tc-grd-${uid}`
+  const clipId = `tc-clip-${uid}`
+  const filtId = `tc-flt-${uid}`
+  const gradId = `tc-grd-${uid}`
 
   return (
     <svg
@@ -96,20 +163,17 @@ export function TurnConveyorCell({
       aria-hidden
     >
       <defs>
-        {/* 롤러 그라디언트 (위→아래) */}
         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%"   stopColor={cfg.rollerHi} stopOpacity="0.8" />
-          <stop offset="40%"  stopColor={cfg.roller}   stopOpacity="1" />
-          <stop offset="60%"  stopColor={cfg.roller}   stopOpacity="1" />
+          <stop offset="0%" stopColor={cfg.rollerHi} stopOpacity="0.8" />
+          <stop offset="40%" stopColor={cfg.roller} stopOpacity="1" />
+          <stop offset="60%" stopColor={cfg.roller} stopOpacity="1" />
           <stop offset="100%" stopColor={cfg.rollerHi} stopOpacity="0.7" />
         </linearGradient>
 
-        {/* 원형 클립 */}
         <clipPath id={clipId}>
           <circle cx={CX} cy={CY} r={R_INNER} />
         </clipPath>
 
-        {/* 글로우 필터 */}
         {cfg.glowOp > 0 && (
           <filter id={filtId} x="-30%" y="-30%" width="160%" height="160%">
             <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur" />
@@ -123,24 +187,21 @@ export function TurnConveyorCell({
         )}
       </defs>
 
-      {/* 배경 */}
       <rect width={S} height={S} fill={cfg.base} />
 
-      {/* 바깥 원 (링) */}
       <circle
-        cx={CX} cy={CY} r={R_OUTER}
+        cx={CX}
+        cy={CY}
+        r={R_OUTER}
         fill={cfg.ringInner}
         stroke={cfg.ring}
         strokeWidth="2.5"
         filter={cfg.glowOp > 0 ? `url(#${filtId})` : undefined}
       />
 
-      {/* 내부 롤러 그룹 (클립 + running 시 회전) */}
       <g clipPath={`url(#${clipId})`}>
-        {/* 롤러 내부 배경 */}
         <circle cx={CX} cy={CY} r={R_INNER} fill={cfg.ringInner} />
         <g>
-          {/* 롤러 바 */}
           {rollerPositions.map((x, i) => (
             <rect
               key={i}
@@ -153,22 +214,43 @@ export function TurnConveyorCell({
             />
           ))}
 
-          {/* 정션: 가로 롤러도 추가 */}
-          {isJunction && rollerPositions.map((y, i) => (
-            <rect
-              key={`h${i}`}
-              x={CX - R_INNER}
-              y={y}
-              width={R_INNER * 2}
-              height={rollerThickness}
-              fill={`url(#${gradId})`}
-              rx="0.8"
-              opacity="0.6"
-            />
-          ))}
+          {isJunction &&
+            rollerPositions.map((y, i) => (
+              <rect
+                key={`h${i}`}
+                x={CX - R_INNER}
+                y={y}
+                width={R_INNER * 2}
+                height={rollerThickness}
+                fill={`url(#${gradId})`}
+                rx="0.8"
+                opacity="0.6"
+              />
+            ))}
 
-          {/* Running: 원 중심으로 롤러 그룹 회전 */}
-          {isRunning && (
+          {isRunning && motion.kind === 'arc' && motion.rotateSign != null && (
+            <animateTransform
+              attributeName="transform"
+              type="rotate"
+              from={`0 ${CX} ${CY}`}
+              to={`${motion.rotateSign * 360} ${CX} ${CY}`}
+              dur="1.8s"
+              repeatCount="indefinite"
+            />
+          )}
+
+          {isRunning && motion.kind === 'linear' && linearAnim && (
+            <animateTransform
+              attributeName="transform"
+              type="translate"
+              from={linearAnim.from}
+              to={linearAnim.to}
+              dur="0.6s"
+              repeatCount="indefinite"
+            />
+          )}
+
+          {isRunning && motion.kind === 'default' && (
             <animateTransform
               attributeName="transform"
               type="rotate"
@@ -181,15 +263,12 @@ export function TurnConveyorCell({
         </g>
       </g>
 
-      {/* 중심 허브 */}
       <circle cx={CX} cy={CY} r="4.5" fill={cfg.ring} opacity="0.85" />
-      <circle cx={CX} cy={CY} r="2"   fill={cfg.base} />
+      <circle cx={CX} cy={CY} r="2" fill={cfg.base} />
 
-      {/* 개구부 노치 (진입/진출 방향 표시) */}
       {openingDirs.map(([dx, dy], i) => {
         const nx = CX + dx * R_NOTCH
         const ny = CY + dy * R_NOTCH
-        // 노치: 원 테두리에 작은 삼각형 화살표
         const angle = Math.atan2(dy, dx) * (180 / Math.PI)
         return (
           <g key={i} transform={`rotate(${angle} ${nx} ${ny})`}>
@@ -203,7 +282,6 @@ export function TurnConveyorCell({
         )
       })}
 
-      {/* 외곽 프레임 (코너) */}
       {([
         [1.5, 1.5, 10, 1.5, 1.5, 10],
         [S - 10, 1.5, S - 1.5, 1.5, S - 1.5, 10],
@@ -221,7 +299,6 @@ export function TurnConveyorCell({
         />
       ))}
 
-      {/* error 깜박임 */}
       {status === 'error' && (
         <rect width={S} height={S} fill={cfg.glow} opacity="0">
           <animate attributeName="opacity" values="0;0.1;0" dur="1.2s" repeatCount="indefinite" />

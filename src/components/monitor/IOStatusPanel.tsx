@@ -1,4 +1,9 @@
 import type { SemiCnvIOStatus } from '../../types/semicnv'
+import {
+  autoConditionValueClass,
+  currentStatusValueClass,
+  safetyConditionValueClass,
+} from '../../utils/monitorStats'
 
 interface IOStatusPanelProps {
   ioStatus: SemiCnvIOStatus | null
@@ -20,23 +25,19 @@ function StatusCard({
   title,
   subtitle,
   statusLabel,
-  statusOk,
+  valueClass,
   children,
 }: {
   title: string
   subtitle: string
   statusLabel: string
-  statusOk: boolean
+  valueClass: string
   children: React.ReactNode
 }) {
   return (
     <div className="flex flex-col rounded border border-slate-700 bg-slate-900/80 p-4">
       <p className="text-xs font-semibold tracking-wide text-slate-400">{title}</p>
-      <p
-        className={`mt-1 text-2xl font-bold ${statusOk ? 'text-cyan-400' : 'text-red-400'}`}
-      >
-        {statusLabel}
-      </p>
+      <p className={`mt-1 text-2xl font-bold ${valueClass}`}>{statusLabel}</p>
       <p className="mb-3 text-[10px] text-slate-500">{subtitle}</p>
       {children}
     </div>
@@ -98,7 +99,7 @@ export function IOStatusPanels({ ioStatus }: IOStatusPanelProps) {
         title="SAFETY CONDITION"
         subtitle="Main Power, EMO, EMS Check"
         statusLabel={ioStatus.safetyOk ? 'Safety OK' : 'Safety NG'}
-        statusOk={ioStatus.safetyOk}
+        valueClass={safetyConditionValueClass(ioStatus.safetyOk)}
       >
         <ConditionTable rows={ioStatus.safetyConditions} />
       </StatusCard>
@@ -108,7 +109,7 @@ export function IOStatusPanels({ ioStatus }: IOStatusPanelProps) {
         title="AUTO CONDITION"
         subtitle="Safety OK, Power ON, Home Done"
         statusLabel={ioStatus.autoConditionOk ? 'Enable' : 'Disable'}
-        statusOk={ioStatus.autoConditionOk}
+        valueClass={autoConditionValueClass(ioStatus.autoConditionOk)}
       >
         <ConditionTable rows={ioStatus.autoConditions} />
       </StatusCard>
@@ -118,7 +119,7 @@ export function IOStatusPanels({ ioStatus }: IOStatusPanelProps) {
         title="CURRENT STATUS"
         subtitle="RUN Check, IN/OUT Mode Check"
         statusLabel={ioStatus.currentStatus}
-        statusOk={ioStatus.currentStatus === 'Auto Run'}
+        valueClass={currentStatusValueClass(ioStatus.currentStatus)}
       >
         <p className="mb-2 text-xs font-semibold tracking-wide text-slate-400">
           PROGRAM STATUS
@@ -162,7 +163,7 @@ export function IOStatusPanel({ ioStatus }: IOStatusPanelProps) {
           title="SAFETY CONDITION"
           subtitle="Main Power, EMO, EMS Check"
           statusLabel={ioStatus.safetyOk ? 'Safety OK' : 'Safety NG'}
-          statusOk={ioStatus.safetyOk}
+          valueClass={safetyConditionValueClass(ioStatus.safetyOk)}
         >
           <ConditionTable rows={ioStatus.safetyConditions} />
         </StatusCard>
@@ -172,7 +173,7 @@ export function IOStatusPanel({ ioStatus }: IOStatusPanelProps) {
           title="AUTO CONDITION"
           subtitle="Safety OK, Power ON, Home Done"
           statusLabel={ioStatus.autoConditionOk ? 'Enable' : 'Disable'}
-          statusOk={ioStatus.autoConditionOk}
+          valueClass={autoConditionValueClass(ioStatus.autoConditionOk)}
         >
           <ConditionTable rows={ioStatus.autoConditions} />
         </StatusCard>
@@ -182,7 +183,7 @@ export function IOStatusPanel({ ioStatus }: IOStatusPanelProps) {
           title="CURRENT STATUS"
           subtitle="RUN Check, IN/OUT Mode Check"
           statusLabel={ioStatus.currentStatus}
-          statusOk={ioStatus.currentStatus === 'Auto Run'}
+          valueClass={currentStatusValueClass(ioStatus.currentStatus)}
         >
           <p className="mb-2 text-xs font-semibold tracking-wide text-slate-400">
             PROGRAM STATUS

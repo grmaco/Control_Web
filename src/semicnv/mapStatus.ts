@@ -15,9 +15,9 @@ export function mapSemiCnvToConveyorStatus(item: {
   power: string
 }): ConveyorStatus {
   if (item.alarm) return 'error'
-  if (item.operationStatus === 'Manual') return 'maintenance'
   if (item.power === 'Off') return 'idle'
-  // Auto 모드이면 모터 구동 여부와 무관하게 running으로 표시
+  // 이하 Power On 상태
+  if (item.operationStatus === 'Manual') return 'maintenance'
   if (item.operationStatus === 'Auto') return 'running'
   return 'idle'
 }
@@ -37,9 +37,14 @@ export function toUnitRuntime(item: SemiCnvConveyorStatusItem): {
       autoStatus: item.autoStatus,
       runStatus: item.runStatus,
       operationStatus: item.operationStatus,
+      power: item.power,
       cstId: item.cstId,
       destination: item.destination,
       alarm: item.alarm,
+      alarmCode: item.alarmCode ?? null,
+      alarmMessage: item.alarmMessage ?? null,
+      homeDone: item.axis?.homeDone ?? null,
+      currentDegree: item.currentDegree ?? null,
       updatedAt,
     },
   }

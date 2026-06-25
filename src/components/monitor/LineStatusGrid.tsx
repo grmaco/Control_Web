@@ -11,6 +11,7 @@ import {
   flowExitDir,
   overlaySimulationPathOnFlowMap,
   simulationPathFlowRole,
+  unitTravelDir,
   type UnitFlowDirs,
 } from '../../utils/flowDirection'
 import { getUnitFootprint, footprintBorderClasses, isUnitAnchor } from '../../utils/unitFootprint'
@@ -192,10 +193,13 @@ export function LineStatusGrid({
     () => ({ minX, minY, cols, rows, maxX: minX + cols - 1, maxY: minY + rows - 1 }),
     [minX, minY, cols, rows],
   )
+  const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
+  const unitAlarms = useSemiCnvStore((s) => s.unitAlarms)
   const flowCallouts = useMemo(() => {
     if (!showFlowCallouts || flowByUnitId.size === 0) return []
-    return computeFlowCallouts(line, flowByUnitId, viewportBounds, cellSize)
-  }, [cellSize, flowByUnitId, layoutSignature, line, showFlowCallouts, viewportBounds])
+    const alarmUnitIds = Object.keys(unitAlarms).length > 0 ? new Set(Object.keys(unitAlarms)) : undefined
+    return computeFlowCallouts(line, flowByUnitId, viewportBounds, cellSize, alarmUnitIds, unitAlarms)
+  }, [cellSize, flowByUnitId, layoutSignature, line, showFlowCallouts, viewportBounds, unitAlarms])
   const lineView = useMonitorStore((s) => s.lineViews[line.id] ?? null)
   const saveCalloutPositions = useMonitorStore((s) => s.saveCalloutPositions)
   const savedCalloutPositions = useMemo(() => {
@@ -208,7 +212,6 @@ export function LineStatusGrid({
     },
     [layoutSignature, line.id, saveCalloutPositions],
   )
-  const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
 
   return (
     <div className={`relative overflow-visible ${className ?? ''}`}>
@@ -326,13 +329,7 @@ export function LineStatusGrid({
                 height={spanHeight}
                 status={unit.status}
                 rotation={unit.rotation ?? 0}
-                flowOutDir={
-                  (() => {
-                    const f = flowByUnitId.get(unit.id)
-                    // end 유닛은 outDir=null → inDir로 폴백
-                    return f?.outDir ?? f?.inDir ?? null
-                  })()
-                }
+                flowOutDir={unitTravelDir(flowByUnitId.get(unit.id) ?? { inDir: null, outDir: null })}
                 isRunning={unit.status === 'running'}
                 uid={`${unit.id}-${gridX}-${gridY}`}
               />
@@ -343,6 +340,8 @@ export function LineStatusGrid({
                 height={spanHeight}
                 status={unit.status}
                 rotation={unit.rotation ?? 0}
+                flowInDir={flow?.inDir ?? null}
+                flowOutDir={flow?.outDir ?? null}
                 isRunning={unit.status === 'running'}
                 uid={`${unit.id}-${gridX}-${gridY}`}
                 isJunction={unit.type === 'junction'}

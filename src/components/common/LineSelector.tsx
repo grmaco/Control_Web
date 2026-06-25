@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useConveyorStore } from '../../store/useConveyorStore'
 
-export function LineSelector() {
+export function LineSelector({ selectOnly = false }: { selectOnly?: boolean }) {
   const lines = useConveyorStore((s) => s.lines)
   const selectedLineId = useConveyorStore((s) => s.selectedLineId)
   const selectLine = useConveyorStore((s) => s.selectLine)
@@ -9,6 +9,14 @@ export function LineSelector() {
   const logApplication = useConveyorStore((s) => s.logApplication)
 
   if (lines.length === 0) {
+    if (selectOnly) {
+      return (
+        <span className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-sm text-slate-500">
+          등록된 라인 없음
+        </span>
+      )
+    }
+
     return (
       <button
         type="button"
@@ -55,13 +63,29 @@ export function LineSelector() {
 
 interface LineSelectorPanelProps {
   onCreateLine?: () => void
+  /** true: 드롭다운 선택만 (주화면·라인 현황) */
+  selectOnly?: boolean
 }
 
-export function LineSelectorPanel({ onCreateLine }: LineSelectorPanelProps) {
+export function LineSelectorPanel({ onCreateLine, selectOnly = false }: LineSelectorPanelProps) {
+  if (selectOnly) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-slate-400">라인</span>
+        <LineSelector selectOnly />
+      </div>
+    )
+  }
+
+  return <LineSelectorPanelFull onCreateLine={onCreateLine} />
+}
+
+function LineSelectorPanelFull({ onCreateLine }: Pick<LineSelectorPanelProps, 'onCreateLine'>) {
   const lines = useConveyorStore((s) => s.lines)
   const selectedLineId = useConveyorStore((s) => s.selectedLineId)
   const createLine = useConveyorStore((s) => s.createLine)
   const renameLine = useConveyorStore((s) => s.renameLine)
+  const deleteLine = useConveyorStore((s) => s.deleteLine)
   const logApplication = useConveyorStore((s) => s.logApplication)
 
   const selectedLine = lines.find((line) => line.id === selectedLineId) ?? null
@@ -88,6 +112,24 @@ export function LineSelectorPanel({ onCreateLine }: LineSelectorPanelProps) {
         lineId: selectedLineId,
       })
     }
+  }
+
+  const handleDelete = async () => {
+    if (!selectedLineId || !selectedLine) return
+
+    const confirmed = window.confirm(
+      `"${selectedLine.name}" 라인을 삭제할까요?\n배치한 유닛과 설정이 모두 삭제됩니다.`,
+    )
+    if (!confirmed) return
+
+    const deletedName = selectedLine.name
+    const deletedId = selectedLineId
+    await deleteLine(deletedId)
+    void logApplication({
+      title: 'Button Click',
+      comment: `Line Delete: ${deletedName}`,
+      lineId: deletedId,
+    })
   }
 
   return (
@@ -128,6 +170,15 @@ export function LineSelectorPanel({ onCreateLine }: LineSelectorPanelProps) {
       >
         + 새 라인
       </button>
+      {selectedLine && (
+        <button
+          type="button"
+          onClick={() => void handleDelete()}
+          className="rounded-md border border-red-900 px-2 py-1.5 text-xs text-red-300 hover:bg-red-950/40"
+        >
+          라인 삭제
+        </button>
+      )}
     </div>
   )
 }

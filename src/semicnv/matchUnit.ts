@@ -108,6 +108,7 @@ export function findUnitBySemiCnvId(
   semiCnvId: number,
   semiCnvLineId?: number,
 ): { line: ConveyorLine; unit: ConveyorUnit } | null {
+  // 1차: semiCnvId 직접 매핑 (lineId 필터 적용)
   for (const line of lines) {
     if (
       semiCnvLineId != null &&
@@ -119,10 +120,17 @@ export function findUnitBySemiCnvId(
     if (unit) return { line, unit }
   }
 
+  // 2차: semiCnvId 직접 매핑 (lineId 필터 없이 전체)
   for (const line of lines) {
     const unit = line.units.find((u) => u.semiCnvId === semiCnvId)
     if (unit) return { line, unit }
   }
 
-  return null
+  // 3차: CONVEYOR_STATUS와 동일한 이름 기반 fallback (semiCnvId 미설정 유닛)
+  const fakeItem = {
+    id: semiCnvId,
+    name: String(semiCnvId),
+    lineId: semiCnvLineId ?? 0,
+  } as SemiCnvConveyorStatusItem
+  return findUnitForSemiCnvStatus(lines, fakeItem)
 }

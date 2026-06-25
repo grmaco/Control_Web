@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLineCommStatus } from '../../hooks/useLineCommStatus'
 import { DEFAULT_SEMICNV_WS_URL } from '../../constants/semicnv'
-import { formatLastReceived } from '../../semicnv/lineCommStatus'
+import { formatLastReceived, COMM_STATE_DOT, COMM_STATE_LABEL } from '../../semicnv/lineCommStatus'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import type { SemiCnvConnectionState } from '../../types/semicnv'
@@ -82,17 +82,27 @@ export function SemiCnvConnectionBar() {
 
   const site = comm?.siteId ? siteStatus[comm.siteId] : null
   const siteOnline = site?.online ?? false
+  const lineScoped = Boolean(selectedLine && comm)
+  const statusDotClass = lineScoped
+    ? COMM_STATE_DOT[comm!.state]
+    : SERVER_STATE_COLOR[connectionState]
+  const statusLabel = lineScoped
+    ? `V3 · ${COMM_STATE_LABEL[comm!.state]}`
+    : `서버 · ${SERVER_STATE_LABEL[connectionState]}`
+  const statusTitle = lineScoped
+    ? `${selectedLine!.name} — ${COMM_STATE_LABEL[comm!.state]} (이 라인 V3 데이터 수신 상태)`
+    : `관제 서버 · ${settings.wsUrl ?? DEFAULT_SEMICNV_WS_URL}`
 
   return (
     <div className="relative flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
-      {/* 서버 상태 */}
+      {/* 선택 라인 기준 V3 상태 (라인 미선택 시 전역 소켓 상태) */}
       <span
         className="flex cursor-pointer items-center gap-1.5"
-        title={`관제 서버 · ${settings.wsUrl ?? DEFAULT_SEMICNV_WS_URL}`}
+        title={statusTitle}
         onClick={openConfig}
       >
-        <span className={`h-2 w-2 rounded-full ${SERVER_STATE_COLOR[connectionState]}`} />
-        서버 · {SERVER_STATE_LABEL[connectionState]}
+        <span className={`h-2 w-2 rounded-full ${statusDotClass}`} />
+        {statusLabel}
         {settings.mockMode ? ' (Mock)' : ''}
         {/* 설정 아이콘 */}
         <svg

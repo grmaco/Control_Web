@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { STORAGE_KEYS } from '../constants/storage'
+import { persistMainPowerOffHistory } from '../utils/persistAlarmHistory'
+import { useConveyorStore } from './useConveyorStore'
 
 interface LineControlState {
   powerOn: boolean
@@ -29,6 +31,8 @@ interface PersistedMonitorState {
 
 interface MonitorState {
   etherCatConnected: boolean
+  /** EtherCAT/메인 전원 OFF 최초 감지 시각 (ALARM HISTORY용) */
+  etherCatOffSince: string | null
   lineControls: Record<string, LineControlState>
   lineViews: Record<string, MonitorViewTransform>
   /** 모니터링 화면 전용 선택 라인 */
@@ -114,6 +118,7 @@ function pickMonitorLineId(
 
 export const useMonitorStore = create<MonitorState>((set, get) => ({
   etherCatConnected: false,
+  etherCatOffSince: null,
   lineControls: {},
   lineViews: {},
   monitorLineId: null,
@@ -126,6 +131,7 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
     set({
       hasHydrated: true,
       etherCatConnected: saved.etherCatConnected,
+      etherCatOffSince: null,
       lineControls: saved.lineControls,
       lineViews: saved.lineViews,
       monitorLineId: saved.lastMonitorLineId,
@@ -199,8 +205,15 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
   },
 
   toggleEtherCat: () => {
-    const etherCatConnected = !get().etherCatConnected
-    set({ etherCatConnected })
+    const prevConnected = get().etherCatConnected
+    const etherCatConnected = !prevConnected
+    const etherCatOffSince = etherCatConnected
+      ? null
+      : (get().etherCatOffSince ?? new Date().toISOString())
+    set({ etherCatConnected, etherCatOffSince })
+    if (!etherCatConnected && etherCatOffSince) {
+      persistMainPowerOffHistory(useConveyorStore.getState().lines, etherCatOffSince)
+    }
     persist({
       ...snapshot(get()),
       etherCatConnected,

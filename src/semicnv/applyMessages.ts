@@ -25,6 +25,10 @@ export interface SemiCnvApplyResult {
   allCvRuntime: Record<number, SemiCnvUnitRuntime>
   lineRuntime: Record<string, SemiCnvLineRuntime>
   liveAlarms: AlarmEntry[]
+  /** 유닛별 현재 활성 알람 코드 (unitId → alarmCode) */
+  unitAlarms: Record<string, string>
+  /** 유닛별 알람 최초 발생 시각 (unitId → ISO8601) */
+  unitAlarmAt: Record<string, string>
   siteId: string | null
   siteName: string | null
   programVersion: string | null
@@ -40,6 +44,8 @@ export function createEmptyApplyResult(): SemiCnvApplyResult {
     allCvRuntime: {},
     lineRuntime: {},
     liveAlarms: [],
+    unitAlarms: {},
+    unitAlarmAt: {},
     siteId: null,
     siteName: null,
     programVersion: null,
@@ -107,6 +113,9 @@ function applyConveyorStatus(
   const unitStatuses = { ...prev.unitStatuses }
   const unitRuntime = { ...prev.unitRuntime }
   const allCvRuntime = { ...prev.allCvRuntime }
+  const unitAlarms = { ...prev.unitAlarms }
+  const unitAlarmAt = { ...prev.unitAlarmAt }
+  const occurredAt = message.timestamp || new Date().toISOString()
 
   for (const item of message.data) {
     const { status, runtime } = toUnitRuntime(item)
@@ -118,9 +127,24 @@ function applyConveyorStatus(
     if (!matched) continue
     unitStatuses[matched.unit.id] = status
     unitRuntime[matched.unit.id] = runtime
+
+    // 알람 상세 동기화: 발생 시 메시지 저장, 해제 시 삭제
+    if (item.alarm) {
+      if (item.alarmMessage) {
+        unitAlarms[matched.unit.id] = item.alarmMessage
+      } else if (item.alarmCode != null) {
+        unitAlarms[matched.unit.id] = String(item.alarmCode)
+      }
+      if (!unitAlarmAt[matched.unit.id]) {
+        unitAlarmAt[matched.unit.id] = occurredAt
+      }
+    } else {
+      delete unitAlarms[matched.unit.id]
+      delete unitAlarmAt[matched.unit.id]
+    }
   }
 
-  return { ...prev, unitStatuses, unitRuntime, allCvRuntime }
+  return { ...prev, unitStatuses, unitRuntime, allCvRuntime, unitAlarms, unitAlarmAt }
 }
 
 function applyLineStatus(
@@ -173,16 +197,31 @@ function applyAlarmEvent(
   const matched = findUnitBySemiCnvId(lines, data.conveyorId, data.lineId)
   const unitName = matched?.unit.name ?? `CV-${data.conveyorId}`
 
+  console.log(
+    `[ALARM ${data.eventType}] conveyorId=${data.conveyorId} lineId=${data.lineId} code=${data.alarmCode}`,
+    `→ matched: ${matched ? `${matched.unit.name}(${matched.unit.id})` : 'null (매칭 실패)'}`,
+  )
+
   if (data.eventType === 'CLEAR') {
+    const unitAlarmAt = { ...prev.unitAlarmAt }
+    for (const [unitId, code] of Object.entries(prev.unitAlarms)) {
+      if (code === data.alarmCode) delete unitAlarmAt[unitId]
+    }
+
     return {
       ...prev,
       liveAlarms: prev.liveAlarms.filter((alarm) => alarm.alarmId !== data.alarmCode),
+      unitAlarms: Object.fromEntries(
+        Object.entries(prev.unitAlarms).filter(([, code]) => code !== data.alarmCode),
+      ),
+      unitAlarmAt,
     }
   }
 
+  const occurredAt = message.timestamp || new Date().toISOString()
   const alarm: AlarmEntry = {
-    id: `semicnv-${data.alarmCode}-${message.timestamp}`,
-    timestamp: message.timestamp,
+    id: `semicnv-${data.alarmCode}-${occurredAt}`,
+    timestamp: occurredAt,
     alarmId: data.alarmCode,
     alarmText: data.message || `${unitName} ${data.alarmCode}`,
     level: mapSemiCnvAlarmLevel(data.alarmLevel),
@@ -191,6 +230,12 @@ function applyAlarmEvent(
   return {
     ...prev,
     liveAlarms: [alarm, ...prev.liveAlarms].slice(0, 50),
+    unitAlarms: matched
+      ? { ...prev.unitAlarms, [matched.unit.id]: data.alarmCode }
+      : prev.unitAlarms,
+    unitAlarmAt: matched
+      ? { ...prev.unitAlarmAt, [matched.unit.id]: occurredAt }
+      : prev.unitAlarmAt,
   }
 }
 
@@ -211,10 +256,12 @@ function applyCstTracking(
         semiCnvId: item.conveyorId,
         semiCnvLineId: item.lineId,
         autoStep: 0,
-        autoStatus: 'Idle',
-        runStatus: 'Stop',
-        operationStatus: 'Auto',
+        autoStatus: 'Idle' as const,
+        runStatus: 'Stop' as const,
+        operationStatus: 'Auto' as const,
         alarm: false,
+        homeDone: null,
+        currentDegree: null,
         updatedAt: message.timestamp,
       }),
       cstId: item.cstId,

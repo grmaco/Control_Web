@@ -75,7 +75,6 @@ export function MonitorControlBar({
   allAutoRun,
   onToggleEtherCat,
   onToggleAllPower,
-  onAllPowerOn,
   onAllAutoRun,
   onAllAutoStop,
   onAlarmReset,
@@ -85,7 +84,6 @@ export function MonitorControlBar({
   allAutoRun: boolean
   onToggleEtherCat: () => void
   onToggleAllPower: () => void
-  onAllPowerOn: () => void
   onAllAutoRun: () => void
   onAllAutoStop: () => void
   onAlarmReset: () => void
@@ -94,20 +92,18 @@ export function MonitorControlBar({
     <div className="flex flex-wrap gap-2">
       <ControlButton label="EtherCAT"     active={etherCatConnected} onClick={onToggleEtherCat} />
       <ControlButton
-        label="All Power On"
+        label="설비 전원"
         active={allPowerOn}
         onClick={onToggleAllPower}
-        onLongPress={onAllPowerOn}
-        longPressMs={1000}
       />
       <ControlButton
-        label="All Auto Run"
+        label="설비 가동"
         active={allAutoRun}
         onClick={onAllAutoRun}
         onLongPress={onAllAutoStop}
         longPressMs={1000}
       />
-      <ControlButton label="Alarm Reset"  active={false} onClick={onAlarmReset} />
+      <ControlButton label="이상 복귀" active={false} onClick={onAlarmReset} />
     </div>
   )
 }

@@ -29,6 +29,7 @@ interface PlacedUnitProps {
   dragEnabled?: boolean
   flow?: TurnFlowDisplay | null
   pickHighlight?: 'source' | 'target' | null
+  onPanLock?: () => void
   onSelect: () => void
 }
 
@@ -48,6 +49,7 @@ export function PlacedUnit({
   dragEnabled = true,
   flow = null,
   pickHighlight = null,
+  onPanLock,
   onSelect,
 }: PlacedUnitProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -74,6 +76,10 @@ export function PlacedUnit({
       ref={setNodeRef}
       {...listeners}
       {...attributes}
+      onPointerDown={(e) => {
+        e.stopPropagation()
+        onPanLock?.()
+      }}
       onClick={(e) => {
         e.stopPropagation()
         onSelect()
@@ -83,7 +89,7 @@ export function PlacedUnit({
         height: spanHeight,
         touchAction: 'none',
       }}
-      className={`absolute top-0 left-0 flex cursor-grab flex-col items-center justify-center border p-1 text-[10px] leading-tight active:cursor-grabbing relative overflow-hidden ${(useRollerSvg || useTurnSvg || useStorageSvg) ? colors.border : `${colors.bg} ${colors.border}`} ${selected ? 'ring-2 ring-inset ring-white' : ''} ${
+      className={`builder-no-pan absolute top-0 left-0 flex cursor-grab flex-col items-center justify-center border p-1 text-[10px] leading-tight active:cursor-grabbing relative overflow-hidden ${(useRollerSvg || useTurnSvg || useStorageSvg) ? colors.border : `${colors.bg} ${colors.border}`} ${selected ? 'ring-2 ring-inset ring-white' : ''} ${
         pickHighlight === 'source'
           ? 'ring-2 ring-inset ring-cyan-300 brightness-125'
           : pickHighlight === 'target'

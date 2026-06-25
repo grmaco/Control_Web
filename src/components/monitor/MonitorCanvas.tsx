@@ -8,6 +8,7 @@ import { MONITOR_CELL_SIZE } from '../../constants/grid'
 import { usePathSimulation } from '../../hooks/usePathSimulation'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { useMonitorStore, type MonitorViewTransform } from '../../store/useMonitorStore'
+import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import type { ConveyorLine } from '../../types/conveyor'
 import { PATH_SIMULATION_STEP_MS } from '../../types/unitProperties'
 import { lineLayoutSignature } from '../../utils/lineLayoutSignature'
@@ -15,6 +16,7 @@ import { getBuilderViewport, getLineViewport } from '../../utils/lineViewport'
 import { fitFullMapInView, focusLineInView } from '../../utils/monitorView'
 import { LineStatusGrid } from './LineStatusGrid'
 import { PathSimulationBar } from './PathSimulationBar'
+import { FLOW_CALLOUT_PANEL_CLASS } from './FlowCalloutLayer'
 
 const CELL_SIZE = MONITOR_CELL_SIZE
 const LABELS_MIN_EFFECTIVE_CELL = 32
@@ -96,9 +98,11 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
     return { scale: 1, positionX: 0, positionY: 0 }
   }, [layoutSignature, line.id, savedView])
 
+  const isLive = useSemiCnvStore((s) => s.isLive)
   const [scale, setScale] = useState(initialTransform.scale)
   const [calloutPanLock, setCalloutPanLock] = useState(false)
   const [calloutDeselectToken, setCalloutDeselectToken] = useState(0)
+  const [simBlockPopupOpen, setSimBlockPopupOpen] = useState(false)
   const viewStateRef = useRef(initialTransform)
 
   const logButton = (comment: string) => {
@@ -169,7 +173,11 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   const zoomConfig = useMemo(
     () => ({
       ...ZOOM_CONFIG,
-      panning: { ...ZOOM_CONFIG.panning, disabled: calloutPanLock },
+      panning: {
+        ...ZOOM_CONFIG.panning,
+        disabled: calloutPanLock,
+        excluded: [FLOW_CALLOUT_PANEL_CLASS],
+      },
     }),
     [calloutPanLock],
   )
@@ -248,10 +256,16 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
         waitingLabels={simulation.waitingLabels}
         inputIntervalSec={simulation.inputIntervalSec}
         dischargeIntervalSec={simulation.dischargeIntervalSec}
+        transitIntervalSec={simulation.transitIntervalSec}
         onInputIntervalSecChange={simulation.setInputIntervalSec}
         onDischargeIntervalSecChange={simulation.setDischargeIntervalSec}
+        onTransitIntervalSecChange={simulation.setTransitIntervalSec}
         incompleteLoadCount={simulation.incompleteLoadCount}
         onStart={() => {
+          if (isLive) {
+            setSimBlockPopupOpen(true)
+            return
+          }
           simulation.start()
           logButton('Path Simulation Start')
         }}
@@ -269,6 +283,10 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
           logButton('Path Simulation Reset')
         }}
         onStepForward={() => {
+          if (isLive) {
+            setSimBlockPopupOpen(true)
+            return
+          }
           simulation.stepForward()
           logButton('Path Simulation Step')
         }}
@@ -335,9 +353,37 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
       </TransformWrapper>
 
       <p className="border-t border-slate-800 px-4 py-2 text-xs text-slate-500">
-        마우스 휠: 줌 · 드래그: 맵 이동 · 정보 표: 클릭 선택 후 드래그로 위치 고정 · 경로 시뮬레이션: 투입(IN) 또는 출고(OUT) 다중 동시 출발 (
-        {PATH_SIMULATION_STEP_MS / 1000}초/모듈)
+        마우스 휠: 줌 · 드래그: 맵 이동 · 정보 표: 클릭 선택 후 드래그로 위치 고정 · 경로 시뮬레이션: 투입(IN) 또는 출고(OUT) 다중 동시 출발 (틱{' '}
+        {PATH_SIMULATION_STEP_MS / 1000}초)
       </p>
+
+      {simBlockPopupOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setSimBlockPopupOpen(false)}
+        >
+          <div
+            className="mx-4 w-full max-w-xs rounded-lg border border-amber-500/60 bg-slate-800 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mb-1 text-base font-bold text-amber-400">시뮬레이션 불가</p>
+            <p className="mb-5 text-sm text-slate-300">
+              V3가 연결된 실제 운영 환경입니다.
+              <br />
+              시뮬레이션은 V3 연결이 끊긴 상태에서만 실행할 수 있습니다.
+            </p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSimBlockPopupOpen(false)}
+                className="rounded border border-slate-600 bg-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-600"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

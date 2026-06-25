@@ -54,6 +54,8 @@ export interface SemiCnvConveyorStatusItem {
   destination: number
   currentDegree?: string
   axis?: { torque: number; homeDone: string }
+  alarmCode?: number
+  alarmMessage?: string
 }
 
 export interface SemiCnvLineStatusItem {
@@ -188,9 +190,16 @@ export interface SemiCnvUnitRuntime {
   autoStatus: SemiCnvAutoStatus
   runStatus: SemiCnvRunStatus
   operationStatus: SemiCnvOperationStatus
+  power: SemiCnvPower
   cstId: string | null
   destination: number
   alarm: boolean
+  alarmCode?: number | null
+  alarmMessage?: string | null
+  /** 회전/리프트 HOME 완료 여부 (V3 axis.homeDone) */
+  homeDone: string | null
+  /** 회전 유닛 현재 각도 (V3 currentDegree) */
+  currentDegree: string | null
   updatedAt: string
 }
 

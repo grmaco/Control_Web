@@ -6,8 +6,11 @@ import type {
   SemiCnvRunStatus,
   SemiCnvUnitRuntime,
 } from '../../types/semicnv'
+import { useSemiCnvStore } from '../../store/useSemiCnvStore'
+import { resolveUnitAlarmDisplay } from '../../utils/unitAlarmDisplay'
 
 interface CvRow {
+  unitId: string
   cvId: number
   name: string
   lineName: string
@@ -16,6 +19,8 @@ interface CvRow {
   operationStatus: SemiCnvOperationStatus
   autoStatus: SemiCnvAutoStatus
   alarm: boolean
+  alarmCode: string | null
+  alarmText: string | null
   cstId: string | null
   destination: number
 }
@@ -48,6 +53,8 @@ export function CvStatusPanel({
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
   const [searchCst, setSearchCst] = useState('')
   const [searchName, setSearchName] = useState('')
+  const unitAlarms = useSemiCnvStore((s) => s.unitAlarms)
+  const liveAlarms = useSemiCnvStore((s) => s.liveAlarms)
 
   // 선택 라인의 유닛을 직접 순회 → Web UUID 기반 unitRuntime 참조
   // (두 V3가 같은 semiCnvId를 쓰더라도 Web UUID로 분리되어 충돌 없음)
@@ -61,7 +68,15 @@ export function CvStatusPanel({
       for (const unit of selectedLine.units) {
         const rt = (unitRuntime as Record<string, SemiCnvUnitRuntime>)[unit.id]
         if (!rt) continue
+        const alarmDisplay = resolveUnitAlarmDisplay(
+          unit.id,
+          unit.name,
+          rt,
+          unitAlarms,
+          liveAlarms,
+        )
         result.push({
+          unitId: unit.id,
           cvId: rt.semiCnvId,
           name: unit.name,
           lineName,
@@ -70,6 +85,8 @@ export function CvStatusPanel({
           operationStatus: rt.operationStatus,
           autoStatus: rt.autoStatus,
           alarm: rt.alarm,
+          alarmCode: alarmDisplay.alarmCode,
+          alarmText: alarmDisplay.alarmText,
           cstId: rt.cstId,
           destination: rt.destination,
         })
@@ -80,7 +97,15 @@ export function CvStatusPanel({
         for (const unit of line.units) {
           const rt = (unitRuntime as Record<string, SemiCnvUnitRuntime>)[unit.id]
           if (!rt) continue
+          const alarmDisplay = resolveUnitAlarmDisplay(
+            unit.id,
+            unit.name,
+            rt,
+            unitAlarms,
+            liveAlarms,
+          )
           result.push({
+            unitId: unit.id,
             cvId: rt.semiCnvId,
             name: unit.name,
             lineName: line.name,
@@ -89,6 +114,8 @@ export function CvStatusPanel({
             operationStatus: rt.operationStatus,
             autoStatus: rt.autoStatus,
             alarm: rt.alarm,
+            alarmCode: alarmDisplay.alarmCode,
+            alarmText: alarmDisplay.alarmText,
             cstId: rt.cstId,
             destination: rt.destination,
           })
@@ -98,7 +125,7 @@ export function CvStatusPanel({
 
     result.sort((a, b) => a.cvId - b.cvId)
     return result
-  }, [unitRuntime, selectedLine, lines, lineName])
+  }, [unitRuntime, selectedLine, lines, lineName, unitAlarms, liveAlarms])
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
@@ -182,6 +209,7 @@ export function CvStatusPanel({
               <th className="px-3 py-2 text-center font-medium">MODE</th>
               <th className="px-3 py-2 text-center font-medium">STATUS</th>
               <th className="px-3 py-2 text-center font-medium">ALARM</th>
+              <th className="px-3 py-2 text-left font-medium">ALARM TEXT</th>
               <th className="px-3 py-2 text-left font-medium">제품 ID (CST)</th>
               <th className="px-3 py-2 text-center font-medium">DEST</th>
             </tr>
@@ -189,7 +217,7 @@ export function CvStatusPanel({
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={10} className="py-8 text-center text-slate-500">
+                <td colSpan={11} className="py-8 text-center text-slate-500">
                   {rows.length === 0 ? 'V3 연결 후 CV 데이터가 표시됩니다.' : '검색 결과 없음'}
                 </td>
               </tr>
@@ -198,7 +226,7 @@ export function CvStatusPanel({
                 const isCstMatch = highlightCst && (r.cstId ?? '').toLowerCase().includes(highlightCst)
                 return (
                   <tr
-                    key={r.cvId}
+                    key={r.unitId}
                     className={`border-b border-slate-800 transition-colors ${
                       isCstMatch
                         ? 'bg-amber-950/60 ring-1 ring-inset ring-amber-700'
@@ -236,12 +264,24 @@ export function CvStatusPanel({
                     </td>
                     <td className="px-3 py-2 text-center">
                       {r.alarm ? (
-                        <span className="inline-block rounded bg-red-700 px-1.5 py-0.5 text-xs font-bold text-red-100">
-                          ALARM
-                        </span>
+                        r.alarmCode ? (
+                          <span className="inline-block rounded bg-red-700 px-1.5 py-0.5 font-mono text-xs font-bold text-red-100">
+                            {r.alarmCode}
+                          </span>
+                        ) : (
+                          <span className="inline-block rounded bg-red-700 px-1.5 py-0.5 text-xs font-bold text-red-100">
+                            ALARM
+                          </span>
+                        )
                       ) : (
                         <span className="text-slate-600">-</span>
                       )}
+                    </td>
+                    <td
+                      className="max-w-[220px] truncate px-3 py-2 text-slate-300"
+                      title={r.alarmText ?? undefined}
+                    >
+                      {r.alarmText ?? <span className="text-slate-600">-</span>}
                     </td>
                     <td className={`px-3 py-2 font-mono ${isCstMatch ? 'font-bold text-amber-300' : 'text-slate-300'}`}>
                       {r.cstId ?? <span className="text-slate-600">-</span>}

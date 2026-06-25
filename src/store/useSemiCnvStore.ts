@@ -26,6 +26,11 @@ import {
 } from '../semicnv/lineCommStatus'
 import { SemiCnvClient } from '../semicnv/SemiCnvClient'
 import { SemiCnvMockFeed } from '../semicnv/SemiCnvMockFeed'
+import { mapSemiCnvAlarmLevel } from '../semicnv/mapStatus'
+import {
+  persistMainPowerOffHistory,
+  persistUnitAlarmHistory,
+} from '../utils/persistAlarmHistory'
 import { useConveyorStore } from './useConveyorStore'
 import { useMonitorStore } from './useMonitorStore'
 
@@ -41,6 +46,8 @@ interface SemiCnvState {
   unitRuntime: Record<string, SemiCnvUnitRuntime>
   allCvRuntime: Record<number, SemiCnvUnitRuntime>
   lineRuntime: Record<string, SemiCnvLineRuntime>
+  unitAlarms: Record<string, string>
+  unitAlarmAt: Record<string, string>
   ioStatus: SemiCnvIOStatus | null
   liveAlarms: AlarmEntry[]
   v3Logs: SemiCnvLogEntry[]
@@ -68,6 +75,8 @@ function mergeApplyResult(
     unitRuntime: { ...prev.unitRuntime, ...next.unitRuntime },
     allCvRuntime: { ...prev.allCvRuntime, ...next.allCvRuntime },
     lineRuntime: { ...prev.lineRuntime, ...next.lineRuntime },
+    unitAlarms: next.unitAlarms,
+    unitAlarmAt: next.unitAlarmAt,
     liveAlarms: next.liveAlarms.length > 0 ? next.liveAlarms : prev.liveAlarms,
     siteId: next.siteId ?? prev.siteId,
     siteName: next.siteName ?? prev.siteName,
@@ -80,7 +89,24 @@ function mergeApplyResult(
 
 function applyToMonitorStore(result: SemiCnvApplyResult): void {
   if (result.etherCatConnected != null) {
-    useMonitorStore.setState({ etherCatConnected: result.etherCatConnected })
+    const prev = useMonitorStore.getState()
+    const etherCatConnected = result.etherCatConnected
+    let etherCatOffSince = prev.etherCatOffSince
+
+    if (!etherCatConnected) {
+      etherCatOffSince =
+        etherCatOffSince ??
+        result.lastMessageAt ??
+        new Date().toISOString()
+    } else {
+      etherCatOffSince = null
+    }
+
+    if (!etherCatConnected && !prev.etherCatOffSince && etherCatOffSince) {
+      persistMainPowerOffHistory(useConveyorStore.getState().lines, etherCatOffSince)
+    }
+
+    useMonitorStore.setState({ etherCatConnected, etherCatOffSince })
   }
 
   const patches = result.lineControlPatches
@@ -104,6 +130,8 @@ function clearRuntime(): Partial<SemiCnvState> {
     unitRuntime: {},
     allCvRuntime: {},
     lineRuntime: {},
+    unitAlarms: {},
+    unitAlarmAt: {},
     ioStatus: null,
     liveAlarms: [],
     v3Logs: [],
@@ -149,6 +177,7 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
 
     const allLines = useConveyorStore.getState().lines
     const { settings } = get()
+    const prevUnitAlarmAt = get().unitAlarmAt
 
     // 라인 전용 URL → 그 URL이 지정된 라인만, 전역 URL → 전용 URL 없는 라인만
     const isPerLineUrl = sourceUrl && sourceUrl !== settings.wsUrl
@@ -167,6 +196,8 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
       unitRuntime: applyBuffer.unitRuntime,
       allCvRuntime: applyBuffer.allCvRuntime,
       lineRuntime: applyBuffer.lineRuntime,
+      unitAlarms: applyBuffer.unitAlarms,
+      unitAlarmAt: applyBuffer.unitAlarmAt,
       liveAlarms: applyBuffer.liveAlarms,
       siteStatus: markStaleSites(commTrack.sites),
       lineCommRecords: commTrack.lines,
@@ -188,20 +219,34 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
 
     set(nextState)
 
+    for (const [unitId, timestamp] of Object.entries(applyBuffer.unitAlarmAt)) {
+      if (prevUnitAlarmAt[unitId]) continue
+      persistUnitAlarmHistory(
+        allLines,
+        unitId,
+        timestamp,
+        applyBuffer.unitAlarms[unitId] ?? 'ALARM',
+      )
+    }
+
     applyToMonitorStore(applyBuffer)
 
     if (message.type === 'ALARM_EVENT') {
       const alarmData = message.data as import('../types/semicnv').SemiCnvAlarmEventData
       if (alarmData.eventType === 'OCCUR') {
-        const matched = lines
+        const matched = allLines
           .flatMap((line) => line.units.map((unit) => ({ line, unit })))
           .find(({ unit }) => unit.semiCnvId === alarmData.conveyorId)
+        const unitName = matched?.unit.name ?? `CV-${alarmData.conveyorId}`
+        const timestamp = message.timestamp || new Date().toISOString()
 
-        void useConveyorStore.getState().addHistory({
-          unitId: matched?.unit.id ?? 'semicnv-system',
-          lineId: matched?.line.id ?? lines[0]?.id ?? 'global',
-          eventType: 'error',
-          message: alarmData.message,
+        void useConveyorStore.getState().appendAlarmHistory({
+          id: `semicnv-${alarmData.alarmCode}-${timestamp}`,
+          lineId: matched?.line.id ?? allLines[0]?.id ?? 'global',
+          timestamp,
+          alarmId: alarmData.alarmCode,
+          alarmText: alarmData.message || `${unitName} ${alarmData.alarmCode}`,
+          level: mapSemiCnvAlarmLevel(alarmData.alarmLevel),
         })
       }
     }
@@ -217,6 +262,8 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
     unitRuntime: {},
     allCvRuntime: {},
     lineRuntime: {},
+    unitAlarms: {},
+    unitAlarmAt: {},
     ioStatus: null,
     liveAlarms: [],
     v3Logs: [],

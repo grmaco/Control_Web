@@ -428,6 +428,7 @@ function createSimulationLoad(
     released: true,
     entryTicks: 0,
     exitTicks: 0,
+    transitTicks: 0,
   }
 }
 
@@ -634,19 +635,38 @@ export function initializeParallelLoads(
     released: true,
     entryTicks: 0,
     exitTicks: 0,
+    transitTicks: 0,
   }))
 }
 
 export interface SimulationStepTiming {
   inputIntervalSec: number
   dischargeIntervalSec: number
+  transitIntervalSec: number
 }
 
-const SIM_TRANSIT_STEP_SEC = PATH_SIMULATION_STEP_MS / 1000
+const SIM_TICK_SEC = PATH_SIMULATION_STEP_MS / 1000
 
-/** 시작·종료점 체류 틱 (중간 이동은 SIM_TRANSIT_STEP_SEC 고정) */
+/** 초 → 시뮬 틱 수 (틱 간격 PATH_SIMULATION_STEP_MS) */
 function requiredDwellTicks(intervalSec: number): number {
-  return Math.max(1, Math.ceil(Math.max(0.1, intervalSec) / SIM_TRANSIT_STEP_SEC))
+  return Math.max(1, Math.ceil(Math.max(0.1, intervalSec) / SIM_TICK_SEC))
+}
+
+/** 이송 — 모듈 체류 후 다음 칸 이동까지 필요한 시뮬 틱 수 */
+function requiredTransitTicks(transitIntervalSec: number): number {
+  return Math.max(1, Math.ceil(Math.max(0.1, transitIntervalSec) / SIM_TICK_SEC))
+}
+
+function isReadyToLeaveModule(
+  load: PathSimulationLoad,
+  entryTicksRequired: number,
+  transitTicksRequired: number,
+): boolean {
+  if (isAtDestination(load)) return false
+  if (load.stepIndex === 0) {
+    return (load.entryTicks ?? 0) >= entryTicksRequired
+  }
+  return (load.transitTicks ?? 0) >= transitTicksRequired
 }
 
 export function applySimulationStep(
@@ -680,16 +700,19 @@ export function advanceSimulationLoads(
   timing: SimulationStepTiming = {
     inputIntervalSec: 0.5,
     dischargeIntervalSec: 0.5,
+    transitIntervalSec: 0.5,
   },
 ): PathSimulationLoad[] {
   const entryTicksRequired = requiredDwellTicks(timing.inputIntervalSec)
   const exitTicksRequired = requiredDwellTicks(timing.dischargeIntervalSec)
+  const transitTicksRequired = requiredTransitTicks(timing.transitIntervalSec)
 
   const next = dedupeSimulationLoadsById(loads).map((load) => ({
     ...load,
     waiting: false,
     entryTicks: load.entryTicks ?? 0,
     exitTicks: load.exitTicks ?? 0,
+    transitTicks: load.transitTicks ?? 0,
   }))
 
   for (let i = 0; i < next.length; i += 1) {
@@ -711,8 +734,15 @@ export function advanceSimulationLoads(
       continue
     }
 
-    if (load.stepIndex === 0) {
+    if (load.stepIndex === 0 && load.entryTicks < entryTicksRequired) {
       load.entryTicks += 1
+      load.waiting = true
+      continue
+    }
+
+    if (load.stepIndex > 0 && load.transitTicks < transitTicksRequired) {
+      load.transitTicks += 1
+      load.waiting = true
     }
   }
 
@@ -720,7 +750,7 @@ export function advanceSimulationLoads(
   for (let i = 0; i < next.length; i += 1) {
     const load = next[i]!
     if (!load.released || load.complete || isAtDestination(load)) continue
-    if (load.stepIndex === 0 && load.entryTicks < entryTicksRequired) {
+    if (!isReadyToLeaveModule(load, entryTicksRequired, transitTicksRequired)) {
       load.waiting = true
       continue
     }
@@ -777,9 +807,11 @@ export function advanceSimulationLoads(
       const targetUnit = unitMap.get(to)
       const destinationId = next[index]!.pathUnitIds[next[index]!.pathUnitIds.length - 1]
       const isDestination = to === destinationId
+      const onPlannedPath = next[index]!.pathUnitIds.includes(to)
       if (
         targetUnit &&
         !isDestination &&
+        !onPlannedPath &&
         !isSimulationTransitPassable(targetUnit)
       ) {
         next[index]!.waiting = true
@@ -793,6 +825,7 @@ export function advanceSimulationLoads(
   for (const index of approved) {
     const targetStep = proposals.get(index)!
     next[index]!.stepIndex = targetStep
+    next[index]!.transitTicks = 0
     if (next[index]!.stepIndex > 0) {
       next[index]!.entryTicks = 0
     }

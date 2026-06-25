@@ -82,6 +82,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   const [activeDrag, setActiveDrag] = useState<BuilderDragData | null>(null)
   const [overCellId, setOverCellId] = useState<string | null>(null)
   const [frozenViewport, setFrozenViewport] = useState<LineViewport | null>(null)
+  const [panLocked, setPanLocked] = useState(false)
   const [outputDestinationPickPortId, setOutputDestinationPickPortId] = useState<
     string | null
   >(null)
@@ -212,6 +213,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   }
 
   const handleDragStart = (event: DragStartEvent) => {
+    setPanLocked(true)
     setActiveDrag(event.active.data.current as BuilderDragData)
     setFrozenViewport(getBuilderViewport(draftRef.current))
   }
@@ -236,6 +238,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     setActiveDrag(null)
     setOverCellId(null)
     setFrozenViewport(null)
+    setPanLocked(false)
 
     if (!dragData) return
 
@@ -279,7 +282,20 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     setActiveDrag(null)
     setOverCellId(null)
     setFrozenViewport(null)
+    setPanLocked(false)
   }
+
+  const handleUnitPointerDown = useCallback(() => {
+    setPanLocked(true)
+  }, [])
+
+  useEffect(() => {
+    if (!panLocked || activeDrag) return
+
+    const releasePan = () => setPanLocked(false)
+    window.addEventListener('pointerup', releasePan)
+    return () => window.removeEventListener('pointerup', releasePan)
+  }, [panLocked, activeDrag])
 
   const handleRotate = useCallback(
     async (unitId: string) => {
@@ -513,7 +529,11 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
               maxScale={4}
               smooth
               wheel={{ step: 0.004 }}
-              panning={{ velocityDisabled: true }}
+              panning={{
+                velocityDisabled: true,
+                disabled: panLocked || activeDrag !== null,
+                excluded: ['builder-no-pan'],
+              }}
               doubleClick={{ disabled: true }}
             >
               <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }}>
@@ -577,6 +597,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                         !outputDestinationPickPortId &&
                         (selectedCount <= 1 || selectedUnitIdsSet.has(unit.id))
                       }
+                      onPanLock={handleUnitPointerDown}
                       onSelect={() => {
                         if (outputDestinationPickPortId) {
                           if (
@@ -614,7 +635,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
           </div>
           <p className="mt-2 text-xs text-slate-500">
             배치된 영역 중심 작업 화면 · 저장 맵 {draft.gridSize.cols}×
-            {draft.gridSize.rows} · 드래그 시 가장자리로 작업 영역 확장
+            {draft.gridSize.rows} · 빈 칸 드래그로 맵 이동 · 모듈 드래그로 배치 변경
           </p>
         </section>
 

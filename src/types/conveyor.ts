@@ -122,6 +122,8 @@ import type { SemiCnvMonitorSettings } from './semicnv'
 
 export interface AppSettings {
   lastViewedLineId?: string
+  /** 주화면 현장 그리드뷰 행 순서 (line id 배열) */
+  lineOrder?: string[]
   zoomLevel?: number
   /** Semi C/V WebSocket 모니터링 연동 설정 */
   semiCnv?: SemiCnvMonitorSettings

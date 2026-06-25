@@ -1,5 +1,10 @@
 import type { SemiCnvIOStatus } from '../../types/semicnv'
-import type { CurrentStatusMode } from '../../utils/monitorStats'
+import {
+  autoConditionValueClass,
+  currentStatusValueClass,
+  type CurrentStatusMode,
+  safetyConditionValueClass,
+} from '../../utils/monitorStats'
 
 function StatusPanel({
   title,
@@ -41,33 +46,24 @@ export function MonitorStatusPanels({
   const autoEnabled = ioStatus != null ? ioStatus.autoConditionOk : autoEnabledFallback
   const currentStatusLabel = ioStatus?.currentStatus ?? currentStatusFallback
 
-  const currentStatusClass =
-    currentStatusLabel === 'Error' || currentStatusLabel === 'Idle'
-      ? currentStatusLabel === 'Error' ? 'text-red-400' : 'text-slate-300'
-      : currentStatusLabel === 'Auto Run'
-        ? 'text-blue-400'
-        : currentStatusLabel === 'Manual Mode'
-          ? 'text-amber-400'
-          : 'text-slate-300'
-
   return (
     <div className="grid gap-3 md:grid-cols-3">
       <StatusPanel
         title="SAFETY CONDITION"
         value={safetyOk ? 'Safety OK' : 'Safety NG'}
-        valueClass={safetyOk ? 'text-blue-400' : 'text-red-400'}
+        valueClass={safetyConditionValueClass(safetyOk)}
         checks={['Main Power, EMO, EMS Check']}
       />
       <StatusPanel
         title="AUTO CONDITION"
         value={autoEnabled ? 'Enable' : 'Disable'}
-        valueClass={autoEnabled ? 'text-emerald-400' : 'text-slate-400'}
+        valueClass={autoConditionValueClass(autoEnabled)}
         checks={['Safety OK, Power ON, Home Done']}
       />
       <StatusPanel
         title="CURRENT STATUS"
         value={currentStatusLabel}
-        valueClass={currentStatusClass}
+        valueClass={currentStatusValueClass(currentStatusLabel)}
         checks={['RUN Check, IN/OUT Mode Check']}
       />
     </div>

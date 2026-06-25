@@ -118,6 +118,13 @@ export function isValidTurnFlow(inDir: FlowDir, outDir: FlowDir): boolean {
   return isValidTurnArc(inDir, outDir) || isValidTurnThrough(inDir, outDir)
 }
 
+/** 미니맵 곡선(sweep)과 동일 — 1=시계, -1=반시계, null=직통 등 */
+export function turnFlowRotationSign(inDir: FlowDir, outDir: FlowDir): 1 | -1 | null {
+  const sweep = TURN_SWEEP[turnKey(inDir, outDir)]
+  if (sweep == null) return null
+  return sweep === 1 ? 1 : -1
+}
+
 export function buildTurnFlowPath(
   inDir: FlowDir,
   outDir: FlowDir,
