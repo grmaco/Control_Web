@@ -55,6 +55,8 @@ interface LineStatusGridProps {
   onCalloutPanLockChange?: (locked: boolean) => void
   /** 증가 시 콜아웃 선택 해제 */
   calloutDeselectToken?: number
+  /** 모니터링 2.5D 시점 표현 */
+  is25DView?: boolean
   className?: string
 }
 
@@ -135,6 +137,7 @@ export function LineStatusGrid({
   simulationPathUnitIds = [],
   onCalloutPanLockChange,
   calloutDeselectToken = 0,
+  is25DView = false,
   className,
 }: LineStatusGridProps) {
   const layoutSignature = useMemo(() => lineLayoutSignature(line), [line])
@@ -214,7 +217,17 @@ export function LineStatusGrid({
   )
 
   return (
-    <div className={`relative overflow-visible ${className ?? ''}`}>
+    <div
+      className={`relative overflow-visible transition-transform duration-300 ${className ?? ''}`}
+      style={
+        is25DView
+          ? {
+              transform: 'perspective(1200px) rotateX(52deg) rotateZ(-34deg) scale(0.9)',
+              transformOrigin: 'center center',
+            }
+          : undefined
+      }
+    >
       <div
         className={`inline-grid gap-0 overflow-visible bg-slate-950/50 ${
           showGridLines ? 'border border-slate-700' : ''

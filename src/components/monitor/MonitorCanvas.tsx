@@ -100,6 +100,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
 
   const isLive = useSemiCnvStore((s) => s.isLive)
   const [scale, setScale] = useState(initialTransform.scale)
+  const [is25DView, setIs25DView] = useState(false)
   const [calloutPanLock, setCalloutPanLock] = useState(false)
   const [calloutDeselectToken, setCalloutDeselectToken] = useState(0)
   const [simBlockPopupOpen, setSimBlockPopupOpen] = useState(false)
@@ -189,6 +190,15 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
           {line.name} · {viewport.cols}×{viewport.rows} · 유닛 {line.units.length}개
         </p>
         <div className="flex flex-wrap items-center gap-0.5 sm:gap-1">
+          <ZoomButton
+            label={is25DView ? '2D 보기' : '3D 보기'}
+            active={is25DView}
+            onClick={() => {
+              setIs25DView((current) => !current)
+              logButton(is25DView ? 'Switch 2D View' : 'Switch 3D View')
+            }}
+            wide
+          />
           <ZoomButton
             label={hideModuleNames ? '이름 보기' : '이름 숨기기'}
             active={hideModuleNames}
@@ -347,6 +357,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             simulationPathUnitIds={simulation.pathUnitIds}
             onCalloutPanLockChange={setCalloutPanLock}
             calloutDeselectToken={calloutDeselectToken}
+            is25DView={is25DView}
             className="pointer-events-none select-none"
           />
         </TransformComponent>
