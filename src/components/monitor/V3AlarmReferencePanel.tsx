@@ -1,11 +1,19 @@
 import { useState, useMemo } from 'react'
-import { useSemiCnvStore } from '../../store/useSemiCnvStore'
+import type { ConveyorLine } from '../../types/conveyor'
+import type { SemiCnvLineCommStatus } from '../../types/semicnv'
 import { useConveyorStore } from '../../store/useConveyorStore'
+import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import {
   buildActiveV3AlarmOccurrences,
   formatOccurrenceLocation,
   groupOccurrencesByAlarmCode,
 } from '../../utils/activeV3Alarms'
+import {
+  filterLiveAlarmsForLine,
+  filterUnitAlarmsForLine,
+  filterUnitRuntimeForLine,
+  isLineV3Online,
+} from '../../utils/lineV3Scope'
 
 type AlarmLevel = 'Error' | 'Warning' | 'Info'
 
@@ -894,17 +902,36 @@ interface V3AlarmReferencePanelProps {
   /** page: 전용 화면용 높이·레이아웃 */
   variant?: 'default' | 'page'
   className?: string
+  /** 지정 시 해당 라인 V3 Online일 때만 알람 표시 */
+  scopeLine?: ConveyorLine | null
+  lineComm?: SemiCnvLineCommStatus | null
 }
 
 export function V3AlarmReferencePanel({
   activeOnlyMode = false,
   variant = 'default',
   className = '',
+  scopeLine = null,
+  lineComm = null,
 }: V3AlarmReferencePanelProps) {
-  const liveAlarms  = useSemiCnvStore((s) => s.liveAlarms)
-  const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
-  const unitAlarms  = useSemiCnvStore((s) => s.unitAlarms)
-  const lines       = useConveyorStore((s) => s.lines)
+  const liveAlarmsAll  = useSemiCnvStore((s) => s.liveAlarms)
+  const unitRuntimeAll = useSemiCnvStore((s) => s.unitRuntime)
+  const unitAlarmsAll  = useSemiCnvStore((s) => s.unitAlarms)
+  const linesAll       = useConveyorStore((s) => s.lines)
+
+  const scopedLines = scopeLine
+    ? isLineV3Online(lineComm) ? [scopeLine] : []
+    : linesAll
+  const unitRuntime = scopeLine
+    ? filterUnitRuntimeForLine(scopeLine, unitRuntimeAll, lineComm)
+    : unitRuntimeAll
+  const unitAlarms = scopeLine
+    ? filterUnitAlarmsForLine(scopeLine, unitAlarmsAll, lineComm)
+    : unitAlarmsAll
+  const liveAlarms = scopeLine
+    ? filterLiveAlarmsForLine(scopeLine, liveAlarmsAll, lineComm)
+    : liveAlarmsAll
+  const lines = scopedLines
 
   const [search, setSearch]             = useState('')
   const [category, setCategory]         = useState('전체')

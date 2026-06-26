@@ -2,27 +2,79 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useConveyorStore } from '../../store/useConveyorStore'
 
-const navItems = [
-  { to: '/', label: '주화면', end: true },
-  { to: '/line-status', label: '라인 현황' },
-  { to: '/v3-alarms', label: '알람 리스트' },
-  { to: '/builder', label: '라인 빌더' },
-  { to: '/history', label: '이력' },
+type NavAccent = 'cyan' | 'teal' | 'amber' | 'violet' | 'sky'
+type NavIconName = 'home' | 'status' | 'alarm' | 'builder' | 'history'
+
+const navItems: {
+  to: string
+  label: string
+  end?: boolean
+  accent: NavAccent
+  icon: NavIconName
+}[] = [
+  { to: '/', label: '주화면', end: true, accent: 'cyan', icon: 'home' },
+  { to: '/line-status', label: '라인 현황', accent: 'teal', icon: 'status' },
+  { to: '/v3-alarms', label: '알람 리스트', accent: 'amber', icon: 'alarm' },
+  { to: '/builder', label: '라인 빌더', accent: 'violet', icon: 'builder' },
+  { to: '/history', label: '이력', accent: 'sky', icon: 'history' },
 ]
 
-const desktopLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-    isActive
-      ? 'bg-slate-800 text-white'
-      : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-  }`
+function NavIcon({ name, className }: { name: NavIconName; className?: string }) {
+  const cn = className ?? 'h-4 w-4 shrink-0'
+  switch (name) {
+    case 'home':
+      return (
+        <svg className={cn} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M3 10.5L12 3l9 7.5M5 9.5V20a1 1 0 001 1h4v-6h4v6h4a1 1 0 001-1V9.5"
+          />
+        </svg>
+      )
+    case 'status':
+      return (
+        <svg className={cn} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h10M4 18h16" />
+          <circle cx="18" cy="12" r="2.5" strokeWidth={1.75} />
+        </svg>
+      )
+    case 'alarm':
+      return (
+        <svg className={cn} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0a3 3 0 11-6 0"
+          />
+        </svg>
+      )
+    case 'builder':
+      return (
+        <svg className={cn} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M12 3l7 4v10l-7 4-7-4V7l7-4zM12 12l7-4M12 12v9M12 12L5 8"
+          />
+        </svg>
+      )
+    case 'history':
+      return (
+        <svg className={cn} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      )
+  }
+}
 
-const mobileLinkClass = ({ isActive }: { isActive: boolean }) =>
-  `rounded-md px-3 py-3 text-base font-medium transition-colors ${
-    isActive
-      ? 'bg-slate-800 text-white'
-      : 'text-slate-300 hover:bg-slate-800/60 hover:text-white'
-  }`
+function navLinkClass(isActive: boolean, accent: NavAccent, mobile = false) {
+  const size = mobile
+    ? 'nav-link nav-link--mobile flex items-center gap-3 rounded-lg px-3 py-3 text-base font-medium'
+    : 'nav-link flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium'
+  const state = isActive ? 'nav-link--active' : 'nav-link--idle'
+  return `${size} ${state} nav-link--${accent}`
+}
 
 export function Navigation() {
   const logApplication = useConveyorStore((s) => s.logApplication)
@@ -38,22 +90,31 @@ export function Navigation() {
 
   return (
     <>
-      {/* 데스크톱: 가로 나열 */}
-      <nav className="hidden md:flex gap-1">
-        {navItems.map(({ to, label, end }) => (
-          <NavLink key={to} to={to} end={end} onClick={() => handleClick(label)} className={desktopLinkClass}>
-            {label}
+      <nav className="nav-menu hidden gap-0.5 md:flex">
+        {navItems.map(({ to, label, end, accent, icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            end={end}
+            onClick={() => handleClick(label)}
+            className={({ isActive }) => navLinkClass(isActive, accent)}
+          >
+            <NavIcon name={icon} className="nav-link-icon h-4 w-4 shrink-0" />
+            <span className="nav-link-label">{label}</span>
           </NavLink>
         ))}
       </nav>
 
-      {/* 모바일: 햄버거 버튼 */}
       <button
         type="button"
         aria-label={mobileOpen ? '메뉴 닫기' : '메뉴 열기'}
         aria-expanded={mobileOpen}
         onClick={() => setMobileOpen((v) => !v)}
-        className="md:hidden flex h-11 w-11 items-center justify-center rounded-md text-slate-300 hover:bg-slate-800 active:bg-slate-700"
+        className={`nav-menu-toggle md:hidden flex h-11 w-11 items-center justify-center rounded-lg border transition-all duration-200 ${
+          mobileOpen
+            ? 'border-cyan-400/50 bg-cyan-500/10 text-cyan-200 shadow-[0_0_16px_rgba(34,211,238,0.2)]'
+            : 'border-slate-700/80 text-slate-300 hover:border-cyan-500/30 hover:bg-slate-800/80 hover:text-cyan-100'
+        }`}
       >
         {mobileOpen ? (
           <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -66,18 +127,24 @@ export function Navigation() {
         )}
       </button>
 
-      {/* 모바일: 풀 너비 드롭다운 (헤더 높이 64px 아래 고정) */}
       {mobileOpen && (
         <>
           <div
-            className="fixed inset-0 z-40 bg-black/20 md:hidden"
+            className="fixed inset-0 z-40 bg-black/30 backdrop-blur-[1px] md:hidden"
             onClick={() => setMobileOpen(false)}
           />
-          <div className="fixed inset-x-0 top-[69px] z-50 border-b border-slate-700 bg-slate-900 shadow-xl md:hidden">
-            <nav className="mx-auto max-w-7xl flex flex-col gap-0.5 px-4 py-2">
-              {navItems.map(({ to, label, end }) => (
-                <NavLink key={to} to={to} end={end} onClick={() => handleClick(label)} className={mobileLinkClass}>
-                  {label}
+          <div className="nav-menu-mobile fixed inset-x-0 top-[69px] z-50 border-b border-cyan-500/20 bg-slate-900/95 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-xl md:hidden">
+            <nav className="mx-auto flex max-w-7xl flex-col gap-1 px-4 py-3">
+              {navItems.map(({ to, label, end, accent, icon }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={end}
+                  onClick={() => handleClick(label)}
+                  className={({ isActive }) => navLinkClass(isActive, accent, true)}
+                >
+                  <NavIcon name={icon} className="nav-link-icon h-5 w-5 shrink-0" />
+                  <span className="nav-link-label">{label}</span>
                 </NavLink>
               ))}
             </nav>

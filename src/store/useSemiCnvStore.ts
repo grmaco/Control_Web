@@ -170,6 +170,7 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
         title: d.title,
         description: d.description,
         receivedAt: new Date().toISOString(),
+        siteId: message.siteId,
       }
       set((s) => ({ v3Logs: [entry, ...s.v3Logs].slice(0, V3_LOG_MAX) }))
       return

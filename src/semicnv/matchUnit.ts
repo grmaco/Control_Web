@@ -63,21 +63,24 @@ export function findUnitForSemiCnvStatus(
   lines: ConveyorLine[],
   item: SemiCnvConveyorStatusItem,
 ): { line: ConveyorLine; unit: ConveyorUnit } | null {
-  // 1차: semiCnvId 직접 매핑 — 전체 라인에서 가장 우선
+  // 1차: semiCnvId 직접 매핑
   for (const line of lines) {
     const unit = line.units.find((u) => u.semiCnvId != null && u.semiCnvId === item.id)
     if (unit) return { line, unit }
   }
 
-  // 2차: lineId 가 설정된 라인에서 이름 매칭
-  for (const line of lines) {
-    if (line.semiCnvLineId != null && line.semiCnvLineId !== item.lineId) continue
-    const unit = line.units.find((u) => u.semiCnvId == null && unitMatchesItem(u, item))
-    if (unit) return { line, unit }
+  // 2차: V3 lineId → 관제 라인 매핑 후 이름 매칭
+  const mappedLine = findLineForSemiCnvLineId(lines, item.lineId)
+  if (mappedLine) {
+    const unit = mappedLine.units.find(
+      (u) => u.semiCnvId == null && unitMatchesItem(u, item),
+    )
+    if (unit) return { line: mappedLine, unit }
   }
 
-  // 3차: lineId 무시하고 전체에서 이름 매칭
+  // 3차: semiCnvLineId가 V3 lineId와 일치하는 라인에서만 이름 매칭
   for (const line of lines) {
+    if (line.semiCnvLineId == null || line.semiCnvLineId !== item.lineId) continue
     const unit = line.units.find((u) => u.semiCnvId == null && unitMatchesItem(u, item))
     if (unit) return { line, unit }
   }

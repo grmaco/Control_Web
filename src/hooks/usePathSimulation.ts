@@ -28,6 +28,8 @@ import {
   planMultiTestMaterialLoadPaths,
   buildLoadTackTimeSummaries,
   clampSimIntervalSec,
+  MIN_TACK_TIME_SEC,
+  roundTackTimeSec,
   simulationCstUnitIds,
   simulationRevealUnitIds,
   staticTestMaterialOriginUnitIds,
@@ -75,6 +77,12 @@ export function usePathSimulation(
   const clearedTestMaterialLoadIdsRef = useRef<Set<string>>(new Set())
   const pendingTestMaterialClearRef = useRef<Set<string>>(new Set())
   const sessionLoadIdsRef = useRef<string[]>([])
+  const tackSessionStartRef = useRef<number | null>(null)
+  const tackPausedTotalMsRef = useRef(0)
+  const tackPausedAtRef = useRef<number | null>(null)
+  const frozenLoadTackSecRef = useRef<Record<string, number>>({})
+  const manualStepBonusSecRef = useRef(0)
+  const [tackClockTick, setTackClockTick] = useState(0)
   const [inputIntervalSec, setInputIntervalSecState] = useState(DEFAULT_SIM_INPUT_INTERVAL_SEC)
   const [dischargeIntervalSec, setDischargeIntervalSecState] = useState(
     DEFAULT_SIM_DISCHARGE_INTERVAL_SEC,
@@ -123,18 +131,6 @@ export function usePathSimulation(
     })
   }, [sourceIds, sourceIdsKey])
 
-  useEffect(() => {
-    setPlan(null)
-    setLoads([])
-    setRevealSteps({})
-    setFinalHoldActive(false)
-    setEndHoldActive(false)
-    clearedTestMaterialLoadIdsRef.current = new Set()
-    pendingTestMaterialClearRef.current = new Set()
-    sessionLoadIdsRef.current = []
-    setStatus('idle')
-  }, [line.id, mode])
-
   const clearTimer = useCallback(() => {
     if (timerRef.current != null) {
       window.clearInterval(timerRef.current)
@@ -162,6 +158,81 @@ export function usePathSimulation(
       endHoldTimerRef.current = null
     }
   }, [])
+
+  const clearTackSession = useCallback(() => {
+    tackSessionStartRef.current = null
+    tackPausedTotalMsRef.current = 0
+    tackPausedAtRef.current = null
+    frozenLoadTackSecRef.current = {}
+    manualStepBonusSecRef.current = 0
+  }, [])
+
+  const beginTackSession = useCallback(() => {
+    tackSessionStartRef.current = Date.now()
+    tackPausedTotalMsRef.current = 0
+    tackPausedAtRef.current = null
+    frozenLoadTackSecRef.current = {}
+    manualStepBonusSecRef.current = 0
+  }, [])
+
+  const pauseTackSession = useCallback(() => {
+    if (tackSessionStartRef.current == null || tackPausedAtRef.current != null) return
+    tackPausedAtRef.current = Date.now()
+  }, [])
+
+  const resumeTackSession = useCallback(() => {
+    if (tackPausedAtRef.current == null) return
+    tackPausedTotalMsRef.current += Date.now() - tackPausedAtRef.current
+    tackPausedAtRef.current = null
+  }, [])
+
+  const getLiveTackSec = useCallback((): number => {
+    const bonus = manualStepBonusSecRef.current
+    if (tackSessionStartRef.current != null) {
+      let pausedMs = tackPausedTotalMsRef.current
+      if (tackPausedAtRef.current != null) {
+        pausedMs += Date.now() - tackPausedAtRef.current
+      }
+      const wallSec = (Date.now() - tackSessionStartRef.current - pausedMs) / 1000
+      return roundTackTimeSec(wallSec + bonus)
+    }
+    if (bonus > 0) {
+      return roundTackTimeSec(bonus)
+    }
+    return MIN_TACK_TIME_SEC
+  }, [])
+
+  const isTackClockRunning =
+    status === 'playing' || status === 'endHold'
+
+  useEffect(() => {
+    if (!isTackClockRunning) return
+    const id = window.setInterval(() => setTackClockTick((tick) => tick + 1), 100)
+    return () => window.clearInterval(id)
+  }, [isTackClockRunning])
+
+  useEffect(() => {
+    if (tackSessionStartRef.current == null && manualStepBonusSecRef.current <= 0) return
+    const liveSec = getLiveTackSec()
+    for (const load of loads) {
+      if (isLoadFullyDischarged(load) && frozenLoadTackSecRef.current[load.id] == null) {
+        frozenLoadTackSecRef.current[load.id] = liveSec
+      }
+    }
+  }, [getLiveTackSec, loads, tackClockTick, status])
+
+  useEffect(() => {
+    setPlan(null)
+    setLoads([])
+    setRevealSteps({})
+    setFinalHoldActive(false)
+    setEndHoldActive(false)
+    clearedTestMaterialLoadIdsRef.current = new Set()
+    pendingTestMaterialClearRef.current = new Set()
+    sessionLoadIdsRef.current = []
+    clearTackSession()
+    setStatus('idle')
+  }, [clearTackSession, line.id, mode])
 
   useEffect(() => () => {
     clearTimer()
@@ -191,11 +262,30 @@ export function usePathSimulation(
     return previewPlan
   }, [previewPlan])
 
-  const tackTimeSummaries = useMemo(
-    (): LoadTackTimeSummary[] =>
-      buildLoadTackTimeSummaries(line, (plan ?? previewPlan)?.loads ?? [], stepTiming),
-    [line, plan, previewPlan, stepTiming],
-  )
+  const tackTimeSummaries = useMemo((): LoadTackTimeSummary[] => {
+    const summaries = buildLoadTackTimeSummaries(
+      line,
+      (plan ?? previewPlan)?.loads ?? [],
+      stepTiming,
+    )
+    const hasSession =
+      tackSessionStartRef.current != null || manualStepBonusSecRef.current > 0
+    const liveSec = getLiveTackSec()
+
+    return summaries.map((summary) => {
+      const frozen = frozenLoadTackSecRef.current[summary.loadId]
+      if (frozen != null) {
+        return { ...summary, tackTimeSec: frozen }
+      }
+
+      const activeLoad = loads.find((load) => load.id === summary.loadId)
+      if (hasSession && activeLoad) {
+        return { ...summary, tackTimeSec: liveSec }
+      }
+
+      return summary
+    })
+  }, [getLiveTackSec, line, loads, plan, previewPlan, stepTiming, tackClockTick, status])
 
   const allLoadsComplete = useCallback((nextLoads: PathSimulationLoad[]) => {
     const sessionIds = sessionLoadIdsRef.current
@@ -252,28 +342,36 @@ export function usePathSimulation(
     }
     setEndHoldActive(false)
     setPlan(nextPlan)
-    const initialized = initializeParallelLoads(nextPlan.loads)
+    const initialized = initializeParallelLoads(nextPlan.loads, stepTiming, line)
     sessionLoadIdsRef.current = initialized.map((load) => load.id)
     setLoads(initialized)
     beginPathReveal(initialized)
     clearedTestMaterialLoadIdsRef.current = new Set()
     pendingTestMaterialClearRef.current = new Set()
-  }, [beginPathReveal, rebuildPlan])
+  }, [beginPathReveal, rebuildPlan, line, stepTiming])
+
+  useEffect(() => {
+    if (status !== 'playing') return
+    if (tackSessionStartRef.current != null) return
+    beginTackSession()
+  }, [beginTackSession, status])
 
   const pause = useCallback(() => {
     clearTimer()
     clearRevealTimer()
     clearFinalHoldTimer()
     clearEndHoldTimer()
+    pauseTackSession()
     setStatus((current) =>
       current === 'playing' || current === 'revealing' || current === 'endHold'
         ? 'paused'
         : current,
     )
-  }, [clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTimer])
+  }, [clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTimer, pauseTackSession])
 
   const resume = useCallback(() => {
     if (loads.length === 0) return
+    resumeTackSession()
     if (endHoldActive && allLoadsComplete(loads)) {
       setStatus('endHold')
       return
@@ -287,13 +385,14 @@ export function usePathSimulation(
       return
     }
     setStatus('playing')
-  }, [allLoadsComplete, endHoldActive, finalHoldActive, isRevealComplete, loads, revealSteps])
+  }, [allLoadsComplete, endHoldActive, finalHoldActive, isRevealComplete, loads, revealSteps, resumeTackSession])
 
   const reset = useCallback(() => {
     clearTimer()
     clearRevealTimer()
     clearFinalHoldTimer()
     clearEndHoldTimer()
+    clearTackSession()
     setPlan(null)
     setLoads([])
     setRevealSteps({})
@@ -303,12 +402,19 @@ export function usePathSimulation(
     pendingTestMaterialClearRef.current = new Set()
     sessionLoadIdsRef.current = []
     setStatus('idle')
-  }, [clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTimer])
+  }, [clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTackSession, clearTimer])
 
   const unitMap = useMemo(
     () => new Map(line.units.map((unit) => [unit.id, unit])),
     [line.units],
   )
+
+  const unitMapRef = useRef(unitMap)
+  unitMapRef.current = unitMap
+  const stepTimingRef = useRef(stepTiming)
+  stepTimingRef.current = stepTiming
+  const loadsRef = useRef(loads)
+  loadsRef.current = loads
 
   const stepForward = useCallback(() => {
     const nextPlan = plan ?? rebuildPlan()
@@ -328,31 +434,48 @@ export function usePathSimulation(
 
     if (loads.length === 0 && status === 'idle') {
       setPlan(nextPlan)
-      const initialized = initializeParallelLoads(nextPlan.loads)
+      const initialized = initializeParallelLoads(nextPlan.loads, stepTiming, line)
       sessionLoadIdsRef.current = initialized.map((load) => load.id)
       setLoads(initialized)
+      beginTackSession()
+      pauseTackSession()
       setStatus('paused')
       return
     }
 
     setPlan(nextPlan)
-    const base = loads.length > 0 ? loads : initializeParallelLoads(nextPlan.loads)
+    const base = loads.length > 0 ? loads : initializeParallelLoads(nextPlan.loads, stepTiming, line)
     const advanced = applySimulationStep(base, unitMap, stepTiming)
+    if (status === 'paused') {
+      if (tackSessionStartRef.current == null) {
+        beginTackSession()
+        pauseTackSession()
+      }
+      manualStepBonusSecRef.current = roundTackTimeSec(
+        manualStepBonusSecRef.current + PATH_SIMULATION_STEP_MS / 1000,
+      )
+      setTackClockTick((tick) => tick + 1)
+    }
     setLoads(advanced)
     if (allLoadsComplete(advanced)) {
       beginEndHold()
     } else {
       setStatus('paused')
     }
-  }, [allLoadsComplete, beginEndHold, clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTimer, loads, plan, rebuildPlan, status, stepTiming, unitMap])
+  }, [allLoadsComplete, beginEndHold, beginTackSession, clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTimer, loads, pauseTackSession, plan, rebuildPlan, status, stepTiming, unitMap])
 
   useEffect(() => {
-    if (status !== 'playing' || loads.length === 0) return
+    if (status !== 'playing') return
 
     clearTimer()
     timerRef.current = window.setInterval(() => {
       setLoads((current) => {
-        const advanced = applySimulationStep(current, unitMap, stepTiming)
+        if (current.length === 0) return current
+        const advanced = applySimulationStep(
+          current,
+          unitMapRef.current,
+          stepTimingRef.current,
+        )
         if (allLoadsComplete(advanced)) {
           clearTimer()
           beginEndHold()
@@ -362,16 +485,17 @@ export function usePathSimulation(
     }, PATH_SIMULATION_STEP_MS)
 
     return clearTimer
-  }, [allLoadsComplete, beginEndHold, clearTimer, loads.length, status, stepTiming, unitMap])
+  }, [allLoadsComplete, beginEndHold, clearTimer, status])
 
   useEffect(() => {
-    if (status !== 'revealing' || finalHoldActive || loads.length === 0) return
+    if (status !== 'revealing' || finalHoldActive) return
+    if (loadsRef.current.length === 0) return
 
     clearRevealTimer()
     revealTimerRef.current = window.setInterval(() => {
       setRevealSteps((current) => {
         const next = { ...current }
-        for (const load of loads) {
+        for (const load of loadsRef.current) {
           const max = load.pathUnitIds.length - 1
           const step = next[load.id] ?? 0
           if (step < max) next[load.id] = step + 1
@@ -381,7 +505,7 @@ export function usePathSimulation(
     }, PATH_REVEAL_STEP_MS)
 
     return clearRevealTimer
-  }, [clearRevealTimer, finalHoldActive, loads, status])
+  }, [clearRevealTimer, finalHoldActive, status])
 
   useEffect(() => {
     if (status !== 'revealing' || finalHoldActive || loads.length === 0) return
@@ -428,8 +552,9 @@ export function usePathSimulation(
     setRevealSteps({})
     setFinalHoldActive(false)
     setEndHoldActive(false)
+    clearTackSession()
     setStatus('idle')
-  }, [])
+  }, [clearTackSession])
 
   const changeMode = useCallback((nextMode: PathSimulationMode) => {
     setMode(nextMode)
@@ -438,8 +563,9 @@ export function usePathSimulation(
     setRevealSteps({})
     setFinalHoldActive(false)
     setEndHoldActive(false)
+    clearTackSession()
     setStatus('idle')
-  }, [])
+  }, [clearTackSession])
 
   useEffect(() => {
     const { onClearTestMaterial } = options

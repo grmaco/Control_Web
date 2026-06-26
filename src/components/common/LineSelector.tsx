@@ -11,7 +11,7 @@ export function LineSelector({ selectOnly = false }: { selectOnly?: boolean }) {
   if (lines.length === 0) {
     if (selectOnly) {
       return (
-        <span className="rounded-md border border-slate-700 bg-slate-800/60 px-3 py-1.5 text-sm text-slate-500">
+        <span className="app-chip text-slate-500">
           등록된 라인 없음
         </span>
       )
@@ -28,7 +28,7 @@ export function LineSelector({ selectOnly = false }: { selectOnly?: boolean }) {
             lineId: line.id,
           })
         }}
-        className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500"
+        className="app-btn app-btn-primary app-btn-md"
       >
         첫 라인 만들기
       </button>
@@ -50,7 +50,7 @@ export function LineSelector({ selectOnly = false }: { selectOnly?: boolean }) {
           })
         }
       }}
-      className="rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-100"
+      className="app-input w-full rounded-md px-3 py-1.5 text-sm text-slate-100"
     >
       {lines.map((line) => (
         <option key={line.id} value={line.id}>
@@ -151,7 +151,7 @@ function LineSelectorPanelFull({ onCreateLine }: Pick<LineSelectorPanelProps, 'o
             }
           }}
           placeholder="라인 이름"
-          className="w-40 rounded-md border border-slate-700 bg-slate-800 px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-500"
+          className="app-input w-40 rounded-md px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-500"
         />
       )}
       <button
@@ -165,7 +165,7 @@ function LineSelectorPanelFull({ onCreateLine }: Pick<LineSelectorPanelProps, 'o
           })
           onCreateLine?.()
         }}
-        className="rounded-md border border-slate-700 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-800"
+        className="app-btn app-btn-secondary app-btn-sm"
       >
         + 새 라인
       </button>
@@ -173,7 +173,7 @@ function LineSelectorPanelFull({ onCreateLine }: Pick<LineSelectorPanelProps, 'o
         <button
           type="button"
           onClick={() => void handleDelete()}
-          className="rounded-md border border-red-900 px-2 py-1.5 text-xs text-red-300 hover:bg-red-950/40"
+          className="app-btn app-btn-danger app-btn-sm"
         >
           라인 삭제
         </button>

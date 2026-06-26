@@ -1,8 +1,14 @@
 import { useMemo, useState } from 'react'
 import type { ConveyorLine } from '../../types/conveyor'
+import { useLineCommStatus, useLineCommStatuses } from '../../hooks/useLineCommStatus'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { useMonitorStore } from '../../store/useMonitorStore'
 import { useSemiCnvStore } from '../../store/useSemiCnvStore'
+import {
+  filterIoStatusForLine,
+  filterUnitRuntimeForLine,
+  getLineRuntimeForLine,
+} from '../../utils/lineV3Scope'
 import {
   computeLineStats,
   isAutoEnabled,
@@ -37,16 +43,30 @@ export function MonitorDashboard({
   const setAllAutoRun = useMonitorStore((s) => s.setAllAutoRun)
   const getLineControl = useMonitorStore((s) => s.getLineControl)
   const lineControls = useMonitorStore((s) => s.lineControls)
-  const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
-  const lineRuntime = useSemiCnvStore((s) => s.lineRuntime)
-  const ioStatus = useSemiCnvStore((s) => s.ioStatus)
+  const unitRuntimeAll = useSemiCnvStore((s) => s.unitRuntime)
+  const lineRuntimeAll = useSemiCnvStore((s) => s.lineRuntime)
+  const ioStatusAll = useSemiCnvStore((s) => s.ioStatus)
   const logApplication = useConveyorStore((s) => s.logApplication)
+
+  const lineComm = useLineCommStatus(line)
+  const commByLineId = useLineCommStatuses(lines)
+  const unitRuntime = useMemo(
+    () => filterUnitRuntimeForLine(line, unitRuntimeAll, lineComm),
+    [line, unitRuntimeAll, lineComm],
+  )
+  const lrt = useMemo(
+    () => getLineRuntimeForLine(line, lineRuntimeAll, lineComm),
+    [line, lineRuntimeAll, lineComm],
+  )
+  const ioStatus = useMemo(
+    () => filterIoStatusForLine(ioStatusAll, lineComm),
+    [ioStatusAll, lineComm],
+  )
 
   const [autoCondPopupOpen, setAutoCondPopupOpen] = useState(false)
   const [powerSelectPopupOpen, setPowerSelectPopupOpen] = useState(false)
 
   const control = getLineControl(line.id)
-  const lrt = lineRuntime[line.id]
   const stats = useMemo(
     () => computeLineStats(line, unitRuntime, lrt),
     [line, unitRuntime, lrt],
@@ -58,38 +78,44 @@ export function MonitorDashboard({
   const statsByLineId = useMemo(
     () =>
       Object.fromEntries(
-        lines.map((item) => [item.id, computeLineStats(item, unitRuntime, lineRuntime[item.id])]),
+        lines.map((item) => {
+          const comm = commByLineId[item.id] ?? null
+          const scopedRt = filterUnitRuntimeForLine(item, unitRuntimeAll, comm)
+          const scopedLrt = getLineRuntimeForLine(item, lineRuntimeAll, comm)
+          return [item.id, computeLineStats(item, scopedRt, scopedLrt)]
+        }),
       ),
-    [lines, unitRuntime, lineRuntime],
+    [commByLineId, lineRuntimeAll, lines, unitRuntimeAll],
   )
 
   const autoRunByLineId = useMemo(
     () =>
       Object.fromEntries(
         lines.map((item) => {
-          const lrt2 = lineRuntime[item.id]
+          const comm = commByLineId[item.id] ?? null
+          const lrt2 = getLineRuntimeForLine(item, lineRuntimeAll, comm)
           return [item.id, lrt2 ? lrt2.operationStatus === 'Auto' : (lineControls[item.id]?.autoRun ?? false)]
         }),
       ),
-    [lines, lineRuntime, lineControls],
+    [commByLineId, lineControls, lineRuntimeAll, lines],
   )
 
   const powerOnByLineId = useMemo(
     () =>
       Object.fromEntries(
         lines.map((item) => {
-          const lrt2 = lineRuntime[item.id]
+          const comm = commByLineId[item.id] ?? null
+          const lrt2 = getLineRuntimeForLine(item, lineRuntimeAll, comm)
+          const scopedRt = filterUnitRuntimeForLine(item, unitRuntimeAll, comm)
           if (!lrt2) return [item.id, lineControls[item.id]?.powerOn ?? false]
-          // 해당 라인 유닛의 unitRuntime.power 필드로 판단 (semiCnvId 미설정 라인도 정확히 처리)
           const rts = item.units
-            .map((u) => unitRuntime[u.id])
+            .map((u) => scopedRt[u.id])
             .filter((rt): rt is NonNullable<typeof rt> => rt != null)
           if (rts.length === 0) return [item.id, lrt2.operationStatus === 'Auto' || lrt2.runningConveyors > 0]
-          // 전체 유닛이 모두 Power On일 때만 true
           return [item.id, rts.every((rt) => rt.power === 'On')]
         }),
       ),
-    [lines, lineRuntime, lineControls, unitRuntime],
+    [commByLineId, lineControls, lineRuntimeAll, lines, unitRuntimeAll],
   )
 
   // 전체 유닛이 모두 Power On일 때 파란불

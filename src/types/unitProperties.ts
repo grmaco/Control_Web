@@ -91,6 +91,8 @@ export interface PathSimulationLoad {
   clearsTestMaterial?: boolean
   /** 시뮬 시작 시 true — 동시 출발 */
   released?: boolean
+  /** 다중 투입 시 순차 출발까지 남은 틱 */
+  pendingReleaseTicks?: number
   /** 출발 모듈(step 0) 체류 틱 — 투입 시간 반영 */
   entryTicks?: number
   /** 종료 모듈 체류 틱 — 출고 시간 반영 */

@@ -6,13 +6,17 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MONITOR_CELL_SIZE } from '../../constants/grid'
 import { usePathSimulation } from '../../hooks/usePathSimulation'
+import { useLineCommStatus } from '../../hooks/useLineCommStatus'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { useMonitorStore, type MonitorViewTransform } from '../../store/useMonitorStore'
-import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import type { ConveyorLine } from '../../types/conveyor'
 import { lineLayoutSignature } from '../../utils/lineLayoutSignature'
 import { getBuilderViewport, getLineViewport } from '../../utils/lineViewport'
 import { fitFullMapInView, focusLineInView } from '../../utils/monitorView'
+import {
+  areAllCvUnitsRunning,
+  lineWithAllCvUnitsRunning,
+} from '../../utils/pathSimulation'
 import { LineStatusGrid } from './LineStatusGrid'
 import { MonitorMapControls } from './MonitorMapControls'
 import { PathSimulationBar, PathSimulationPlaybackControls } from './PathSimulationBar'
@@ -98,12 +102,16 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
     return { scale: 1, positionX: 0, positionY: 0 }
   }, [layoutSignature, line.id, savedView])
 
-  const isLive = useSemiCnvStore((s) => s.isLive)
+  const lineComm = useLineCommStatus(line)
+  const isLineV3Connected = lineComm?.state === 'online'
+  const allCvRunning = useMemo(() => areAllCvUnitsRunning(line), [line])
   const [scale, setScale] = useState(initialTransform.scale)
   const [is25DView, setIs25DView] = useState(false)
   const [calloutPanLock, setCalloutPanLock] = useState(false)
   const [calloutDeselectToken, setCalloutDeselectToken] = useState(0)
   const [simBlockPopupOpen, setSimBlockPopupOpen] = useState(false)
+  const [runConfirmPopupOpen, setRunConfirmPopupOpen] = useState(false)
+  const pendingStartAfterRunRef = useRef(false)
   const viewStateRef = useRef(initialTransform)
 
   const logButton = (comment: string) => {
@@ -113,6 +121,32 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
       lineId: line.id,
     })
   }
+
+  useEffect(() => {
+    if (!pendingStartAfterRunRef.current || !allCvRunning) return
+    pendingStartAfterRunRef.current = false
+    simulation.start()
+    logButton('Path Simulation Start')
+  }, [allCvRunning, line.id, simulation])
+
+  const handleSimulationStart = useCallback(() => {
+    if (isLineV3Connected) {
+      setSimBlockPopupOpen(true)
+      return
+    }
+    if (!allCvRunning) {
+      setRunConfirmPopupOpen(true)
+      return
+    }
+    simulation.start()
+    logButton('Path Simulation Start')
+  }, [allCvRunning, isLineV3Connected, simulation])
+
+  const handleConfirmRunAllAndStart = useCallback(async () => {
+    setRunConfirmPopupOpen(false)
+    pendingStartAfterRunRef.current = true
+    await saveLine(lineWithAllCvUnitsRunning(line))
+  }, [line, saveLine])
 
   const persistView = useCallback(
     (nextScale: number, positionX: number, positionY: number) => {
@@ -187,11 +221,12 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
     <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900">
       <div className="border-b border-slate-800 px-3 py-2 sm:px-4">
         <p className="text-sm text-slate-400">
-          {line.name} · {viewport.cols}×{viewport.rows} · 유닛 {line.units.length}개
+          {line.name} · {viewport.cols}×{viewport.rows}
         </p>
       </div>
 
       <PathSimulationBar
+        unitCount={line.units.length}
         mode={simulation.mode}
         onModeChange={simulation.changeMode}
         conveyorOnlyLine={simulation.conveyorOnlyLine}
@@ -258,14 +293,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
         plan={simulation.plan}
         status={simulation.status}
         canSimulate={simulation.canSimulate}
-        onStart={() => {
-          if (isLive) {
-            setSimBlockPopupOpen(true)
-            return
-          }
-          simulation.start()
-          logButton('Path Simulation Start')
-        }}
+        onStart={handleSimulationStart}
         onPause={() => {
           simulation.pause()
           logButton('Path Simulation Pause')
@@ -280,7 +308,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
           logButton('Path Simulation Reset')
         }}
         onStepForward={() => {
-          if (isLive) {
+          if (isLineV3Connected) {
             setSimBlockPopupOpen(true)
             return
           }
@@ -353,6 +381,41 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
       <p className="border-t border-slate-800 px-4 py-2 text-xs text-slate-500">
         마우스 휠: 줌 · 드래그: 맵 이동 · 정보 표: 클릭 선택 후 드래그로 위치 고정 · 경로 시뮬레이션: 투입(IN) 또는 출고(OUT) 다중 동시 출발
       </p>
+
+      {runConfirmPopupOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setRunConfirmPopupOpen(false)}
+        >
+          <div
+            className="mx-4 w-full max-w-sm rounded-lg border border-cyan-500/50 bg-slate-800 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mb-1 text-base font-bold text-cyan-300">가동 상태 전환</p>
+            <p className="mb-5 text-sm leading-relaxed text-slate-300">
+              경로 시뮬레이션은 모든 컨베이어 모듈이 가동 상태일 때 시작할 수 있습니다.
+              <br />
+              전체 모듈을 가동 상태로 전환한 뒤 시작하시겠습니까?
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRunConfirmPopupOpen(false)}
+                className="app-btn app-btn-secondary app-btn-sm"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmRunAllAndStart()}
+                className="app-btn app-btn-primary app-btn-sm"
+              >
+                전환 후 시작
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {simBlockPopupOpen && (
         <div

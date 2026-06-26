@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useInitializeStore } from '../components/common/LineSelector'
+import { AppCard, EmptyPanel, PageHeader, PageState } from '../components/common/PageUi'
 import { useConveyorStore } from '../store/useConveyorStore'
 import {
   filterLogEntries,
@@ -58,23 +59,21 @@ export function HistoryPage() {
   }
 
   if (isLoading) {
-    return <StateBox message="로그를 불러오는 중..." />
+    return <PageState message="로그를 불러오는 중..." />
   }
 
   if (error) {
-    return <StateBox message={error} error />
+    return <PageState message={error} variant="error" />
   }
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-xl font-semibold">이력</h2>
-        <p className="mt-1 text-sm text-slate-400">
-          시스템 로그 조회 · {logs.length}건 표시
-        </p>
-      </div>
+      <PageHeader
+        title="이력"
+        subtitle={`시스템 로그 조회 · ${logs.length}건 표시`}
+      />
 
-      <div className="rounded-lg border border-slate-800 bg-slate-900 p-4">
+      <AppCard muted>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
           <FilterField label="라인">
             <select
@@ -146,18 +145,18 @@ export function HistoryPage() {
             <button
               type="button"
               onClick={resetFilters}
-              className="w-full min-h-[44px] rounded-md border border-slate-700 bg-slate-800 px-3 py-2 text-sm text-slate-200 hover:bg-slate-700"
+              className="app-btn app-btn-secondary app-btn-md w-full min-h-[44px]"
             >
               필터 초기화
             </button>
           </div>
         </div>
-      </div>
+      </AppCard>
 
       {logs.length === 0 ? (
-        <StateBox message="조건에 맞는 로그가 없습니다." />
+        <EmptyPanel message="조건에 맞는 로그가 없습니다." />
       ) : (
-        <div className="overflow-hidden rounded-lg border border-slate-800">
+        <div className="app-card-muted overflow-hidden p-0">
           <div className="max-h-[560px] overflow-auto">
             <table className="w-full min-w-[960px] text-left text-sm">
               <thead className="sticky top-0 z-10 bg-slate-800 text-slate-300">
@@ -205,23 +204,9 @@ function FilterField({
   children: ReactNode
 }) {
   return (
-    <label className="block text-xs text-slate-400">
+    <label className="block">
       {label}
       <div className="mt-1">{children}</div>
     </label>
-  )
-}
-
-function StateBox({ message, error }: { message: string; error?: boolean }) {
-  return (
-    <div
-      className={`rounded-lg border p-12 text-center text-sm ${
-        error
-          ? 'border-red-900 bg-red-950/30 text-red-300'
-          : 'border-slate-800 bg-slate-900 text-slate-400'
-      }`}
-    >
-      {message}
-    </div>
   )
 }

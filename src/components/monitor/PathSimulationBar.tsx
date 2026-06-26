@@ -9,6 +9,7 @@ import { formatTackTimeSec } from '../../utils/pathSimulation'
 import { unitDisplayCode } from '../../utils/unitPropertyHelpers'
 
 interface PathSimulationBarProps {
+  unitCount?: number
   mode: PathSimulationMode
   onModeChange: (mode: PathSimulationMode) => void
   conveyorOnlyLine?: boolean
@@ -80,6 +81,7 @@ export function PathSimulationPlaybackControls({
 }
 
 export function PathSimulationBar({
+  unitCount,
   mode,
   onModeChange,
   conveyorOnlyLine = false,
@@ -133,6 +135,9 @@ export function PathSimulationBar({
     <div className="border-b border-slate-800 px-3 py-2 sm:px-4">
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-sm font-medium text-slate-200">경로 시뮬레이션</span>
+        {unitCount != null ? (
+          <span className="text-xs text-slate-500">유닛 {unitCount}개</span>
+        ) : null}
         <span className="text-xs text-slate-500">
           틱 {PATH_SIMULATION_STEP_MS / 1000}초 · 비가동 우회
         </span>
@@ -232,17 +237,25 @@ export function PathSimulationBar({
                     key={summary.loadId}
                     className="grid grid-cols-[4.5rem_3.5rem_minmax(0,1fr)_auto] items-center gap-x-2 text-sm"
                   >
-                    <span className="text-right text-slate-300">{summary.label}</span>
+                    <span className="text-right text-slate-300" title={`${summary.moduleCount}구간`}>
+                      {summary.label}
+                    </span>
                     <TackTimeFlowArrow />
-                    <span className="truncate text-slate-300">{summary.exitLabel}</span>
+                    <span className="truncate text-slate-300" title={`${summary.moduleCount}구간`}>
+                      {summary.exitLabel}
+                      <span className="ml-1 text-[10px] text-slate-500">({summary.moduleCount}구간)</span>
+                    </span>
                     <span className="shrink-0 text-right font-medium text-violet-300">
                       {formatTackTimeSec(summary.tackTimeSec)}
+                      <span className="mt-0.5 block text-[10px] font-normal text-slate-500">
+                        예상 {formatTackTimeSec(summary.estimatedTackTimeSec)}
+                      </span>
                     </span>
                   </li>
                 ))}
               </ul>
               <p className="mt-1.5 text-[10px] text-slate-600">
-                투입·이송·출고 기준 (대기·충돌 미포함)
+                실측 0.1초 단위 · 구간당 약 {PATH_SIMULATION_STEP_MS / 1000}초(틱) — 렉이 아니라 경로 구간 수에 비례
               </p>
             </div>
           ) : (
@@ -418,6 +431,24 @@ function TackTimeFlowArrow() {
           <stop offset="100%" stopColor="#c4b5fd" stopOpacity="0.95" />
         </linearGradient>
       </defs>
+
+      {/* 미리 그려진 베이스 화살표 */}
+      <g className="tack-time-arrow-base">
+        <line
+          x1="2"
+          y1="5"
+          x2="40"
+          y2="5"
+          stroke="#64748b"
+          strokeOpacity="0.55"
+          strokeWidth="1.75"
+          strokeLinecap="round"
+        />
+        <circle cx="4" cy="5" r="1.35" fill="#94a3b8" fillOpacity="0.45" />
+        <path d="M44 5 L38 1.75 L38 8.25 Z" fill="#64748b" fillOpacity="0.55" />
+      </g>
+
+      {/* 베이스 위 흐름 하이라이트 */}
       <line
         x1="2"
         y1="5"
@@ -426,20 +457,9 @@ function TackTimeFlowArrow() {
         stroke={`url(#${gradId})`}
         strokeWidth="1.75"
         strokeLinecap="round"
-        className="tack-time-arrow-shaft"
+        className="tack-time-arrow-flow"
       />
-      <circle
-        cx="4"
-        cy="5"
-        r="1.6"
-        fill="#c4b5fd"
-        className="tack-time-arrow-dot"
-      />
-      <path
-        d="M44 5 L38 1.75 L38 8.25 Z"
-        fill={`url(#${gradId})`}
-        className="tack-time-arrow-head"
-      />
+      <circle cx="4" cy="5" r="1.6" fill="#c4b5fd" className="tack-time-arrow-dot" />
     </svg>
   )
 }

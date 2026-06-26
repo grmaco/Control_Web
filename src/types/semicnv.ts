@@ -233,6 +233,8 @@ export interface SemiCnvLogEntry {
   title: string
   description: string
   receivedAt: string
+  /** V3 현장(site) — 라인별 이력 필터용 */
+  siteId?: string
 }
 
 export type SemiCnvMessage =

@@ -91,6 +91,42 @@ function edgePointToward(
   }
 }
 
+/** 콜아웃 연결선 시작점 — 모듈 꼭지점 대신 변 위 점(모서리 inset) */
+function lineAnchorOnBounds(
+  bounds: PxRect & { cx: number; cy: number },
+  targetX: number,
+  targetY: number,
+  spreadSeed = 0,
+): { x: number; y: number } {
+  const dx = targetX - bounds.cx
+  const dy = targetY - bounds.cy
+  const width = bounds.right - bounds.left
+  const height = bounds.bottom - bounds.top
+  const halfW = width / 2
+  const halfH = height / 2
+  const cornerInset = Math.min(6, width * 0.22, height * 0.22)
+  const spread = Math.min(10, width * 0.28, height * 0.28)
+  const spreadT = ((spreadSeed % 7) - 3) / 3
+
+  if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) {
+    return { x: bounds.cx + spreadT * spread, y: bounds.top + cornerInset }
+  }
+
+  if (Math.abs(dx) * halfH >= Math.abs(dy) * halfW) {
+    const x = dx < 0 ? bounds.left : bounds.right
+    const ySpan = Math.max(cornerInset, halfH - cornerInset)
+    const y = bounds.cy + (dy / Math.max(Math.abs(dx), 1e-6)) * (halfW / Math.max(halfH, 1e-6)) * ySpan
+    const clampedY = Math.max(bounds.top + cornerInset, Math.min(bounds.bottom - cornerInset, y))
+    return { x, y: clampedY + spreadT * Math.min(spread, ySpan * 0.35) }
+  }
+
+  const y = dy < 0 ? bounds.top : bounds.bottom
+  const xSpan = Math.max(cornerInset, halfW - cornerInset)
+  const x = bounds.cx + (dx / Math.max(Math.abs(dy), 1e-6)) * (halfH / Math.max(halfW, 1e-6)) * xSpan
+  const clampedX = Math.max(bounds.left + cornerInset, Math.min(bounds.right - cornerInset, x))
+  return { x: clampedX + spreadT * Math.min(spread, xSpan * 0.35), y }
+}
+
 function edgePointOnRect(rect: PxRect, fromX: number, fromY: number): { x: number; y: number } {
   const cx = (rect.left + rect.right) / 2
   const cy = (rect.top + rect.bottom) / 2
@@ -193,6 +229,7 @@ function fallbackPlacement(
   panelHeight: number,
   unitRects: PxRect[],
   reservedPanels: PxRect[],
+  spreadSeed = 0,
 ): {
   lineStart: { x: number; y: number }
   lineEnd: { x: number; y: number }
@@ -200,30 +237,35 @@ function fallbackPlacement(
 } | null {
   const moduleGap = 2
   const margin = 6
+  const width = bounds.right - bounds.left
+  const height = bounds.bottom - bounds.top
+  const cornerInset = Math.min(6, width * 0.22, height * 0.22)
+  const spread = Math.min(10, width * 0.28, height * 0.28)
+  const spreadT = ((spreadSeed % 7) - 3) / 3
   const anchors = [
     {
-      x: bounds.left,
-      y: bounds.top,
+      x: bounds.cx + spreadT * spread,
+      y: bounds.top + cornerInset,
       panelX: bounds.left - panelWidth - margin,
       panelY: bounds.top - panelHeight - margin,
     },
     {
-      x: bounds.right,
-      y: bounds.top,
+      x: bounds.right - cornerInset,
+      y: bounds.cy + spreadT * spread,
       panelX: bounds.right + margin,
       panelY: bounds.top - panelHeight - margin,
     },
     {
-      x: bounds.left,
-      y: bounds.bottom,
+      x: bounds.cx + spreadT * spread,
+      y: bounds.bottom - cornerInset,
       panelX: bounds.left - panelWidth - margin,
       panelY: bounds.bottom + margin,
     },
     {
-      x: bounds.right,
-      y: bounds.bottom,
-      panelX: bounds.right + margin,
-      panelY: bounds.bottom + margin,
+      x: bounds.left + cornerInset,
+      y: bounds.cy + spreadT * spread,
+      panelX: bounds.left - panelWidth - margin,
+      panelY: bounds.top - panelHeight - margin,
     },
   ]
 
@@ -252,6 +294,7 @@ function placeCalloutPanel(
   panelHeight: number,
   unitRects: PxRect[],
   reservedPanels: PxRect[],
+  spreadSeed = 0,
 ): {
   lineStart: { x: number; y: number }
   lineEnd: { x: number; y: number }
@@ -275,7 +318,7 @@ function placeCalloutPanel(
       const length = cellSize * (1.8 + step * 0.65)
       const targetX = bounds.cx + dir.x * length
       const targetY = bounds.cy + dir.y * length
-      const lineStart = edgePointToward(bounds, targetX, targetY)
+      const lineStart = lineAnchorOnBounds(bounds, targetX, targetY, spreadSeed)
       const panel = positionPanelOutside(lineStart, dir, panelWidth, panelHeight, panelGap)
       const lineEnd = edgePointOnRect(panel, lineStart.x, lineStart.y)
 
@@ -298,7 +341,7 @@ function placeCalloutPanel(
     }
   }
 
-  return fallbackPlacement(bounds, panelWidth, panelHeight, unitRects, reservedPanels)
+  return fallbackPlacement(bounds, panelWidth, panelHeight, unitRects, reservedPanels, spreadSeed)
 }
 
 /** 알람 한 줄 표시용 패널 너비 추정 (7px 폰트 기준) */
@@ -343,6 +386,7 @@ export function computeFlowCallouts(
       alarmTexts?.[unit.id],
       panelMinWidth,
     )
+    const spreadSeed = unit.gridX * 11 + unit.gridY * 17 + unit.name.length
     const placement = placeCalloutPanel(
       bounds,
       cellSize,
@@ -350,6 +394,7 @@ export function computeFlowCallouts(
       panelHeight,
       unitRects,
       reservedPanels,
+      spreadSeed,
     )
     if (!placement) continue
 

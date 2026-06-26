@@ -12,7 +12,7 @@ import {
 import { isStorageUnit } from '../constants/conveyorTypes'
 import { getEntryUnits, getExitUnits, isFlowCapableUnit } from './flowEntries'
 import { computeMinimapFlowMap, type UnitFlowDirs } from './flowDirection'
-import { computeFlowOrder } from './sequentialNaming'
+import { computeFlowOrder, parseTrailingNumber } from './sequentialNaming'
 import { isCvUnit } from './unitMaterial'
 import { stkRoutingService } from '../services/StkRoutingService'
 import {
@@ -31,10 +31,32 @@ export function isSimulationTransitPassable(unit: ConveyorUnit): boolean {
   return unit.status === 'running'
 }
 
+/** 컨베이어(CV) 모듈이 모두 가동 중인지 */
+export function areAllCvUnitsRunning(line: ConveyorLine): boolean {
+  const cvUnits = line.units.filter(isCvUnit)
+  if (cvUnits.length === 0) return true
+  return cvUnits.every((unit) => unit.status === 'running')
+}
+
+/** 컨베이어(CV) 모듈 전체를 가동 상태로 */
+export function lineWithAllCvUnitsRunning(line: ConveyorLine): ConveyorLine {
+  const now = new Date().toISOString()
+  return {
+    ...line,
+    updatedAt: now,
+    units: line.units.map((unit) =>
+      isCvUnit(unit)
+        ? { ...unit, status: 'running' as const, updatedAt: now }
+        : unit,
+    ),
+  }
+}
+
 export function bfsPath(
   startId: string,
   targetId: string,
   unitMap: Map<string, ConveyorUnit>,
+  options?: { allowIdleTransit?: boolean },
 ): string[] | null {
   if (startId === targetId) return [startId]
 
@@ -42,6 +64,9 @@ export function bfsPath(
     const unit = unitMap.get(unitId)
     if (!unit) return false
     if (unitId === startId || unitId === targetId) return true
+    if (options?.allowIdleTransit) {
+      return isFlowCapableUnit(unit)
+    }
     return isSimulationTransitPassable(unit)
   }
 
@@ -188,6 +213,75 @@ function resolveExitTargetIds(
   return last ? [last] : []
 }
 
+function cvNumberFromUnit(unit: ConveyorUnit): number | null {
+  return parseTrailingNumber(unit.name)?.number ?? null
+}
+
+/** CV01→CV10처럼 순번이 이어지면 연결 그래프보다 짧은 직선 경로 */
+function buildCvSequencePath(
+  entryUnitId: string,
+  exitIds: string[],
+  line: ConveyorLine,
+  unitMap: Map<string, ConveyorUnit>,
+): string[] | null {
+  const entry = unitMap.get(entryUnitId)
+  if (!entry) return null
+  const entryCv = cvNumberFromUnit(entry)
+  if (entryCv == null) return null
+
+  const unitsByCv = new Map<number, ConveyorUnit>()
+  for (const unit of line.units) {
+    const cv = cvNumberFromUnit(unit)
+    if (cv != null && isFlowCapableUnit(unit)) {
+      unitsByCv.set(cv, unit)
+    }
+  }
+
+  let best: string[] | null = null
+  for (const exitId of exitIds) {
+    const exit = unitMap.get(exitId)
+    const exitCv = exit ? cvNumberFromUnit(exit) : null
+    if (exitCv == null || exitCv <= entryCv) continue
+
+    const path: string[] = []
+    let complete = true
+    for (let cv = entryCv; cv <= exitCv; cv += 1) {
+      const unit = unitsByCv.get(cv)
+      if (!unit) {
+        complete = false
+        break
+      }
+      path.push(unit.id)
+    }
+    if (!complete || path.length <= 1) continue
+    if (!best || path.length < best.length) best = path
+  }
+
+  return best
+}
+
+/** 물류순서에서 출고점까지 잘라낸 경로 (전체 DFS 순회 대신) */
+function sliceFlowPathToExit(
+  orderedUnitIds: string[],
+  exitIds: string[],
+): { pathUnitIds: string[]; exitId: string | null } {
+  for (const exitId of exitIds) {
+    const index = orderedUnitIds.indexOf(exitId)
+    if (index > 0) {
+      return {
+        pathUnitIds: orderedUnitIds.slice(0, index + 1),
+        exitId,
+      }
+    }
+  }
+
+  const lastId = orderedUnitIds[orderedUnitIds.length - 1]!
+  return {
+    pathUnitIds: orderedUnitIds,
+    exitId: lastId,
+  }
+}
+
 /** STK 없는 라인 — 투입점 → 출고점 (BFS 우선, 없으면 물류 순서) */
 function buildEntryToExitPath(
   entryUnitId: string,
@@ -208,8 +302,20 @@ function buildEntryToExitPath(
   }
 
   const exitIds = resolveExitTargetIds(line, entryUnitId, unitMap)
+
+  const cvChain = buildCvSequencePath(entryUnitId, exitIds, line, unitMap)
+  if (cvChain && cvChain.length > 1) {
+    const exitId = cvChain[cvChain.length - 1]!
+    const exit = unitMap.get(exitId)!
+    return {
+      pathUnitIds: cvChain,
+      exitId,
+      message: `${unitDisplayCode(entry)} → … → ${unitDisplayCode(exit)} (${cvChain.length}구간 · CV순번)`,
+    }
+  }
+
   for (const exitId of exitIds) {
-    const path = bfsPath(entryUnitId, exitId, unitMap)
+    const path = bfsPath(entryUnitId, exitId, unitMap, { allowIdleTransit: true })
     if (path && path.length > 1) {
       const exit = unitMap.get(exitId)!
       return {
@@ -222,12 +328,12 @@ function buildEntryToExitPath(
 
   const { orderedUnitIds } = computeFlowOrder(line, entryUnitId)
   if (orderedUnitIds.length > 1) {
-    const lastId = orderedUnitIds[orderedUnitIds.length - 1]!
-    const exit = unitMap.get(lastId)!
+    const sliced = sliceFlowPathToExit(orderedUnitIds, exitIds)
+    const exit = unitMap.get(sliced.exitId ?? sliced.pathUnitIds[sliced.pathUnitIds.length - 1]!)!
     return {
-      pathUnitIds: orderedUnitIds,
-      exitId: lastId,
-      message: `${unitDisplayCode(entry)} → … → ${unitDisplayCode(exit)} (${orderedUnitIds.length}구간 · 물류순서)`,
+      pathUnitIds: sliced.pathUnitIds,
+      exitId: sliced.exitId,
+      message: `${unitDisplayCode(entry)} → … → ${unitDisplayCode(exit)} (${sliced.pathUnitIds.length}구간 · 물류순서)`,
     }
   }
 
@@ -253,7 +359,7 @@ function buildFlowChain(
     })
 
   for (const stk of allStks) {
-    const path = bfsPath(entryId, stk.id, unitMap)
+    const path = bfsPath(entryId, stk.id, unitMap, { allowIdleTransit: true })
     if (path && path.length > 1) return path
   }
 
@@ -628,14 +734,24 @@ export function sortSimulationLoadsByFlowOrder(
   )
 }
 
-/** 투입·테스트 자재 동시 출발 */
+/** 투입·테스트 자재 — 투입 간격만큼 순차 출발 */
 export function initializeParallelLoads(
   loads: PathSimulationLoad[],
+  timing?: SimulationStepTiming,
+  line?: ConveyorLine,
 ): PathSimulationLoad[] {
-  return dedupeSimulationLoadsById(loads).map((load) => ({
+  const entryTicksRequired = timing
+    ? requiredDwellTicks(timing.inputIntervalSec)
+    : 1
+  const ordered = line
+    ? sortSimulationLoadsByFlowOrder(line, loads)
+    : dedupeSimulationLoadsById(loads)
+
+  return dedupeSimulationLoadsById(ordered).map((load, index) => ({
     ...load,
     pathUnitIds: [...load.pathUnitIds],
-    released: true,
+    released: index === 0,
+    pendingReleaseTicks: index > 0 ? index * entryTicksRequired : 0,
     entryTicks: 0,
     exitTicks: 0,
     transitTicks: 0,
@@ -729,7 +845,19 @@ export function advanceSimulationLoads(
 
   for (let i = 0; i < next.length; i += 1) {
     const load = next[i]!
-    if (!load.released || load.complete) continue
+    if (load.complete) continue
+
+    if (!load.released) {
+      const pending = load.pendingReleaseTicks ?? 0
+      if (pending > 0) {
+        load.pendingReleaseTicks = pending - 1
+        load.waiting = true
+        continue
+      }
+      load.released = true
+    }
+
+    if (!load.released) continue
 
     if (isAtDestination(load)) {
       if (load.stepIndex === 0 && load.entryTicks < entryTicksRequired) {
@@ -774,7 +902,11 @@ export function advanceSimulationLoads(
   const posAt = (index: number, step: number) => next[index]!.pathUnitIds[step]!
   const approved = new Set<number>()
 
-  for (const [index, targetStep] of proposals) {
+  const proposalEntries = [...proposals.entries()].sort(
+    ([indexA], [indexB]) => next[indexB]!.stepIndex - next[indexA]!.stepIndex,
+  )
+
+  for (const [index, targetStep] of proposalEntries) {
     const from = posAt(index, next[index]!.stepIndex)
     const to = posAt(index, targetStep)
     if (from === to) continue
@@ -951,10 +1083,18 @@ export interface LoadTackTimeSummary {
   label: string
   exitLabel: string
   tackTimeSec: number
+  estimatedTackTimeSec: number
   moduleCount: number
 }
 
-/** 시작점 → 출고점 예상 Tack Time (초) — 시뮬 틱 규칙과 동일 */
+export const MIN_TACK_TIME_SEC = 0
+
+export function roundTackTimeSec(sec: number): number {
+  if (!Number.isFinite(sec) || sec < 0) return MIN_TACK_TIME_SEC
+  return Math.max(MIN_TACK_TIME_SEC, Math.round(sec * 10) / 10)
+}
+
+/** 시작점 → 출고점 예상 Tack Time (초) — 시뮬 틱 규칙과 동일 (모듈당 약 1틱) */
 export function computeLoadTackTimeSec(
   pathUnitCount: number,
   timing: SimulationStepTiming,
@@ -962,19 +1102,22 @@ export function computeLoadTackTimeSec(
   if (pathUnitCount <= 0) return 0
 
   const entryTicks = requiredDwellTicks(timing.inputIntervalSec)
-  const exitTicks = requiredDwellTicks(timing.dischargeIntervalSec)
   const transitTicks = requiredTransitTicks(timing.transitIntervalSec)
-  const transitSegments = Math.max(0, pathUnitCount - 2)
-  const totalTicks = entryTicks + transitSegments * transitTicks + exitTicks
+  const exitTicks = requiredDwellTicks(timing.dischargeIntervalSec)
 
-  return totalTicks * SIM_TICK_SEC
+  if (pathUnitCount === 1) {
+    return (entryTicks + exitTicks) * SIM_TICK_SEC
+  }
+
+  const uniformTicks = Math.max(entryTicks, transitTicks, exitTicks)
+  return pathUnitCount * uniformTicks * SIM_TICK_SEC
 }
 
 export function formatTackTimeSec(sec: number): string {
-  if (sec <= 0) return '—'
-  if (sec < 60) return `${Number(sec.toFixed(1))}초`
-  const minutes = Math.floor(sec / 60)
-  const remainder = sec - minutes * 60
+  const rounded = roundTackTimeSec(sec)
+  if (rounded < 60) return `${Number(rounded.toFixed(1))}초`
+  const minutes = Math.floor(rounded / 60)
+  const remainder = rounded - minutes * 60
   return remainder > 0
     ? `${minutes}분 ${Number(remainder.toFixed(1))}초`
     : `${minutes}분`
@@ -996,12 +1139,15 @@ export function buildLoadTackTimeSummaries(
       const exitFromPath = unitMap.get(load.pathUnitIds[load.pathUnitIds.length - 1]!)
       const exitUnit = exitFromTarget ?? exitFromPath
 
+      const estimatedTackTimeSec = computeLoadTackTimeSec(load.pathUnitIds.length, timing)
+
       return {
         loadId: load.id,
         entryUnitId: load.entryUnitId,
         label: load.label,
         exitLabel: exitUnit ? unitDisplayCode(exitUnit) : '—',
-        tackTimeSec: computeLoadTackTimeSec(load.pathUnitIds.length, timing),
+        tackTimeSec: estimatedTackTimeSec,
+        estimatedTackTimeSec,
         moduleCount: load.pathUnitIds.length,
       }
     })

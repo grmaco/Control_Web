@@ -4,6 +4,7 @@ import type { SemiCnvLogEntry } from '../../types/semicnv'
 interface Props {
   logs: SemiCnvLogEntry[]
   fullHeight?: boolean
+  lineName?: string
 }
 
 function levelClass(level: string): string {
@@ -14,7 +15,7 @@ function levelClass(level: string): string {
   }
 }
 
-export function V3LogPanel({ logs, fullHeight = false }: Props) {
+export function V3LogPanel({ logs, fullHeight = false, lineName }: Props) {
   const [typeFilter, setTypeFilter]   = useState('')
   const [levelFilter, setLevelFilter] = useState('')
 
@@ -38,6 +39,12 @@ export function V3LogPanel({ logs, fullHeight = false }: Props) {
         }`}
       >
         V3와 연결되면 로그가 실시간으로 표시됩니다.
+        {lineName ? (
+          <>
+            <br />
+            <span className="text-slate-500">({lineName} · V3 Online 시)</span>
+          </>
+        ) : null}
       </div>
     )
   }

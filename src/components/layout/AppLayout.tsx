@@ -1,17 +1,22 @@
 import { useEffect, useRef } from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
-import { SemiCnvConnectionBar } from '../monitor/SemiCnvConnectionBar'
 import { useSemiCnvMonitor } from '../../hooks/useSemiCnvMonitor'
 import { USER_ROLE_LABELS } from '../../constants/auth'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { useMonitorStore } from '../../store/useMonitorStore'
+import type { UserRole } from '../../types/auth'
 import { Navigation } from './Navigation'
+
+const ROLE_BADGE_CLASS: Record<UserRole, string> = {
+  operator: 'header-role-badge--operator',
+  engineer: 'header-role-badge--engineer',
+  developer: 'header-role-badge--developer',
+}
 
 export function AppLayout() {
   const navigate = useNavigate()
   const logApplication = useConveyorStore((s) => s.logApplication)
-  const semiCnvEnabled = useConveyorStore((s) => s.settings.semiCnv?.enabled ?? false)
   const initializeMonitor = useMonitorStore((s) => s.initialize)
   const role = useAuthStore((s) => s.role)
   const logout = useAuthStore((s) => s.logout)
@@ -37,15 +42,25 @@ export function AppLayout() {
       <header className="border-b border-slate-800 bg-slate-900">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <div className="flex flex-shrink-0 items-center gap-3 md:gap-6">
-            <h1 className="whitespace-nowrap text-base font-semibold tracking-tight sm:text-lg">
-              PC제어설비 관제시스템
-            </h1>
+            <div className="flex items-center gap-2.5">
+              <span
+                className="hidden h-7 w-0.5 shrink-0 rounded-full bg-gradient-to-b from-cyan-400 via-slate-200 to-violet-500 sm:block"
+                aria-hidden
+              />
+              <h1 className="app-header-title whitespace-nowrap text-base sm:text-lg">
+                <span className="app-header-title-text font-semibold tracking-wide">
+                  제어설비 관제시스템
+                </span>
+              </h1>
+            </div>
             <Navigation />
           </div>
           <div className="flex min-w-0 items-center gap-2 md:gap-4">
             {role ? (
               <div className="flex items-center gap-2">
-                <span className="hidden rounded-md border border-slate-700 bg-slate-800 px-2 py-1 text-xs text-slate-300 sm:inline">
+                <span
+                  className={`header-role-badge hidden rounded-lg px-2.5 py-1 text-xs font-medium sm:inline ${ROLE_BADGE_CLASS[role]}`}
+                >
                   {USER_ROLE_LABELS[role]}
                 </span>
                 <button
@@ -58,20 +73,16 @@ export function AppLayout() {
                     logout()
                     navigate('/login', { replace: true })
                   }}
-                  className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+                  className="header-logout-btn rounded-lg px-2.5 py-1 text-xs text-slate-400"
                 >
                   로그아웃
                 </button>
               </div>
             ) : null}
-            <SemiCnvConnectionBar />
-            <span className="hidden sm:inline text-xs text-slate-500">
-              {semiCnvEnabled ? 'Semi C/V 연동' : 'Phase 1 · localStorage'}
-            </span>
           </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-7xl flex-1 px-3 py-4 sm:px-4">
+      <main className="app-content mx-auto w-full max-w-7xl flex-1 px-3 py-4 sm:px-4">
         <Outlet />
       </main>
     </div>

@@ -5,6 +5,7 @@ import type {
   SemiCnvOperationStatus,
   SemiCnvUnitRuntime,
 } from '../../types/semicnv'
+import type { AlarmEntry } from '../../utils/alarms'
 import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import { resolveUnitAlarmDisplay } from '../../utils/unitAlarmDisplay'
 
@@ -37,17 +38,23 @@ type CvFilter = 'all' | SemiCnvOperationStatus | 'error'
 export function CvStatusPanel({
   lines,
   unitRuntime,
+  unitAlarms: unitAlarmsProp,
+  liveAlarms: liveAlarmsProp,
   selectedLine,
 }: {
   lines: ConveyorLine[]
   unitRuntime: Record<string, SemiCnvUnitRuntime> | Record<number, SemiCnvUnitRuntime>
+  unitAlarms?: Record<string, string>
+  liveAlarms?: AlarmEntry[]
   selectedLine?: ConveyorLine | null
 }) {
   const [cvFilter, setCvFilter] = useState<CvFilter>('all')
   const [searchCst, setSearchCst] = useState('')
   const [searchName, setSearchName] = useState('')
-  const unitAlarms = useSemiCnvStore((s) => s.unitAlarms)
-  const liveAlarms = useSemiCnvStore((s) => s.liveAlarms)
+  const unitAlarmsStore = useSemiCnvStore((s) => s.unitAlarms)
+  const liveAlarmsStore = useSemiCnvStore((s) => s.liveAlarms)
+  const unitAlarms = unitAlarmsProp ?? unitAlarmsStore
+  const liveAlarms = liveAlarmsProp ?? liveAlarmsStore
 
   // 선택 라인의 유닛을 직접 순회 → Web UUID 기반 unitRuntime 참조
   // (두 V3가 같은 semiCnvId를 쓰더라도 Web UUID로 분리되어 충돌 없음)
@@ -200,7 +207,11 @@ export function CvStatusPanel({
             {filtered.length === 0 ? (
               <tr>
                 <td colSpan={9} className="py-8 text-center text-slate-500">
-                  {rows.length === 0 ? 'V3 연결 후 CV 데이터가 표시됩니다.' : '검색 결과 없음'}
+                  {rows.length === 0
+                    ? selectedLine
+                      ? '이 라인은 V3에 연결되지 않았습니다. V3 Online 후 CV 데이터가 표시됩니다.'
+                      : 'V3 연결 후 CV 데이터가 표시됩니다.'
+                    : '검색 결과 없음'}
                 </td>
               </tr>
             ) : (
