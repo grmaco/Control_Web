@@ -248,6 +248,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
         onTransitIntervalSecChange={simulation.setTransitIntervalSec}
         incompleteLoadCount={simulation.incompleteLoadCount}
         tackTimeSummaries={simulation.tackTimeSummaries}
+        continuousInputActive={simulation.continuousInputActive}
         mapControls={
           <MonitorMapControls
             is25DView={is25DView}
@@ -292,7 +293,10 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
       <PathSimulationPlaybackControls
         plan={simulation.plan}
         status={simulation.status}
+        mode={simulation.mode}
         canSimulate={simulation.canSimulate}
+        continuousInputActive={simulation.continuousInputActive}
+        onToggleContinuousInput={simulation.toggleContinuousInput}
         onStart={handleSimulationStart}
         onPause={() => {
           simulation.pause()
@@ -370,6 +374,11 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
                 : []
             }
             simulationPathUnitIds={simulation.pathUnitIds}
+            continuousInputActive={simulation.continuousInputActive}
+            continuousGatherProbes={simulation.continuousGatherProbes}
+            continuousGatherAnimating={simulation.continuousGatherAnimating}
+            continuousInputIntervalSec={simulation.continuousInputIntervalSec}
+            warehouseFillCounts={simulation.warehouseFillCounts}
             onCalloutPanLockChange={setCalloutPanLock}
             calloutDeselectToken={calloutDeselectToken}
             is25DView={is25DView}
@@ -411,6 +420,34 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
                 className="app-btn app-btn-primary app-btn-sm"
               >
                 전환 후 시작
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {simulation.warehouseFullNotice && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => simulation.dismissWarehouseFullNotice()}
+        >
+          <div
+            className="mx-4 w-full max-w-sm rounded-lg border border-amber-500/60 bg-slate-800 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mb-1 text-base font-bold text-amber-400">적재창고 만재</p>
+            <p className="mb-5 text-sm leading-relaxed text-slate-300">
+              STK 48칸이 모두 찼습니다. 연속 투입이 종료되었습니다.
+              <br />
+              컨베이어에 남은 자재는 계속 이동합니다.
+            </p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => simulation.dismissWarehouseFullNotice()}
+                className="rounded border border-slate-600 bg-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-600"
+              >
+                확인
               </button>
             </div>
           </div>

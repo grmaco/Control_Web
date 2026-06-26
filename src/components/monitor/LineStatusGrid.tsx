@@ -24,6 +24,8 @@ import { computeFlowCallouts } from '../../utils/flowCallouts'
 import { RollerConveyorCell } from './RollerConveyorCell'
 import { TurnConveyorCell } from './TurnConveyorCell'
 import { StorageConveyorCell } from './StorageConveyorCell'
+import { ContinuousInputGatherOverlay } from './ContinuousInputGatherOverlay'
+import type { GatherProbeState } from '../../utils/continuousInputGather'
 
 interface LineStatusGridProps {
   line: ConveyorLine
@@ -38,7 +40,7 @@ interface LineStatusGridProps {
   scale?: number
   /** 셀 격자 실선 표시 */
   showGridLines?: boolean
-  /** 적재창고(STK) 제외 모듈 이름 숨김 */
+  /** 모듈 이름 숨김 (적재창고 포함) */
   hideModuleNames?: boolean
   /** 경로 시뮬 — 화살표 네온 점등 대상 (시작 점등 또는 현재 자재 위치) */
   simulationNeonUnitIds?: string[]
@@ -52,6 +54,13 @@ interface LineStatusGridProps {
   /** 경로 시뮬레이션 — 계획 경로 하이라이트 */
   simulationPathUnitIds?: string[]
   /** 콜아웃 드래그 중 맵 패닝 잠금 */
+  /** 연속 투입 — 프로브·미네랄 수집 오버레이 */
+  continuousGatherProbes?: GatherProbeState[]
+  continuousInputActive?: boolean
+  continuousInputIntervalSec?: number
+  continuousGatherAnimating?: boolean
+  /** 연속 투입 — 적재창고 슬롯 채움 수 */
+  warehouseFillCounts?: Record<string, number>
   onCalloutPanLockChange?: (locked: boolean) => void
   /** 증가 시 콜아웃 선택 해제 */
   calloutDeselectToken?: number
@@ -138,6 +147,11 @@ export function LineStatusGrid({
   onCalloutPanLockChange,
   calloutDeselectToken = 0,
   is25DView = false,
+  continuousGatherProbes = [],
+  continuousInputActive = false,
+  continuousInputIntervalSec = 0.5,
+  continuousGatherAnimating = false,
+  warehouseFillCounts = {},
   className,
 }: LineStatusGridProps) {
   const layoutSignature = useMemo(() => lineLayoutSignature(line), [line])
@@ -258,7 +272,11 @@ export function LineStatusGrid({
         const showMinimapPortOverlay =
           showFlowArrows && isAnchor && isPort
         const showMinimapStorageLabel =
-          showFlowArrows && isMultiCellAnchor && unit != null && isStorageUnit(unit)
+          showFlowArrows &&
+          isMultiCellAnchor &&
+          unit != null &&
+          isStorageUnit(unit) &&
+          !hideModuleNames
         const showUnitLabel =
           unit &&
           showLabels &&
@@ -372,6 +390,7 @@ export function LineStatusGrid({
                 height={spanHeight}
                 status={unit.status}
                 uid={`${unit.id}-${gridX}-${gridY}`}
+                filledSlotCount={warehouseFillCounts[unit.id] ?? 0}
               />
             )}
             {flow && unit && !isStorageUnit(unit) ? (
@@ -448,6 +467,18 @@ export function LineStatusGrid({
         )
       })}
       </div>
+      <ContinuousInputGatherOverlay
+        active={continuousInputActive && simulationInProgress}
+        animating={continuousGatherAnimating}
+        probes={continuousGatherProbes}
+        line={line}
+        cellSize={cellSize}
+        minX={minX}
+        minY={minY}
+        gridWidth={cols * cellSize}
+        gridHeight={rows * cellSize}
+        inputIntervalSec={continuousInputIntervalSec}
+      />
       {showFlowCallouts && flowCallouts.length > 0 ? (
         <FlowCalloutOverlay
           callouts={flowCallouts}

@@ -89,6 +89,23 @@ export function filterIoStatusForLine(
   return ioStatus
 }
 
+/** 선택 라인에 활성 알람이 있는지 */
+export function hasActiveAlarmsForLine(
+  line: ConveyorLine,
+  unitRuntime: Record<string, SemiCnvUnitRuntime>,
+  unitAlarms: Record<string, string>,
+  comm: SemiCnvLineCommStatus | null,
+): boolean {
+  const scopedAlarms = filterUnitAlarmsForLine(line, unitAlarms, comm)
+  if (Object.keys(scopedAlarms).length > 0) return true
+
+  if (isLineV3Online(comm)) {
+    return line.units.some((unit) => unitRuntime[unit.id]?.alarm)
+  }
+
+  return line.units.some((unit) => unit.status === 'error')
+}
+
 /** 선택 라인 V3 Online일 때만 라인 런타임 반환 */
 export function getLineRuntimeForLine(
   line: ConveyorLine,

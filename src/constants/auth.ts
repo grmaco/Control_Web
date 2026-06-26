@@ -1,7 +1,7 @@
 import type { UserRole } from '../types/auth'
 
 /** 임시 공통 비밀번호 (추후 역할별·설정 화면에서 변경 예정) */
-export const DEFAULT_LOGIN_PASSWORD = '0001'
+export const DEFAULT_LOGIN_PASSWORD = '1'
 
 export const USER_ROLE_LABELS: Record<UserRole, string> = {
   operator: '오퍼레이터',

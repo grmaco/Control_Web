@@ -6,6 +6,7 @@ import { PATH_SIMULATION_STEP_MS } from '../../types/unitProperties'
 import type { PathSimulationMode, PathSimulationStatus } from '../../hooks/usePathSimulation'
 import type { LoadTackTimeSummary } from '../../utils/pathSimulation'
 import { formatTackTimeSec } from '../../utils/pathSimulation'
+import { CONTINUOUS_INPUT_INTERVAL_SEC } from '../../utils/continuousInputGather'
 import { unitDisplayCode } from '../../utils/unitPropertyHelpers'
 
 interface PathSimulationBarProps {
@@ -32,28 +33,35 @@ interface PathSimulationBarProps {
   incompleteLoadCount?: number
   tackTimeSummaries?: LoadTackTimeSummary[]
   mapControls?: ReactNode
+  continuousInputActive?: boolean
 }
 
 interface PathSimulationPlaybackControlsProps {
   plan: MultiPathSimulationPlan | null
   status: PathSimulationStatus
+  mode: PathSimulationMode
   canSimulate: boolean
   onStart: () => void
   onPause: () => void
   onResume: () => void
   onReset: () => void
   onStepForward: () => void
+  continuousInputActive?: boolean
+  onToggleContinuousInput?: () => void
 }
 
 export function PathSimulationPlaybackControls({
   plan,
   status,
+  mode,
   canSimulate,
   onStart,
   onPause,
   onResume,
   onReset,
   onStepForward,
+  continuousInputActive = false,
+  onToggleContinuousInput,
 }: PathSimulationPlaybackControlsProps) {
   const isBusy = status === 'playing' || status === 'revealing' || status === 'endHold'
 
@@ -65,6 +73,20 @@ export function PathSimulationPlaybackControls({
         onClick={onStart}
         accent
       />
+      {mode === 'inbound' && onToggleContinuousInput ? (
+        <button
+          type="button"
+          disabled={!continuousInputActive && (status === 'idle' || status === 'complete')}
+          onClick={onToggleContinuousInput}
+          className={`rounded border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+            continuousInputActive
+              ? 'border-cyan-400/60 bg-cyan-500/15 text-cyan-200'
+              : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
+          }`}
+        >
+          연속 투입 {continuousInputActive ? 'ON' : 'OFF'}
+        </button>
+      ) : null}
       {isBusy ? (
         <SimButton label="일시정지" onClick={onPause} />
       ) : (
@@ -104,6 +126,7 @@ export function PathSimulationBar({
   incompleteLoadCount = 0,
   tackTimeSummaries = [],
   mapControls,
+  continuousInputActive = false,
 }: PathSimulationBarProps) {
   const statusText =
     status === 'revealing'
@@ -120,6 +143,10 @@ export function PathSimulationBar({
 
   const isBusy = status === 'playing' || status === 'revealing' || status === 'endHold'
   const timingLocked = status === 'playing'
+  const inputDisplaySec = continuousInputActive
+    ? CONTINUOUS_INPUT_INTERVAL_SEC
+    : inputIntervalSec
+  const inputLocked = timingLocked || continuousInputActive
 
   const sourceLabel = mode === 'inbound' ? '투입점 (동시 출발)' : 'OUT 포트 (동시 출발)'
   const emptyHint =
@@ -151,10 +178,10 @@ export function PathSimulationBar({
         <SimPanel title="시뮬레이션 설정">
           <div className="flex flex-wrap items-end justify-center gap-3">
             <TimingField
-              label="투입 (초)"
-              hint="시작점 체류"
-              value={inputIntervalSec}
-              disabled={timingLocked}
+              label="투입 대기 (초)"
+              hint={continuousInputActive ? '연속 투입 4초 고정' : '시작점 체류'}
+              value={inputDisplaySec}
+              disabled={inputLocked}
               onChange={onInputIntervalSecChange}
             />
             <TimingField
@@ -165,7 +192,7 @@ export function PathSimulationBar({
               onChange={onTransitIntervalSecChange}
             />
             <TimingField
-              label="출고 (초)"
+              label="출고 대기 (초)"
               hint="출고점 체류"
               value={dischargeIntervalSec}
               disabled={timingLocked}

@@ -35,6 +35,23 @@ import {
   staticTestMaterialOriginUnitIds,
   unionSimulationPathUnitIds,
 } from '../utils/pathSimulation'
+import {
+  advanceGatherProbes,
+  CONTINUOUS_INPUT_INTERVAL_SEC,
+  initGatherProbes,
+  type GatherProbeState,
+} from '../utils/continuousInputGather'
+import {
+  detectWarehouseDeposits,
+  resolveInboundStorageTarget,
+  WAREHOUSE_SLOT_CAPACITY,
+} from '../utils/warehouseSlots'
+
+function formatStatusTail(parts: string[], maxItems = 5): string {
+  if (parts.length === 0) return ''
+  if (parts.length <= maxItems) return parts.join(' · ')
+  return `…${parts.length - maxItems}건 · ${parts.slice(-maxItems).join(' · ')}`
+}
 
 export type PathSimulationStatus =
   | 'idle'
@@ -90,6 +107,24 @@ export function usePathSimulation(
   const [transitIntervalSec, setTransitIntervalSecState] = useState(
     DEFAULT_SIM_TRANSIT_INTERVAL_SEC,
   )
+  const [continuousInputActive, setContinuousInputActive] = useState(false)
+  const [gatherProbes, setGatherProbes] = useState<GatherProbeState[]>([])
+  const [warehouseFillCounts, setWarehouseFillCounts] = useState<Record<string, number>>({})
+  const [warehouseFullNotice, setWarehouseFullNotice] = useState(false)
+
+  const continuousInputActiveRef = useRef(continuousInputActive)
+  continuousInputActiveRef.current = continuousInputActive
+  const gatherProbesRef = useRef(gatherProbes)
+  gatherProbesRef.current = gatherProbes
+  const simTickRef = useRef(0)
+  const lastInjectTickRef = useRef(0)
+  const injectSeqRef = useRef(0)
+  const entryVacancyRef = useRef<Record<string, number>>({})
+  const depositedLoadIdsRef = useRef<Set<string>>(new Set())
+  const warehouseFillCountsRef = useRef(warehouseFillCounts)
+  warehouseFillCountsRef.current = warehouseFillCounts
+  const selectedSourceUnitIdsRef = useRef(selectedSourceUnitIds)
+  selectedSourceUnitIdsRef.current = selectedSourceUnitIds
 
   const setInputIntervalSec = useCallback(
     (value: number) =>
@@ -114,9 +149,22 @@ export function usePathSimulation(
   )
 
   const stepTiming = useMemo(
-    () => ({ inputIntervalSec, dischargeIntervalSec, transitIntervalSec }),
-    [dischargeIntervalSec, inputIntervalSec, transitIntervalSec],
+    () => ({
+      inputIntervalSec: continuousInputActive
+        ? CONTINUOUS_INPUT_INTERVAL_SEC
+        : inputIntervalSec,
+      dischargeIntervalSec,
+      transitIntervalSec,
+      continuousInputActive,
+    }),
+    [continuousInputActive, dischargeIntervalSec, inputIntervalSec, transitIntervalSec],
   )
+
+  const storageTargetId = useMemo(() => {
+    const entryId = selectedSourceUnitIds[0]
+    if (!entryId) return null
+    return resolveInboundStorageTarget(line, entryId)
+  }, [line, selectedSourceUnitIds])
 
   const sourceIdsKey = useMemo(
     () => [...sourceIds].sort().join('|'),
@@ -231,6 +279,15 @@ export function usePathSimulation(
     pendingTestMaterialClearRef.current = new Set()
     sessionLoadIdsRef.current = []
     clearTackSession()
+    setContinuousInputActive(false)
+    setGatherProbes([])
+    setWarehouseFillCounts({})
+    setWarehouseFullNotice(false)
+    simTickRef.current = 0
+    lastInjectTickRef.current = 0
+    injectSeqRef.current = 0
+    entryVacancyRef.current = {}
+    depositedLoadIdsRef.current = new Set()
     setStatus('idle')
   }, [clearTackSession, line.id, mode])
 
@@ -287,16 +344,41 @@ export function usePathSimulation(
     })
   }, [getLiveTackSec, line, loads, plan, previewPlan, stepTiming, tackClockTick, status])
 
-  const allLoadsComplete = useCallback((nextLoads: PathSimulationLoad[]) => {
-    const sessionIds = sessionLoadIdsRef.current
-    if (sessionIds.length === 0) {
-      return areAllSimulationLoadsFinished(nextLoads)
-    }
-    return sessionIds.every((loadId) => {
-      const load = nextLoads.find((item) => item.id === loadId)
-      return load != null && isLoadFullyDischarged(load)
+  const allLoadsComplete = useCallback(
+    (nextLoads: PathSimulationLoad[]) => {
+      if (continuousInputActiveRef.current) return false
+      const sessionIds = sessionLoadIdsRef.current
+      if (sessionIds.length === 0) {
+        return areAllSimulationLoadsFinished(nextLoads)
+      }
+      return sessionIds.every((loadId) => {
+        const load = nextLoads.find((item) => item.id === loadId)
+        return load != null && isLoadFullyDischarged(load)
+      })
+    },
+    [],
+  )
+
+  const toggleContinuousInput = useCallback(() => {
+    if (mode !== 'inbound') return
+    setContinuousInputActive((current) => {
+      const next = !current
+      if (next) {
+        setGatherProbes(
+          initGatherProbes(line, selectedSourceUnitIds, CONTINUOUS_INPUT_INTERVAL_SEC),
+        )
+        entryVacancyRef.current = {}
+        depositedLoadIdsRef.current = new Set()
+        simTickRef.current = 0
+        lastInjectTickRef.current = 0
+        injectSeqRef.current = 0
+        setWarehouseFullNotice(false)
+      } else {
+        setGatherProbes([])
+      }
+      return next
     })
-  }, [])
+  }, [line, mode, selectedSourceUnitIds])
 
   const isRevealComplete = useCallback(
     (steps: Record<string, number>, nextLoads: PathSimulationLoad[]) => {
@@ -331,7 +413,35 @@ export function usePathSimulation(
 
   const start = useCallback(() => {
     const nextPlan = rebuildPlan()
-    if (!nextPlan || nextPlan.loads.length === 0) {
+    const planLoads = nextPlan?.loads ?? []
+
+    if (
+      continuousInputActive &&
+      mode === 'inbound' &&
+      selectedSourceUnitIds.length > 0
+    ) {
+      const testOnlyLoads = planLoads.filter((load) => load.clearsTestMaterial)
+      const initialized =
+        testOnlyLoads.length > 0
+          ? initializeParallelLoads(testOnlyLoads, stepTiming, line)
+          : []
+      setEndHoldActive(false)
+      setPlan(nextPlan)
+      sessionLoadIdsRef.current = initialized.map((load) => load.id)
+      setLoads(initialized)
+      setRevealSteps({})
+      setFinalHoldActive(false)
+      clearedTestMaterialLoadIdsRef.current = new Set()
+      pendingTestMaterialClearRef.current = new Set()
+      if (initialized.length > 0) {
+        beginPathReveal(initialized)
+      } else {
+        setStatus('playing')
+      }
+      return
+    }
+
+    if (!nextPlan || planLoads.length === 0) {
       setPlan(nextPlan)
       setLoads([])
       setRevealSteps({})
@@ -342,13 +452,21 @@ export function usePathSimulation(
     }
     setEndHoldActive(false)
     setPlan(nextPlan)
-    const initialized = initializeParallelLoads(nextPlan.loads, stepTiming, line)
+    const initialized = initializeParallelLoads(planLoads, stepTiming, line)
     sessionLoadIdsRef.current = initialized.map((load) => load.id)
     setLoads(initialized)
     beginPathReveal(initialized)
     clearedTestMaterialLoadIdsRef.current = new Set()
     pendingTestMaterialClearRef.current = new Set()
-  }, [beginPathReveal, rebuildPlan, line, stepTiming])
+  }, [
+    beginPathReveal,
+    continuousInputActive,
+    mode,
+    rebuildPlan,
+    line,
+    selectedSourceUnitIds.length,
+    stepTiming,
+  ])
 
   useEffect(() => {
     if (status !== 'playing') return
@@ -370,8 +488,12 @@ export function usePathSimulation(
   }, [clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTimer, pauseTackSession])
 
   const resume = useCallback(() => {
-    if (loads.length === 0) return
+    if (loads.length === 0 && !continuousInputActive) return
     resumeTackSession()
+    if (loads.length === 0 && continuousInputActive) {
+      setStatus('playing')
+      return
+    }
     if (endHoldActive && allLoadsComplete(loads)) {
       setStatus('endHold')
       return
@@ -385,7 +507,7 @@ export function usePathSimulation(
       return
     }
     setStatus('playing')
-  }, [allLoadsComplete, endHoldActive, finalHoldActive, isRevealComplete, loads, revealSteps, resumeTackSession])
+  }, [allLoadsComplete, continuousInputActive, endHoldActive, finalHoldActive, isRevealComplete, loads, revealSteps, resumeTackSession])
 
   const reset = useCallback(() => {
     clearTimer()
@@ -401,6 +523,15 @@ export function usePathSimulation(
     clearedTestMaterialLoadIdsRef.current = new Set()
     pendingTestMaterialClearRef.current = new Set()
     sessionLoadIdsRef.current = []
+    setContinuousInputActive(false)
+    setGatherProbes([])
+    setWarehouseFillCounts({})
+    setWarehouseFullNotice(false)
+    simTickRef.current = 0
+    lastInjectTickRef.current = 0
+    injectSeqRef.current = 0
+    entryVacancyRef.current = {}
+    depositedLoadIdsRef.current = new Set()
     setStatus('idle')
   }, [clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTackSession, clearTimer])
 
@@ -470,12 +601,74 @@ export function usePathSimulation(
     clearTimer()
     timerRef.current = window.setInterval(() => {
       setLoads((current) => {
-        if (current.length === 0) return current
-        const advanced = applySimulationStep(
-          current,
+        if (current.length === 0 && !continuousInputActiveRef.current) return current
+
+        let nextLoads = current
+        const entryIds = selectedSourceUnitIdsRef.current
+        const beforeStep = nextLoads
+
+        nextLoads = applySimulationStep(
+          nextLoads,
           unitMapRef.current,
           stepTimingRef.current,
         )
+
+        if (continuousInputActiveRef.current && mode === 'inbound' && entryIds.length > 0) {
+          const stkId = storageTargetId
+          const totalFill = stkId ? (warehouseFillCountsRef.current[stkId] ?? 0) : 0
+          if (totalFill < WAREHOUSE_SLOT_CAPACITY) {
+            const gatherResult = advanceGatherProbes(
+              gatherProbesRef.current,
+              nextLoads,
+              line,
+              entryIds,
+              CONTINUOUS_INPUT_INTERVAL_SEC,
+              injectSeqRef.current,
+              entryVacancyRef.current,
+            )
+            gatherProbesRef.current = gatherResult.probes
+            setGatherProbes(gatherResult.probes)
+            entryVacancyRef.current = gatherResult.entryVacantTicks
+            injectSeqRef.current = gatherResult.nextSequence
+            if (gatherResult.spawned.length > 0) {
+              sessionLoadIdsRef.current = [
+                ...sessionLoadIdsRef.current,
+                ...gatherResult.spawned.map((load) => load.id),
+              ]
+              nextLoads = [...nextLoads, ...gatherResult.spawned]
+            }
+          }
+        }
+
+        const advanced = nextLoads
+
+        if (
+          continuousInputActiveRef.current &&
+          storageTargetId &&
+          beforeStep !== advanced
+        ) {
+          const deposited = detectWarehouseDeposits(
+            beforeStep,
+            advanced,
+            storageTargetId,
+            depositedLoadIdsRef.current,
+          )
+          if (deposited.length > 0) {
+            for (const loadId of deposited) {
+              depositedLoadIdsRef.current.add(loadId)
+            }
+            setWarehouseFillCounts((prev) => {
+              const nextCount = (prev[storageTargetId] ?? 0) + deposited.length
+              if (nextCount >= WAREHOUSE_SLOT_CAPACITY) {
+                setContinuousInputActive(false)
+                setGatherProbes([])
+                setWarehouseFullNotice(true)
+              }
+              return { ...prev, [storageTargetId]: nextCount }
+            })
+          }
+        }
+
         if (allLoadsComplete(advanced)) {
           clearTimer()
           beginEndHold()
@@ -485,7 +678,7 @@ export function usePathSimulation(
     }, PATH_SIMULATION_STEP_MS)
 
     return clearTimer
-  }, [allLoadsComplete, beginEndHold, clearTimer, status])
+  }, [allLoadsComplete, beginEndHold, clearTimer, line, mode, status, storageTargetId])
 
   useEffect(() => {
     if (status !== 'revealing' || finalHoldActive) return
@@ -553,6 +746,8 @@ export function usePathSimulation(
     setFinalHoldActive(false)
     setEndHoldActive(false)
     clearTackSession()
+    setContinuousInputActive(false)
+    setGatherProbes([])
     setStatus('idle')
   }, [clearTackSession])
 
@@ -564,6 +759,8 @@ export function usePathSimulation(
     setFinalHoldActive(false)
     setEndHoldActive(false)
     clearTackSession()
+    setContinuousInputActive(false)
+    setGatherProbes([])
     setStatus('idle')
   }, [clearTackSession])
 
@@ -656,12 +853,12 @@ export function usePathSimulation(
   )
   const progressLabel =
     loads.length > 0
-      ? `${incompleteLoadCount > 0 ? `잔여 ${incompleteLoadCount}개 · ` : ''}${loads
-          .map(
+      ? `${incompleteLoadCount > 0 ? `잔여 ${incompleteLoadCount}개 · ` : ''}${formatStatusTail(
+          loads.map(
             (load) =>
               `${load.label} ${load.stepIndex + 1}/${load.pathUnitIds.length}${isLoadFullyDischarged(load) ? ' ✓' : ''}`,
-          )
-          .join(' · ')}`
+          ),
+        )}`
       : null
   const activeUnitLabel =
     cstUnitIds.length > 0
@@ -705,6 +902,18 @@ export function usePathSimulation(
     setTransitIntervalSec,
     incompleteLoadCount,
     tackTimeSummaries,
+    continuousInputActive,
+    gatherProbes,
+    continuousGatherProbes: gatherProbes,
+    continuousGatherAnimating: status === 'playing' && continuousInputActive,
+    continuousInputIntervalSec: continuousInputActive
+      ? CONTINUOUS_INPUT_INTERVAL_SEC
+      : inputIntervalSec,
+    toggleContinuousInput,
+    warehouseFillCounts,
+    warehouseFullNotice,
+    dismissWarehouseFullNotice: () => setWarehouseFullNotice(false),
+    storageTargetId,
     entries: sources,
     selectedEntryUnitIds: selectedSourceUnitIds,
     toggleEntryUnitId: toggleSourceUnitId,

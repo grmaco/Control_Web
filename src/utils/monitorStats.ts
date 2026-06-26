@@ -120,7 +120,7 @@ export function safetyConditionValueClass(ok: boolean): string {
 
 /** 주화면·라인 현황 공통 — AUTO CONDITION Enable/Disable 색상 */
 export function autoConditionValueClass(enabled: boolean): string {
-  return enabled ? 'text-emerald-400' : 'text-slate-400'
+  return enabled ? 'text-emerald-400' : 'text-red-400'
 }
 
 /** 주화면·라인 현황 공통 — CURRENT STATUS 값 색상 */

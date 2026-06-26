@@ -22,7 +22,7 @@ interface RoleCardTheme {
 const ROLE_THEMES: Record<UserRole, RoleCardTheme> = {
   operator: {
     tagline: 'FIELD OPS',
-    desc: '현장 모니터링 · 운전',
+    desc: '현장 모니터링',
     accent: 'from-cyan-500/20 via-teal-500/10 to-slate-900/80',
     glow: 'shadow-[0_0_28px_rgba(34,211,238,0.35)]',
     ring: 'ring-cyan-400/80',
@@ -31,7 +31,7 @@ const ROLE_THEMES: Record<UserRole, RoleCardTheme> = {
   },
   engineer: {
     tagline: 'SYS ENGINEER',
-    desc: '설비 상태 · 라인 구성',
+    desc: '설비 제어 · 관리',
     accent: 'from-amber-500/20 via-orange-500/10 to-slate-900/80',
     glow: 'shadow-[0_0_28px_rgba(251,191,36,0.35)]',
     ring: 'ring-amber-400/80',
@@ -40,7 +40,7 @@ const ROLE_THEMES: Record<UserRole, RoleCardTheme> = {
   },
   developer: {
     tagline: 'CORE DEV',
-    desc: '시스템 · 연동 개발',
+    desc: 'GUI · 시스템 개발',
     accent: 'from-violet-500/25 via-fuchsia-500/15 to-slate-900/80',
     glow: 'shadow-[0_0_28px_rgba(167,139,250,0.4)]',
     ring: 'ring-violet-400/80',
@@ -273,7 +273,7 @@ export function LoginPage() {
           <h1 className="bg-gradient-to-r from-cyan-200 via-white to-violet-200 bg-clip-text text-2xl font-bold tracking-tight text-transparent sm:text-3xl">
             PC제어설비 관제시스템
           </h1>
-          <p className="mt-2 text-sm text-slate-400">캐릭터를 선택하고 접속하세요</p>
+          <p className="mt-2 text-sm text-slate-400">신분을 선택하고 접속하세요</p>
         </header>
 
         <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-5 shadow-2xl backdrop-blur-xl sm:p-8">

@@ -99,6 +99,8 @@ export interface PathSimulationLoad {
   exitTicks?: number
   /** 현재 모듈 체류 틱 — 다음 모듈 이송 전 대기 */
   transitTicks?: number
+  /** 연속 투입으로 생성된 자재 */
+  continuousInject?: boolean
 }
 
 /** 모니터 — 다중 투입점 동시 시뮬레이션 계획 */

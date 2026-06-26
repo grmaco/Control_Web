@@ -78,6 +78,34 @@ function navLinkClass(isActive: boolean, accent: NavAccent, mobile = false) {
 
 export function Navigation() {
   const logApplication = useConveyorStore((s) => s.logApplication)
+
+  const handleClick = (label: string) => {
+    void logApplication({
+      title: 'Button Click',
+      comment: `Main: Menu-${label} Click`,
+    })
+  }
+
+  return (
+    <nav className="nav-menu hidden gap-0.5 md:flex">
+      {navItems.map(({ to, label, end, accent, icon }) => (
+        <NavLink
+          key={to}
+          to={to}
+          end={end}
+          onClick={() => handleClick(label)}
+          className={({ isActive }) => navLinkClass(isActive, accent)}
+        >
+          <NavIcon name={icon} className="nav-link-icon h-4 w-4 shrink-0" />
+          <span className="nav-link-label">{label}</span>
+        </NavLink>
+      ))}
+    </nav>
+  )
+}
+
+export function MobileNavigation() {
+  const logApplication = useConveyorStore((s) => s.logApplication)
   const [mobileOpen, setMobileOpen] = useState(false)
 
   const handleClick = (label: string) => {
@@ -90,21 +118,6 @@ export function Navigation() {
 
   return (
     <>
-      <nav className="nav-menu hidden gap-0.5 md:flex">
-        {navItems.map(({ to, label, end, accent, icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={end}
-            onClick={() => handleClick(label)}
-            className={({ isActive }) => navLinkClass(isActive, accent)}
-          >
-            <NavIcon name={icon} className="nav-link-icon h-4 w-4 shrink-0" />
-            <span className="nav-link-label">{label}</span>
-          </NavLink>
-        ))}
-      </nav>
-
       <button
         type="button"
         aria-label={mobileOpen ? '메뉴 닫기' : '메뉴 열기'}

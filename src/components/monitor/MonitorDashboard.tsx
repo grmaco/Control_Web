@@ -8,6 +8,7 @@ import {
   filterIoStatusForLine,
   filterUnitRuntimeForLine,
   getLineRuntimeForLine,
+  hasActiveAlarmsForLine,
 } from '../../utils/lineV3Scope'
 import {
   computeLineStats,
@@ -44,6 +45,7 @@ export function MonitorDashboard({
   const getLineControl = useMonitorStore((s) => s.getLineControl)
   const lineControls = useMonitorStore((s) => s.lineControls)
   const unitRuntimeAll = useSemiCnvStore((s) => s.unitRuntime)
+  const unitAlarmsAll = useSemiCnvStore((s) => s.unitAlarms)
   const lineRuntimeAll = useSemiCnvStore((s) => s.lineRuntime)
   const ioStatusAll = useSemiCnvStore((s) => s.ioStatus)
   const logApplication = useConveyorStore((s) => s.logApplication)
@@ -140,6 +142,11 @@ export function MonitorDashboard({
     ? lrt.keyStatus === 'Auto' && lrt.operationStatus === 'Auto' && allCvsAreAuto
     : control.autoRun
 
+  const hasActiveAlarm = useMemo(
+    () => hasActiveAlarmsForLine(line, unitRuntime, unitAlarmsAll, lineComm),
+    [line, unitRuntime, unitAlarmsAll, lineComm],
+  )
+
   return (
     <div className="space-y-4">
       {!showIOPanels && (
@@ -147,6 +154,7 @@ export function MonitorDashboard({
           etherCatConnected={etherCatConnected}
           allPowerOn={allPowerOn}
           allAutoRun={allAutoRun}
+          hasActiveAlarm={hasActiveAlarm}
           onToggleEtherCat={() => {
             toggleEtherCat()
             void logApplication({

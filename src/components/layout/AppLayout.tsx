@@ -6,7 +6,7 @@ import { useAuthStore } from '../../store/useAuthStore'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { useMonitorStore } from '../../store/useMonitorStore'
 import type { UserRole } from '../../types/auth'
-import { Navigation } from './Navigation'
+import { Navigation, MobileNavigation } from './Navigation'
 
 const ROLE_BADGE_CLASS: Record<UserRole, string> = {
   operator: 'header-role-badge--operator',
@@ -37,6 +37,16 @@ export function AppLayout() {
     })
   }, [logApplication])
 
+  const handleLogout = () => {
+    if (!role) return
+    void logApplication({
+      title: 'Logout',
+      comment: `${USER_ROLE_LABELS[role]} logout`,
+    })
+    logout()
+    navigate('/login', { replace: true })
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
       <header className="border-b border-slate-800 bg-slate-900">
@@ -54,25 +64,28 @@ export function AppLayout() {
               </h1>
             </div>
             <Navigation />
+            {role ? (
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="header-logout-btn rounded-lg px-2.5 py-1 text-xs text-slate-400 md:hidden"
+              >
+                로그아웃
+              </button>
+            ) : null}
           </div>
           <div className="flex min-w-0 items-center gap-2 md:gap-4">
+            <MobileNavigation />
             {role ? (
-              <div className="flex items-center gap-2">
+              <div className="hidden items-center gap-2 md:flex">
                 <span
-                  className={`header-role-badge hidden rounded-lg px-2.5 py-1 text-xs font-medium sm:inline ${ROLE_BADGE_CLASS[role]}`}
+                  className={`header-role-badge rounded-lg px-2.5 py-1 text-xs font-medium ${ROLE_BADGE_CLASS[role]}`}
                 >
                   {USER_ROLE_LABELS[role]}
                 </span>
                 <button
                   type="button"
-                  onClick={() => {
-                    void logApplication({
-                      title: 'Logout',
-                      comment: `${USER_ROLE_LABELS[role]} logout`,
-                    })
-                    logout()
-                    navigate('/login', { replace: true })
-                  }}
+                  onClick={handleLogout}
                   className="header-logout-btn rounded-lg px-2.5 py-1 text-xs text-slate-400"
                 >
                   로그아웃

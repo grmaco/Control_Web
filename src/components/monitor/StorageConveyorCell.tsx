@@ -37,9 +37,17 @@ interface StorageConveyorCellProps {
   height: number
   status: ConveyorStatus
   uid: string
+  /** 연속 투입 적재 슬롯 (0–48) */
+  filledSlotCount?: number
 }
 
-export function StorageConveyorCell({ width, height, status, uid }: StorageConveyorCellProps) {
+export function StorageConveyorCell({
+  width,
+  height,
+  status,
+  uid,
+  filledSlotCount = 0,
+}: StorageConveyorCellProps) {
   const cfg = COLORS[status]
   const W = 300
   const H = 300
@@ -73,6 +81,15 @@ export function StorageConveyorCell({ width, height, status, uid }: StorageConve
   const N_SHELVES = 3   // 각 랙 내 선반 줄
 
   const filterId = `stf-${uid}`
+  const slotFill = Math.max(0, Math.min(48, filledSlotCount))
+  const SLOT_COLS = 8
+  const SLOT_ROWS = 6
+  const slotPadX = INNER_L + 10
+  const slotPadY = INNER_T + 8
+  const slotAreaW = INNER_W - 20
+  const slotAreaH = INNER_H - 16
+  const slotW = (slotAreaW - (SLOT_COLS - 1) * 3) / SLOT_COLS
+  const slotH = (slotAreaH - (SLOT_ROWS - 1) * 3) / SLOT_ROWS
 
   return (
     <svg
@@ -196,6 +213,28 @@ export function StorageConveyorCell({ width, height, status, uid }: StorageConve
           />
         </g>
       ))}
+
+      {/* ── 48 슬롯 적재 표시 (연속 투입) ── */}
+      {filledSlotCount != null
+        ? Array.from({ length: SLOT_ROWS }, (_, row) =>
+            Array.from({ length: SLOT_COLS }, (_, col) => {
+              const index = row * SLOT_COLS + col
+              const filled = index < slotFill
+              return (
+                <rect
+                  key={`slot-${index}`}
+                  x={slotPadX + col * (slotW + 3)}
+                  y={slotPadY + row * (slotH + 3)}
+                  width={slotW}
+                  height={slotH}
+                  rx={1}
+                  fill={filled ? '#38bdf8' : '#2e6444'}
+                  opacity={filled ? 0.95 : 0.35}
+                />
+              )
+            }),
+          )
+        : null}
 
       {/* ── 외곽 프레임 ── */}
       <rect

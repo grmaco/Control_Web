@@ -143,15 +143,15 @@ export function SemiCnvConnectionBar() {
         </>
       ) : null}
 
-      {/* 설정 팝오버 */}
       {showConfig && (
-        <>
-          {/* 배경 클릭으로 닫기 */}
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setShowConfig(false)}
+        >
           <div
-            className="fixed inset-0 z-40"
-            onClick={() => setShowConfig(false)}
-          />
-          <div className="absolute left-0 top-6 z-50 w-80 rounded-lg border border-slate-600 bg-slate-800 p-4 shadow-xl">
+            className="w-full max-w-sm rounded-lg border border-slate-600 bg-slate-800 p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <p className="mb-3 text-sm font-medium text-slate-200">전역 서버 연결 설정</p>
 
             <label className="mb-1 block text-xs text-slate-400">
@@ -163,14 +163,15 @@ export function SemiCnvConnectionBar() {
               onChange={(e) => setInputUrl(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && applyConfig()}
               placeholder="ws://192.168.0.10:8765/ws/dashboard"
-              className="w-full rounded border border-slate-600 bg-slate-900 px-3 py-1.5 text-xs text-slate-100 placeholder-slate-600 focus:border-blue-500 focus:outline-none"
+              className="w-full rounded border border-slate-600 bg-slate-900 px-3 py-2 text-base text-slate-100 placeholder-slate-600 focus:border-blue-500 focus:outline-none sm:py-1.5 sm:text-xs"
             />
             <p className="mt-1 text-xs text-slate-500">
               라인별 URL이 없는 경우 이 URL로 연결됩니다. 같은 PC면 <code className="text-slate-400">localhost</code>, 다른 PC면 해당 PC의 IP 주소
             </p>
 
-            <div className="mt-3 flex items-center justify-between">
+            <div className="mt-3 flex items-center justify-between gap-2">
               <button
+                type="button"
                 onClick={toggleEnabled}
                 className="text-xs text-slate-500 hover:text-red-400"
               >
@@ -178,21 +179,23 @@ export function SemiCnvConnectionBar() {
               </button>
               <div className="flex gap-2">
                 <button
+                  type="button"
                   onClick={() => setShowConfig(false)}
-                  className="rounded px-3 py-1 text-xs text-slate-400 hover:bg-slate-700"
+                  className="rounded px-3 py-1.5 text-sm text-slate-400 hover:bg-slate-700 sm:py-1 sm:text-xs"
                 >
                   취소
                 </button>
                 <button
+                  type="button"
                   onClick={applyConfig}
-                  className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-500"
+                  className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-500 sm:py-1 sm:text-xs"
                 >
                   적용
                 </button>
               </div>
             </div>
           </div>
-        </>
+        </div>
       )}
     </div>
   )

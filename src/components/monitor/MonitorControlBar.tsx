@@ -3,13 +3,14 @@ import { useCallback, useRef } from 'react'
 interface ControlButtonProps {
   label: string
   active: boolean
+  emergency?: boolean
   onClick?: () => void
   onLongPress?: () => void
   longPressMs?: number
   debounceMs?: number
 }
 
-function ControlButton({ label, active, onClick, onLongPress, longPressMs = 1000, debounceMs = 1000 }: ControlButtonProps) {
+function ControlButton({ label, active, emergency = false, onClick, onLongPress, longPressMs = 1000, debounceMs = 1000 }: ControlButtonProps) {
   const timerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const firedRef    = useRef(false)
   const lastClickAt = useRef(0)
@@ -54,9 +55,11 @@ function ControlButton({ label, active, onClick, onLongPress, longPressMs = 1000
       onTouchStart={startPress}
       onTouchEnd={endPress}
       className={`relative min-w-[120px] rounded border px-4 py-3 text-sm font-semibold transition-colors select-none sm:py-2 ${
-        active
-          ? 'border-blue-500 bg-blue-600 text-white shadow-[0_0_12px_rgba(37,99,235,0.45)]'
-          : 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600'
+        emergency
+          ? 'control-btn-alarm border-red-500 bg-red-600 text-white'
+          : active
+            ? 'border-blue-500 bg-blue-600 text-white shadow-[0_0_12px_rgba(37,99,235,0.45)]'
+            : 'border-slate-600 bg-slate-700 text-slate-300 hover:bg-slate-600'
       }`}
     >
       {label}
@@ -73,6 +76,7 @@ export function MonitorControlBar({
   etherCatConnected,
   allPowerOn,
   allAutoRun,
+  hasActiveAlarm,
   onToggleEtherCat,
   onToggleAllPower,
   onAllAutoRun,
@@ -82,6 +86,7 @@ export function MonitorControlBar({
   etherCatConnected: boolean
   allPowerOn: boolean
   allAutoRun: boolean
+  hasActiveAlarm: boolean
   onToggleEtherCat: () => void
   onToggleAllPower: () => void
   onAllAutoRun: () => void
@@ -103,7 +108,12 @@ export function MonitorControlBar({
         onLongPress={onAllAutoStop}
         longPressMs={1000}
       />
-      <ControlButton label="이상 복귀" active={false} onClick={onAlarmReset} />
+      <ControlButton
+        label="이상 복귀"
+        active={!hasActiveAlarm}
+        emergency={hasActiveAlarm}
+        onClick={onAlarmReset}
+      />
     </div>
   )
 }

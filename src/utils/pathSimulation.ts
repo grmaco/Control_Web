@@ -762,6 +762,8 @@ export interface SimulationStepTiming {
   inputIntervalSec: number
   dischargeIntervalSec: number
   transitIntervalSec: number
+  /** 연속 투입 활성 — 연속 자재 entry 체류 1틱 */
+  continuousInputActive?: boolean
 }
 
 /** 시뮬 투입·이송·출고 시간 입력값 (0.1~60초) */
@@ -789,12 +791,23 @@ function isReadyToLeaveModule(
   load: PathSimulationLoad,
   entryTicksRequired: number,
   transitTicksRequired: number,
+  timing?: SimulationStepTiming,
 ): boolean {
   if (isAtDestination(load)) return false
+  const entryRequired = resolveEntryTicksRequired(load, entryTicksRequired, timing)
   if (load.stepIndex === 0) {
-    return (load.entryTicks ?? 0) >= entryTicksRequired
+    return (load.entryTicks ?? 0) >= entryRequired
   }
   return (load.transitTicks ?? 0) >= transitTicksRequired
+}
+
+function resolveEntryTicksRequired(
+  load: PathSimulationLoad,
+  entryTicksRequired: number,
+  timing?: SimulationStepTiming,
+): number {
+  if (timing?.continuousInputActive && load.continuousInject) return 1
+  return entryTicksRequired
 }
 
 export function applySimulationStep(
@@ -860,9 +873,10 @@ export function advanceSimulationLoads(
     if (!load.released) continue
 
     if (isAtDestination(load)) {
-      if (load.stepIndex === 0 && load.entryTicks < entryTicksRequired) {
+      const entryRequired = resolveEntryTicksRequired(load, entryTicksRequired, timing)
+      if (load.stepIndex === 0 && load.entryTicks < entryRequired) {
         load.entryTicks += 1
-        load.waiting = load.entryTicks < entryTicksRequired
+        load.waiting = load.entryTicks < entryRequired
         continue
       }
       load.exitTicks += 1
@@ -874,7 +888,8 @@ export function advanceSimulationLoads(
       continue
     }
 
-    if (load.stepIndex === 0 && load.entryTicks < entryTicksRequired) {
+    const entryRequired = resolveEntryTicksRequired(load, entryTicksRequired, timing)
+    if (load.stepIndex === 0 && load.entryTicks < entryRequired) {
       load.entryTicks += 1
       load.waiting = true
       continue
@@ -890,7 +905,7 @@ export function advanceSimulationLoads(
   for (let i = 0; i < next.length; i += 1) {
     const load = next[i]!
     if (!load.released || load.complete || isAtDestination(load)) continue
-    if (!isReadyToLeaveModule(load, entryTicksRequired, transitTicksRequired)) {
+    if (!isReadyToLeaveModule(load, entryTicksRequired, transitTicksRequired, timing)) {
       load.waiting = true
       continue
     }
@@ -1088,6 +1103,84 @@ export interface LoadTackTimeSummary {
 }
 
 export const MIN_TACK_TIME_SEC = 0
+
+export interface EntryVacancyState {
+  vacantTicks: number
+}
+
+export function continuousEntryVacantTicksRequired(): number {
+  return 1
+}
+
+export function tickEntryVacancy(
+  entryUnitId: string,
+  loads: PathSimulationLoad[],
+  state: EntryVacancyState,
+): EntryVacancyState {
+  const occupied = loads.some(
+    (load) =>
+      !load.complete &&
+      load.pathUnitIds.length > 0 &&
+      load.pathUnitIds[load.stepIndex] === entryUnitId,
+  )
+  if (occupied) {
+    return { vacantTicks: 0 }
+  }
+  return { vacantTicks: state.vacantTicks + 1 }
+}
+
+export function isEntryPointReadyForContinuousInject(
+  entryUnitId: string,
+  loads: PathSimulationLoad[],
+  vacancy: EntryVacancyState,
+): boolean {
+  if (vacancy.vacantTicks < continuousEntryVacantTicksRequired()) return false
+  return !loads.some(
+    (load) =>
+      !load.complete &&
+      load.pathUnitIds.length > 0 &&
+      load.pathUnitIds[load.stepIndex] === entryUnitId,
+  )
+}
+
+export function canContinuousInjectAtEntry(
+  entryUnitId: string,
+  loads: PathSimulationLoad[],
+  vacancy: EntryVacancyState,
+  lastInjectAtTick: number,
+  currentTick: number,
+  injectIntervalTicks: number,
+): boolean {
+  if (currentTick - lastInjectAtTick < injectIntervalTicks) return false
+  return isEntryPointReadyForContinuousInject(entryUnitId, loads, vacancy)
+}
+
+/** 연속 투입 — 선택 투입점마다 자재 1개 생성 */
+export function spawnInboundSimulationLoads(
+  line: ConveyorLine,
+  entryUnitIds: string[],
+  seq: number,
+): PathSimulationLoad[] {
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  return entryUnitIds.map((entryUnitId) => {
+    const plan = planInboundLoadPath(line, entryUnitId)
+    const load = createSimulationLoad(
+      plan,
+      unitMap.get(entryUnitId),
+      'inbound',
+      { loadIdSuffix: `-ci-${seq}` },
+    )
+    return {
+      ...load,
+      id: `${load.id}-${entryUnitId}-${seq}`,
+      continuousInject: true,
+      released: true,
+      entryTicks: 0,
+      exitTicks: 0,
+      transitTicks: 0,
+    }
+  })
+}
 
 export function roundTackTimeSec(sec: number): number {
   if (!Number.isFinite(sec) || sec < 0) return MIN_TACK_TIME_SEC

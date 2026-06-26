@@ -35,7 +35,7 @@ export function LineV3UrlSetting({ line }: Props) {
   const statusLabel = comm ? COMM_STATE_LABEL[comm.state] : '미선택'
 
   return (
-    <div className="relative">
+    <>
       <button
         type="button"
         onClick={openPanel}
@@ -54,9 +54,14 @@ export function LineV3UrlSetting({ line }: Props) {
       </button>
 
       {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-9 z-50 w-88 min-w-[340px] rounded-lg border border-slate-600 bg-slate-800 p-4 shadow-xl">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-lg border border-slate-600 bg-slate-800 p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <p className="mb-1 text-sm font-medium text-slate-200">
               {line.name} · V3 연결 설정
             </p>
@@ -71,8 +76,7 @@ export function LineV3UrlSetting({ line }: Props) {
               onChange={(e) => setInputUrl(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void apply()}
               placeholder="ws://192.168.0.10:8765/ws/dashboard"
-              autoFocus
-              className="w-full rounded border border-slate-600 bg-slate-900 px-3 py-1.5 text-xs text-slate-100 placeholder-slate-600 focus:border-blue-500 focus:outline-none"
+              className="w-full rounded border border-slate-600 bg-slate-900 px-3 py-2 text-base text-slate-100 placeholder-slate-600 focus:border-blue-500 focus:outline-none sm:py-1.5 sm:text-xs"
             />
             <p className="mt-1 text-xs text-slate-500">
               예) <code className="text-slate-400">ws://10.200.31.191:8765/ws/dashboard</code>
@@ -80,21 +84,23 @@ export function LineV3UrlSetting({ line }: Props) {
 
             <div className="mt-3 flex justify-end gap-2">
               <button
+                type="button"
                 onClick={() => setOpen(false)}
-                className="rounded px-3 py-1 text-xs text-slate-400 hover:bg-slate-700"
+                className="rounded px-3 py-1.5 text-sm text-slate-400 hover:bg-slate-700 sm:py-1 sm:text-xs"
               >
                 취소
               </button>
               <button
+                type="button"
                 onClick={() => void apply()}
-                className="rounded bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-500"
+                className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-500 sm:py-1 sm:text-xs"
               >
                 적용 및 재연결
               </button>
             </div>
           </div>
-        </>
+        </div>
       )}
-    </div>
+    </>
   )
 }
