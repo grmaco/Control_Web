@@ -15,7 +15,6 @@ import { TransformComponent, TransformWrapper } from 'react-zoom-pan-pinch'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BUILDER_PALETTE_TYPES,
-  typeDescription,
   typeLabel,
 } from '../../constants/conveyorTypes'
 import { BUILDER_CELL_SIZE } from '../../constants/grid'
@@ -479,14 +478,6 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
               <PaletteItem key={type} type={type} />
             ))}
           </ul>
-          <ul className="mt-3 hidden space-y-1 text-xs text-slate-500 lg:block">
-            {PALETTE_TYPES.map((type) => (
-              <li key={type}>
-                <span className="text-slate-400">{typeLabel(type)}</span> —{' '}
-                {typeDescription(type)}
-              </li>
-            ))}
-          </ul>
           <p className="mt-4 text-xs leading-relaxed text-slate-500">
             팔레트 항목을 그리드 빈 칸으로 드래그해 배치하세요.
           </p>
@@ -645,7 +636,6 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
             line={draft}
             unit={selectedUnit}
             selectedUnitIds={selectedUnitIds}
-            onSetFlowRole={handleSetFlowRole}
             onChange={persist}
             onDelete={handleDelete}
             onRotate={handleRotate}

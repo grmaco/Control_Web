@@ -4,6 +4,7 @@ export const STORAGE_KEYS = {
   alarmHistory: 'conveyor.alarmHistory',
   settings: 'conveyor.settings',
   monitor: 'conveyor.monitor',
+  authSession: 'conveyor.auth.session',
 } as const
 
 export const MAX_HISTORY_RECORDS = 1000

@@ -3,7 +3,6 @@ import type { ConveyorLine } from '../../types/conveyor'
 import type {
   SemiCnvAutoStatus,
   SemiCnvOperationStatus,
-  SemiCnvRunStatus,
   SemiCnvUnitRuntime,
 } from '../../types/semicnv'
 import { useSemiCnvStore } from '../../store/useSemiCnvStore'
@@ -13,9 +12,7 @@ interface CvRow {
   unitId: string
   cvId: number
   name: string
-  lineName: string
   type: string
-  runStatus: SemiCnvRunStatus
   operationStatus: SemiCnvOperationStatus
   autoStatus: SemiCnvAutoStatus
   alarm: boolean
@@ -25,10 +22,6 @@ interface CvRow {
   destination: number
 }
 
-const RUN_STATUS_LABELS: Record<string, string> = {
-  Run: 'Run',
-  Stop: 'Stop',
-}
 
 const AUTO_STATUS_COLORS: Record<string, string> = {
   Busy:   'text-amber-400',
@@ -39,7 +32,7 @@ const AUTO_STATUS_COLORS: Record<string, string> = {
   None:   'text-slate-600',
 }
 
-type FilterStatus = 'all' | 'run' | 'stop' | 'alarm' | 'manual'
+type CvFilter = 'all' | SemiCnvOperationStatus | 'error'
 
 export function CvStatusPanel({
   lines,
@@ -50,7 +43,7 @@ export function CvStatusPanel({
   unitRuntime: Record<string, SemiCnvUnitRuntime> | Record<number, SemiCnvUnitRuntime>
   selectedLine?: ConveyorLine | null
 }) {
-  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all')
+  const [cvFilter, setCvFilter] = useState<CvFilter>('all')
   const [searchCst, setSearchCst] = useState('')
   const [searchName, setSearchName] = useState('')
   const unitAlarms = useSemiCnvStore((s) => s.unitAlarms)
@@ -58,8 +51,6 @@ export function CvStatusPanel({
 
   // 선택 라인의 유닛을 직접 순회 → Web UUID 기반 unitRuntime 참조
   // (두 V3가 같은 semiCnvId를 쓰더라도 Web UUID로 분리되어 충돌 없음)
-  const lineName = selectedLine?.name ?? '-'
-
   const rows = useMemo<CvRow[]>(() => {
     const result: CvRow[] = []
 
@@ -79,9 +70,7 @@ export function CvStatusPanel({
           unitId: unit.id,
           cvId: rt.semiCnvId,
           name: unit.name,
-          lineName,
           type: unit.type,
-          runStatus: rt.runStatus,
           operationStatus: rt.operationStatus,
           autoStatus: rt.autoStatus,
           alarm: rt.alarm,
@@ -108,9 +97,7 @@ export function CvStatusPanel({
             unitId: unit.id,
             cvId: rt.semiCnvId,
             name: unit.name,
-            lineName: line.name,
             type: unit.type,
-            runStatus: rt.runStatus,
             operationStatus: rt.operationStatus,
             autoStatus: rt.autoStatus,
             alarm: rt.alarm,
@@ -125,14 +112,12 @@ export function CvStatusPanel({
 
     result.sort((a, b) => a.cvId - b.cvId)
     return result
-  }, [unitRuntime, selectedLine, lines, lineName, unitAlarms, liveAlarms])
+  }, [unitRuntime, selectedLine, lines, unitAlarms, liveAlarms])
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
-      if (filterStatus === 'run' && r.runStatus !== 'Run') return false
-      if (filterStatus === 'stop' && r.runStatus !== 'Stop') return false
-      if (filterStatus === 'alarm' && !r.alarm) return false
-      if (filterStatus === 'manual' && r.operationStatus !== 'Manual') return false
+      if (cvFilter === 'error' && !r.alarm) return false
+      if (cvFilter !== 'all' && cvFilter !== 'error' && r.operationStatus !== cvFilter) return false
 
       const cstQ = searchCst.trim().toLowerCase()
       if (cstQ && !(r.cstId ?? '').toLowerCase().includes(cstQ)) return false
@@ -142,16 +127,15 @@ export function CvStatusPanel({
 
       return true
     })
-  }, [rows, filterStatus, searchCst, searchName])
+  }, [rows, cvFilter, searchCst, searchName])
 
   const highlightCst = searchCst.trim().toLowerCase()
 
-  const FILTER_BTNS: { key: FilterStatus; label: string }[] = [
-    { key: 'all',    label: '전체' },
-    { key: 'run',    label: 'Run' },
-    { key: 'stop',   label: 'Stop' },
-    { key: 'alarm',  label: 'Alarm' },
-    { key: 'manual', label: 'Manual' },
+  const CV_FILTER_BTNS: { key: CvFilter; label: string }[] = [
+    { key: 'all', label: '전체' },
+    { key: 'Auto', label: 'Auto' },
+    { key: 'Manual', label: 'Manual' },
+    { key: 'error', label: 'Error' },
   ]
 
   return (
@@ -159,13 +143,13 @@ export function CvStatusPanel({
       {/* 필터 / 검색 바 */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded border border-slate-700 overflow-hidden">
-          {FILTER_BTNS.map(({ key, label }) => (
+          {CV_FILTER_BTNS.map(({ key, label }) => (
             <button
               key={key}
               type="button"
-              onClick={() => setFilterStatus(key)}
+              onClick={() => setCvFilter(key)}
               className={`px-3 py-1 text-xs font-medium transition-colors ${
-                filterStatus === key
+                cvFilter === key
                   ? 'bg-cyan-700 text-white'
                   : 'bg-slate-800 text-slate-400 hover:bg-slate-700'
               }`}
@@ -201,23 +185,21 @@ export function CvStatusPanel({
         <table className="w-full min-w-[640px] text-xs">
           <thead className="border-b border-slate-700 bg-slate-800 text-slate-400">
             <tr>
-              <th className="px-3 py-2 text-left font-medium">CV ID</th>
+              <th className="px-3 py-2 text-left font-medium">ID</th>
               <th className="px-3 py-2 text-left font-medium">이름</th>
-              <th className="px-3 py-2 text-left font-medium">라인</th>
               <th className="px-3 py-2 text-left font-medium">TYPE</th>
-              <th className="px-3 py-2 text-center font-medium">RUN</th>
               <th className="px-3 py-2 text-center font-medium">MODE</th>
               <th className="px-3 py-2 text-center font-medium">STATUS</th>
               <th className="px-3 py-2 text-center font-medium">ALARM</th>
-              <th className="px-3 py-2 text-left font-medium">ALARM TEXT</th>
-              <th className="px-3 py-2 text-left font-medium">제품 ID (CST)</th>
-              <th className="px-3 py-2 text-center font-medium">DEST</th>
+              <th className="px-3 py-2 text-left font-medium">알람 내용</th>
+              <th className="whitespace-nowrap px-3 py-2 text-left font-medium">제품 ID</th>
+              <th className="whitespace-nowrap px-3 py-2 text-center font-medium">목적지</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={11} className="py-8 text-center text-slate-500">
+                <td colSpan={9} className="py-8 text-center text-slate-500">
                   {rows.length === 0 ? 'V3 연결 후 CV 데이터가 표시됩니다.' : '검색 결과 없음'}
                 </td>
               </tr>
@@ -235,19 +217,7 @@ export function CvStatusPanel({
                   >
                     <td className="px-3 py-2 font-mono text-cyan-400">{r.cvId}</td>
                     <td className="px-3 py-2 text-slate-200">{r.name}</td>
-                    <td className="px-3 py-2 text-slate-400">{r.lineName}</td>
                     <td className="px-3 py-2 text-slate-400 capitalize">{r.type}</td>
-                    <td className="px-3 py-2 text-center">
-                      <span
-                        className={`inline-block min-w-[38px] rounded px-1.5 py-0.5 text-center font-bold ${
-                          r.runStatus === 'Run'
-                            ? 'bg-emerald-700 text-emerald-100'
-                            : 'bg-slate-700 text-slate-400'
-                        }`}
-                      >
-                        {RUN_STATUS_LABELS[r.runStatus] ?? r.runStatus}
-                      </span>
-                    </td>
                     <td className="px-3 py-2 text-center">
                       <span
                         className={`text-xs font-medium ${

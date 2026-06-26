@@ -5,6 +5,7 @@ import { useConveyorStore } from '../../store/useConveyorStore'
 const navItems = [
   { to: '/', label: '주화면', end: true },
   { to: '/line-status', label: '라인 현황' },
+  { to: '/v3-alarms', label: '알람 리스트' },
   { to: '/builder', label: '라인 빌더' },
   { to: '/history', label: '이력' },
 ]

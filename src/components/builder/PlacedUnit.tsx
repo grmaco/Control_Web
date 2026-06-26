@@ -38,6 +38,21 @@ function flowRoleBadgeClass(role: FlowRole): string {
   return 'bg-emerald-600'
 }
 
+function getHighlightOverlayClass(
+  selected: boolean,
+  pickHighlight: 'source' | 'target' | null,
+  routingHighlighted: boolean,
+  flowRole: FlowRole | null,
+): string | null {
+  if (pickHighlight === 'source') return 'ring-2 ring-inset ring-cyan-300 brightness-125'
+  if (pickHighlight === 'target') return 'ring-2 ring-inset ring-emerald-300 brightness-125'
+  if (routingHighlighted) return 'ring-2 ring-inset ring-violet-300 brightness-125'
+  if (selected) return 'ring-2 ring-inset ring-white'
+  if (flowRole === 'entry') return 'ring-2 ring-inset ring-amber-400'
+  if (flowRole === 'exit') return 'ring-2 ring-inset ring-emerald-400'
+  return null
+}
+
 export function PlacedUnit({
   unit,
   selected,
@@ -69,6 +84,12 @@ export function PlacedUnit({
   const useRollerSvg  = !isStorage && !isTurn
   const useTurnSvg    = isTurn
   const useStorageSvg = isStorage
+  const highlightOverlayClass = getHighlightOverlayClass(
+    selected,
+    pickHighlight,
+    routingHighlighted,
+    flowRole,
+  )
 
   return (
     <button
@@ -89,20 +110,8 @@ export function PlacedUnit({
         height: spanHeight,
         touchAction: 'none',
       }}
-      className={`builder-no-pan absolute top-0 left-0 flex cursor-grab flex-col items-center justify-center border p-1 text-[10px] leading-tight active:cursor-grabbing relative overflow-hidden ${(useRollerSvg || useTurnSvg || useStorageSvg) ? colors.border : `${colors.bg} ${colors.border}`} ${selected ? 'ring-2 ring-inset ring-white' : ''} ${
-        pickHighlight === 'source'
-          ? 'ring-2 ring-inset ring-cyan-300 brightness-125'
-          : pickHighlight === 'target'
-            ? 'ring-2 ring-inset ring-emerald-300 brightness-125 cursor-crosshair'
-            : ''
-      } ${
-        routingHighlighted ? 'ring-2 ring-inset ring-violet-300 brightness-125' : ''
-      } ${
-        flowRole === 'entry'
-          ? 'ring-2 ring-inset ring-amber-400'
-          : flowRole === 'exit'
-            ? 'ring-2 ring-inset ring-emerald-400'
-            : ''
+      className={`builder-no-pan absolute top-0 left-0 flex cursor-grab flex-col items-center justify-center border p-1 text-[10px] leading-tight active:cursor-grabbing relative overflow-hidden ${(useRollerSvg || useTurnSvg || useStorageSvg) ? colors.border : `${colors.bg} ${colors.border}`} ${
+        pickHighlight === 'target' ? 'cursor-crosshair' : ''
       } ${isDragging ? 'opacity-30' : 'hover:brightness-110'}`}
       title={
         routingTooltip ??
@@ -163,6 +172,12 @@ export function PlacedUnit({
             </>
           )}
         </div>
+      ) : null}
+      {highlightOverlayClass ? (
+        <span
+          className={`pointer-events-none absolute inset-0 z-20 ${highlightOverlayClass}`}
+          aria-hidden
+        />
       ) : null}
     </button>
   )

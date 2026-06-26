@@ -5,7 +5,10 @@ import type {
   PathSimulationLoad,
   PathSimulationPlan,
 } from '../types/unitProperties'
-import { PATH_SIMULATION_STEP_MS } from '../types/unitProperties'
+import {
+  DEFAULT_SIM_INPUT_INTERVAL_SEC,
+  PATH_SIMULATION_STEP_MS,
+} from '../types/unitProperties'
 import { isStorageUnit } from '../constants/conveyorTypes'
 import { getEntryUnits, getExitUnits, isFlowCapableUnit } from './flowEntries'
 import { computeMinimapFlowMap, type UnitFlowDirs } from './flowDirection'
@@ -645,6 +648,15 @@ export interface SimulationStepTiming {
   transitIntervalSec: number
 }
 
+/** 시뮬 투입·이송·출고 시간 입력값 (0.1~60초) */
+export function clampSimIntervalSec(
+  value: number,
+  fallback = DEFAULT_SIM_INPUT_INTERVAL_SEC,
+): number {
+  if (!Number.isFinite(value)) return fallback
+  return Math.min(60, Math.max(0.1, Math.round(value * 10) / 10))
+}
+
 const SIM_TICK_SEC = PATH_SIMULATION_STEP_MS / 1000
 
 /** 초 → 시뮬 틱 수 (틱 간격 PATH_SIMULATION_STEP_MS) */
@@ -931,4 +943,66 @@ export function simulationFinalUnitIds(loads: PathSimulationLoad[]): string[] {
     }
   }
   return ordered
+}
+
+export interface LoadTackTimeSummary {
+  loadId: string
+  entryUnitId: string
+  label: string
+  exitLabel: string
+  tackTimeSec: number
+  moduleCount: number
+}
+
+/** 시작점 → 출고점 예상 Tack Time (초) — 시뮬 틱 규칙과 동일 */
+export function computeLoadTackTimeSec(
+  pathUnitCount: number,
+  timing: SimulationStepTiming,
+): number {
+  if (pathUnitCount <= 0) return 0
+
+  const entryTicks = requiredDwellTicks(timing.inputIntervalSec)
+  const exitTicks = requiredDwellTicks(timing.dischargeIntervalSec)
+  const transitTicks = requiredTransitTicks(timing.transitIntervalSec)
+  const transitSegments = Math.max(0, pathUnitCount - 2)
+  const totalTicks = entryTicks + transitSegments * transitTicks + exitTicks
+
+  return totalTicks * SIM_TICK_SEC
+}
+
+export function formatTackTimeSec(sec: number): string {
+  if (sec <= 0) return '—'
+  if (sec < 60) return `${Number(sec.toFixed(1))}초`
+  const minutes = Math.floor(sec / 60)
+  const remainder = sec - minutes * 60
+  return remainder > 0
+    ? `${minutes}분 ${Number(remainder.toFixed(1))}초`
+    : `${minutes}분`
+}
+
+export function buildLoadTackTimeSummaries(
+  line: ConveyorLine,
+  loads: PathSimulationLoad[],
+  timing: SimulationStepTiming,
+): LoadTackTimeSummary[] {
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+
+  return loads
+    .filter((load) => load.pathUnitIds.length > 0)
+    .map((load) => {
+      const exitFromTarget = load.targetExitId
+        ? unitMap.get(load.targetExitId)
+        : undefined
+      const exitFromPath = unitMap.get(load.pathUnitIds[load.pathUnitIds.length - 1]!)
+      const exitUnit = exitFromTarget ?? exitFromPath
+
+      return {
+        loadId: load.id,
+        entryUnitId: load.entryUnitId,
+        label: load.label,
+        exitLabel: exitUnit ? unitDisplayCode(exitUnit) : '—',
+        tackTimeSec: computeLoadTackTimeSec(load.pathUnitIds.length, timing),
+        moduleCount: load.pathUnitIds.length,
+      }
+    })
 }

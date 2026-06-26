@@ -1,4 +1,4 @@
-export type InterfaceUnitType = 'OHT' | 'AGV' | 'ROBOT' | 'AMR' | 'EQ'
+export type InterfaceUnitType = 'OHT' | 'AGV' | 'ROBOT' | 'AMR' | 'EQ' | 'PORT'
 
 export type PortDirection = 'IN' | 'OUT'
 export type PortRecipe = '2BP1ST' | '2BPCV'
@@ -46,7 +46,7 @@ export type { UnitRole, StkPolicy, StkRoutingProperties, StkProperties, PortProp
 
 export interface ConveyorUnit {
   id: string
-  /** 사용자 지정 코드 (예: CV01) — 미설정 시 name과 동일 */
+  /** @deprecated name과 동일하게 유지 — 로드 시 name으로 마이그레이션 */
   code?: string
   name: string
   /** Semi C/V 프로그램 Conveyor.ID — WebSocket 매핑용 */

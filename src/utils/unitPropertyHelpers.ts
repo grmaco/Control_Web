@@ -6,7 +6,6 @@ import type {
   UnitRole,
   UnitRoleProperties,
 } from '../types/unitProperties'
-import { parseTrailingNumber } from './sequentialNaming'
 import { DEFAULT_STK_CAPACITY } from '../constants/unitRoles'
 import { DEFAULT_GRID_SIZE } from '../constants/grid'
 import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
@@ -31,25 +30,18 @@ export interface PortValidationIssue {
   message: string
 }
 
-/** UI·라벨용 — 캔버스와 동일하게 name 우선 */
+/** UI·라벨용 — name이 유일한 표시 식별자 */
 export function unitDisplayCode(unit: ConveyorUnit): string {
   return unit.name?.trim() || unit.code?.trim() || ''
 }
 
-/** CV 순번 유닛 — name과 code 불일치 시 name 기준으로 맞춤 */
+/** legacy code → name 통합, code는 name과 동기화 */
 export function syncUnitCodeWithName(unit: ConveyorUnit): ConveyorUnit {
   const name = unit.name?.trim()
-  if (!name) return unit
-
-  if (unit.type === 'port' || unit.type === 'storage') {
-    return { ...unit, code: unit.code?.trim() || name }
-  }
-
-  if (parseTrailingNumber(name)) {
-    return { ...unit, code: name }
-  }
-
-  return { ...unit, code: unit.code?.trim() || name }
+  const code = unit.code?.trim()
+  const resolved = name || code || ''
+  if (!resolved) return unit
+  return { ...unit, name: resolved, code: resolved }
 }
 
 export function isTurnRoutingUnit(unit: ConveyorUnit): boolean {
@@ -71,7 +63,10 @@ export function inferUnitRole(
   if (isPortUnit(unit)) {
     return portRoleFromDirection(unit.portDirection ?? 'IN')
   }
-  if (unit.role) return unit.role
+  if (unit.role) {
+    if (unit.role === 'STORAGE' && !isStorageUnit(unit)) return 'TRANSFER'
+    return unit.role
+  }
   if (isStorageUnit(unit)) return 'STORAGE'
   if (unit.flowRole === 'entry') return 'INPUT'
   if (unit.flowRole === 'exit') return 'OUTPUT'

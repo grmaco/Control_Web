@@ -64,3 +64,163 @@ body {
 .minimap-flow-neon .minimap-neon-flow {
   animation: minimap-neon-flow 0.5s linear infinite;
 }
+
+/* ── Login: AI 배경 · 캐릭터 선택 ── */
+.login-ai-bg {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(34, 211, 238, 0.14), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 50%, rgba(139, 92, 246, 0.12), transparent 50%),
+    radial-gradient(ellipse 50% 40% at 0% 80%, rgba(6, 182, 212, 0.1), transparent 45%),
+    #020617;
+}
+
+.login-ai-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  animation: login-orb-float 12s ease-in-out infinite;
+}
+
+.login-ai-orb-a {
+  top: 10%;
+  left: 15%;
+  width: 280px;
+  height: 280px;
+  background: rgba(34, 211, 238, 0.18);
+}
+
+.login-ai-orb-b {
+  right: 10%;
+  bottom: 15%;
+  width: 320px;
+  height: 320px;
+  background: rgba(167, 139, 250, 0.16);
+  animation-delay: -4s;
+}
+
+.login-ai-orb-c {
+  top: 45%;
+  left: 45%;
+  width: 200px;
+  height: 200px;
+  background: rgba(251, 191, 36, 0.08);
+  animation-delay: -8s;
+}
+
+.login-ai-scanline {
+  animation: login-scan 6s linear infinite;
+}
+
+.login-ai-line {
+  stroke-dasharray: 8 12;
+  animation: login-dash 14s linear infinite;
+}
+
+.login-ai-line-delay {
+  animation-delay: -5s;
+}
+
+.login-ai-line-delay-2 {
+  animation-delay: -9s;
+}
+
+.login-ai-node {
+  animation: login-node-pulse 2.4s ease-in-out infinite;
+}
+
+.login-ai-pulse {
+  animation: login-text-pulse 2s ease-in-out infinite;
+}
+
+.login-char-selected {
+  animation: login-select-pop 0.35s ease-out;
+}
+
+.login-start-btn {
+  background: linear-gradient(90deg, #0891b2, #6366f1, #8b5cf6);
+  background-size: 200% 100%;
+  animation: login-btn-shimmer 4s ease infinite;
+  box-shadow: 0 0 24px rgba(34, 211, 238, 0.25);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.login-start-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 0 32px rgba(34, 211, 238, 0.4);
+}
+
+@keyframes login-orb-float {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(24px, -18px) scale(1.06);
+  }
+}
+
+@keyframes login-scan {
+  0% {
+    top: 0;
+    opacity: 0;
+  }
+  10% {
+    opacity: 0.8;
+  }
+  90% {
+    opacity: 0.8;
+  }
+  100% {
+    top: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes login-dash {
+  to {
+    stroke-dashoffset: -120;
+  }
+}
+
+@keyframes login-node-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+    r: 3;
+  }
+  50% {
+    opacity: 1;
+    r: 4.5;
+  }
+}
+
+@keyframes login-text-pulse {
+  0%,
+  100% {
+    opacity: 0.65;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes login-select-pop {
+  0% {
+    transform: translate(-50%, 4px) scale(0.85);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(-50%, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes login-btn-shimmer {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}

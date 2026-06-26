@@ -6,12 +6,13 @@ import { MonitorCanvas } from './MonitorCanvas'
 import { MonitorDashboard } from './MonitorDashboard'
 import { CvStatusPanel } from './CvStatusPanel'
 import { V3LogPanel } from './V3LogPanel'
+import { V3AlarmReferencePanel } from './V3AlarmReferencePanel'
 
 type Tab = 'canvas' | 'map' | 'cv' | 'v3log'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'canvas', label: '모니터링' },
-  { key: 'map',    label: 'I/O 상태' },
+  { key: 'map',    label: '설비 상태' },
   { key: 'cv',     label: 'CV 현황' },
   { key: 'v3log',  label: 'V3 이력' },
 ]
@@ -77,12 +78,13 @@ export function MonitorTabView({ line, lines, selectedLineId }: MonitorTabViewPr
         )}
 
         {activeTab === 'cv' && (
-          <CvStatusPanel lines={lines} unitRuntime={unitRuntime} selectedLine={line} />
+          <div className="space-y-4">
+            <CvStatusPanel lines={lines} unitRuntime={unitRuntime} selectedLine={line} />
+            <V3AlarmReferencePanel activeOnlyMode />
+          </div>
         )}
 
-        {activeTab === 'v3log' && (
-          <V3LogPanel logs={v3Logs} />
-        )}
+        {activeTab === 'v3log' && <V3LogPanel logs={v3Logs} fullHeight />}
       </div>
     </div>
   )

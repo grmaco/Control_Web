@@ -6,6 +6,7 @@ export const INTERFACE_UNIT_TYPES: InterfaceUnitType[] = [
   'ROBOT',
   'AMR',
   'EQ',
+  'PORT',
 ]
 
 export function interfaceUnitLabel(type: InterfaceUnitType): string {

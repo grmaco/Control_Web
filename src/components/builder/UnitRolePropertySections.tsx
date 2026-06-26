@@ -78,7 +78,9 @@ export function UnitRoleSelector({ line, unit, onChange }: RoleSectionsProps) {
         onChange={(e) => patchRole(line, unit, e.target.value as UnitRole, onChange)}
         className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
       >
-        {UNIT_ROLES.filter((role) => role !== 'PORT_IN' && role !== 'PORT_OUT').map((role) => (
+        {UNIT_ROLES.filter(
+          (role) => role !== 'PORT_IN' && role !== 'PORT_OUT' && role !== 'STORAGE',
+        ).map((role) => (
           <option key={role} value={role}>
             {UNIT_ROLE_LABELS[role]}
           </option>
@@ -408,7 +410,7 @@ export function RolePropertySections({
       {isTurnRoutingUnit(unit) ? (
         <TurnStkRoutingSection line={line} unit={unit} onChange={onChange} />
       ) : null}
-      {unit.role === 'STORAGE' ? (
+      {isStorageUnit(unit) ? (
         <StkRoleSection line={line} unit={unit} onChange={onChange} />
       ) : null}
       {isPortUnit(unit) ? (

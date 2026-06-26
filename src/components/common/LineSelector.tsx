@@ -71,7 +71,6 @@ export function LineSelectorPanel({ onCreateLine, selectOnly = false }: LineSele
   if (selectOnly) {
     return (
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-slate-400">라인</span>
         <LineSelector selectOnly />
       </div>
     )

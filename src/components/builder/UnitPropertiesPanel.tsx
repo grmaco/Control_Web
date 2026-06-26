@@ -36,11 +36,8 @@ import {
   warehouseShapeLabel,
 } from '../../constants/warehouseUnit'
 import { updateUnitInLine, updateUnitsStatusInLine, updateUnitsTestMaterialInLine } from '../../utils/units'
-import type { InterfaceUnitType, FlowRole } from '../../types/conveyor'
-import {
-  formatFlowRoleLabel,
-  isFlowCapableUnit,
-} from '../../utils/flowEntries'
+import type { InterfaceUnitType } from '../../types/conveyor'
+import { formatFlowRoleLabel } from '../../utils/flowEntries'
 import { RolePropertySections } from './UnitRolePropertySections'
 import { computeMinimapFlowMap } from '../../utils/flowDirection'
 import {
@@ -54,7 +51,6 @@ interface UnitPropertiesPanelProps {
   line: ConveyorLine
   unit: ConveyorUnit | null
   selectedUnitIds?: string[]
-  onSetFlowRole: (unitId: string, role: FlowRole | null) => void
   onChange: (line: ConveyorLine) => void
   onDelete: (unitId: string) => void
   onRotate: (unitId: string) => void
@@ -72,7 +68,6 @@ export function UnitPropertiesPanel({
   line,
   unit,
   selectedUnitIds = [],
-  onSetFlowRole,
   onChange,
   onDelete,
   onRotate,
@@ -149,8 +144,8 @@ export function UnitPropertiesPanel({
               {uniqueMaterials.size > 1 ? (
                 <option value="">— 여러 값 —</option>
               ) : null}
-              <option value={0}>0 — 없음</option>
-              <option value={1}>1 — 있음 (네온 표시)</option>
+              <option value={0}>무</option>
+              <option value={1}>유</option>
             </select>
             <p className="mt-1 text-xs text-slate-500">
               적재창고를 제외한 {materialUnits.length}개 모듈에 적용됩니다.
@@ -232,30 +227,16 @@ export function UnitPropertiesPanel({
   return (
     <div className="space-y-4">
       <div>
-        <label className="mb-1 block text-xs text-slate-400">코드</label>
-        <input
-          type="text"
-          value={unit.code ?? unit.name}
-          onChange={(e) =>
-            onChange(updateUnitInLine(line, unit.id, { code: e.target.value }))
-          }
-          className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
-        />
-      </div>
-
-      <div>
         <label className="mb-1 block text-xs text-slate-400">이름</label>
         <input
           type="text"
           value={unit.name}
           onChange={(e) => {
             const nextName = e.target.value
-            const prevCode = unit.code?.trim()
-            const prevName = unit.name.trim()
             onChange(
               updateUnitInLine(line, unit.id, {
                 name: nextName,
-                ...(!prevCode || prevCode === prevName ? { code: nextName } : {}),
+                code: nextName,
               }),
             )
           }}
@@ -508,11 +489,11 @@ export function UnitPropertiesPanel({
             }
             className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
           >
-            <option value={0}>0 — 없음</option>
-            <option value={1}>1 — 있음 (네온 표시)</option>
+            <option value={0}>무</option>
+            <option value={1}>유</option>
           </select>
           <p className="mt-1 text-xs text-slate-500">
-            주화면 미니맵 화살표 네온 효과 테스트용입니다.
+            물류맵상 자재 표시와 시뮬레이션용입니다.
           </p>
         </div>
       )}
@@ -589,29 +570,6 @@ export function UnitPropertiesPanel({
           </p>
         )}
       </div>
-
-      {isFlowCapableUnit(unit) && (
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              onSetFlowRole(unit.id, unit.flowRole === 'entry' ? null : 'entry')
-            }
-            className="flex-1 rounded-md border border-amber-800/60 px-2 py-1.5 text-xs text-amber-200 hover:bg-amber-950/40"
-          >
-            {unit.flowRole === 'entry' ? '투입 해제' : '투입 지정'}
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              onSetFlowRole(unit.id, unit.flowRole === 'exit' ? null : 'exit')
-            }
-            className="flex-1 rounded-md border border-emerald-800/60 px-2 py-1.5 text-xs text-emerald-200 hover:bg-emerald-950/40"
-          >
-            {unit.flowRole === 'exit' ? '출고 해제' : '출고 지정'}
-          </button>
-        </div>
-      )}
 
       <div className="flex gap-2">
         {canRotate && (

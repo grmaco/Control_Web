@@ -194,13 +194,15 @@ export function MonitorDashboard({
         </div>
       )}
 
-      <LineStatusTable
-        lines={lines}
-        selectedLineId={selectedLineId}
-        statsByLineId={statsByLineId}
-        autoRunByLineId={autoRunByLineId}
-        powerOnByLineId={powerOnByLineId}
-      />
+      {!showIOPanels && (
+        <LineStatusTable
+          lines={lines}
+          selectedLineId={selectedLineId}
+          statsByLineId={statsByLineId}
+          autoRunByLineId={autoRunByLineId}
+          powerOnByLineId={powerOnByLineId}
+        />
+      )}
 
       {/* Auto Condition 미충족 경고 팝업 — ioStatus 실시간 반영 */}
       {autoCondPopupOpen && (

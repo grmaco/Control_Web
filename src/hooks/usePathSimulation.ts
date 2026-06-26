@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ConveyorLine } from '../types/conveyor'
 import type { MultiPathSimulationPlan, PathSimulationLoad } from '../types/unitProperties'
+import type { LoadTackTimeSummary } from '../utils/pathSimulation'
 import {
   DEFAULT_SIM_DISCHARGE_INTERVAL_SEC,
   DEFAULT_SIM_INPUT_INTERVAL_SEC,
@@ -25,6 +26,8 @@ import {
   planMultiInboundLoadPaths,
   planMultiOutboundLoadPaths,
   planMultiTestMaterialLoadPaths,
+  buildLoadTackTimeSummaries,
+  clampSimIntervalSec,
   simulationCstUnitIds,
   simulationRevealUnitIds,
   staticTestMaterialOriginUnitIds,
@@ -72,12 +75,34 @@ export function usePathSimulation(
   const clearedTestMaterialLoadIdsRef = useRef<Set<string>>(new Set())
   const pendingTestMaterialClearRef = useRef<Set<string>>(new Set())
   const sessionLoadIdsRef = useRef<string[]>([])
-  const [inputIntervalSec, setInputIntervalSec] = useState(DEFAULT_SIM_INPUT_INTERVAL_SEC)
-  const [dischargeIntervalSec, setDischargeIntervalSec] = useState(
+  const [inputIntervalSec, setInputIntervalSecState] = useState(DEFAULT_SIM_INPUT_INTERVAL_SEC)
+  const [dischargeIntervalSec, setDischargeIntervalSecState] = useState(
     DEFAULT_SIM_DISCHARGE_INTERVAL_SEC,
   )
-  const [transitIntervalSec, setTransitIntervalSec] = useState(
+  const [transitIntervalSec, setTransitIntervalSecState] = useState(
     DEFAULT_SIM_TRANSIT_INTERVAL_SEC,
+  )
+
+  const setInputIntervalSec = useCallback(
+    (value: number) =>
+      setInputIntervalSecState((current) =>
+        clampSimIntervalSec(value, current),
+      ),
+    [],
+  )
+  const setDischargeIntervalSec = useCallback(
+    (value: number) =>
+      setDischargeIntervalSecState((current) =>
+        clampSimIntervalSec(value, current),
+      ),
+    [],
+  )
+  const setTransitIntervalSec = useCallback(
+    (value: number) =>
+      setTransitIntervalSecState((current) =>
+        clampSimIntervalSec(value, current),
+      ),
+    [],
   )
 
   const stepTiming = useMemo(
@@ -147,7 +172,7 @@ export function usePathSimulation(
 
   const testMaterialUnits = useMemo(() => listTestMaterialUnits(line), [line])
 
-  const rebuildPlan = useCallback((): MultiPathSimulationPlan | null => {
+  const previewPlan = useMemo((): MultiPathSimulationPlan | null => {
     const primary =
       selectedSourceUnitIds.length === 0
         ? { loads: [], message: '' }
@@ -161,6 +186,16 @@ export function usePathSimulation(
     if (merged.loads.length === 0) return null
     return merged
   }, [line, mode, selectedSourceUnitIds])
+
+  const rebuildPlan = useCallback((): MultiPathSimulationPlan | null => {
+    return previewPlan
+  }, [previewPlan])
+
+  const tackTimeSummaries = useMemo(
+    (): LoadTackTimeSummary[] =>
+      buildLoadTackTimeSummaries(line, (plan ?? previewPlan)?.loads ?? [], stepTiming),
+    [line, plan, previewPlan, stepTiming],
+  )
 
   const allLoadsComplete = useCallback((nextLoads: PathSimulationLoad[]) => {
     const sessionIds = sessionLoadIdsRef.current
@@ -543,6 +578,7 @@ export function usePathSimulation(
     transitIntervalSec,
     setTransitIntervalSec,
     incompleteLoadCount,
+    tackTimeSummaries,
     entries: sources,
     selectedEntryUnitIds: selectedSourceUnitIds,
     toggleEntryUnitId: toggleSourceUnitId,

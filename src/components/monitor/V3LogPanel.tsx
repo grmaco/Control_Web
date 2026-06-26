@@ -3,6 +3,7 @@ import type { SemiCnvLogEntry } from '../../types/semicnv'
 
 interface Props {
   logs: SemiCnvLogEntry[]
+  fullHeight?: boolean
 }
 
 function levelClass(level: string): string {
@@ -13,7 +14,7 @@ function levelClass(level: string): string {
   }
 }
 
-export function V3LogPanel({ logs }: Props) {
+export function V3LogPanel({ logs, fullHeight = false }: Props) {
   const [typeFilter, setTypeFilter]   = useState('')
   const [levelFilter, setLevelFilter] = useState('')
 
@@ -31,14 +32,18 @@ export function V3LogPanel({ logs }: Props) {
 
   if (logs.length === 0) {
     return (
-      <div className="rounded-lg border border-slate-800 bg-slate-900 p-12 text-center text-sm text-slate-400">
+      <div
+        className={`rounded-lg border border-slate-800 bg-slate-900 p-12 text-center text-sm text-slate-400 ${
+          fullHeight ? 'min-h-[calc(100vh-16rem)]' : ''
+        }`}
+      >
         V3와 연결되면 로그가 실시간으로 표시됩니다.
       </div>
     )
   }
 
   return (
-    <div className="space-y-3">
+    <div className={`space-y-3 ${fullHeight ? 'flex min-h-[calc(100vh-16rem)] flex-col' : ''}`}>
       {/* 필터 */}
       <div className="flex flex-wrap gap-2">
         <select
@@ -69,8 +74,16 @@ export function V3LogPanel({ logs }: Props) {
       </div>
 
       {/* 테이블 */}
-      <div className="overflow-hidden rounded-lg border border-slate-800">
-        <div className="max-h-[480px] overflow-auto">
+      <div
+        className={`overflow-hidden rounded-lg border border-slate-800 ${
+          fullHeight ? 'min-h-0 flex-1' : ''
+        }`}
+      >
+        <div
+          className={`overflow-auto ${
+            fullHeight ? 'max-h-[calc(100vh-16rem)]' : 'max-h-[480px]'
+          }`}
+        >
           <table className="w-full min-w-[700px] text-left text-xs">
             <thead className="sticky top-0 z-10 bg-slate-800 text-slate-300">
               <tr>

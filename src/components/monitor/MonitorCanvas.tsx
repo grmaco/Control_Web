@@ -10,12 +10,12 @@ import { useConveyorStore } from '../../store/useConveyorStore'
 import { useMonitorStore, type MonitorViewTransform } from '../../store/useMonitorStore'
 import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import type { ConveyorLine } from '../../types/conveyor'
-import { PATH_SIMULATION_STEP_MS } from '../../types/unitProperties'
 import { lineLayoutSignature } from '../../utils/lineLayoutSignature'
 import { getBuilderViewport, getLineViewport } from '../../utils/lineViewport'
 import { fitFullMapInView, focusLineInView } from '../../utils/monitorView'
 import { LineStatusGrid } from './LineStatusGrid'
-import { PathSimulationBar } from './PathSimulationBar'
+import { MonitorMapControls } from './MonitorMapControls'
+import { PathSimulationBar, PathSimulationPlaybackControls } from './PathSimulationBar'
 import { FLOW_CALLOUT_PANEL_CLASS } from './FlowCalloutLayer'
 
 const CELL_SIZE = MONITOR_CELL_SIZE
@@ -185,69 +185,10 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
 
   return (
     <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900">
-      <div className="flex flex-col gap-1.5 border-b border-slate-800 px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+      <div className="border-b border-slate-800 px-3 py-2 sm:px-4">
         <p className="text-sm text-slate-400">
           {line.name} · {viewport.cols}×{viewport.rows} · 유닛 {line.units.length}개
         </p>
-        <div className="flex flex-wrap items-center gap-0.5 sm:gap-1">
-          <ZoomButton
-            label={is25DView ? '2D 보기' : '3D 보기'}
-            active={is25DView}
-            onClick={() => {
-              setIs25DView((current) => !current)
-              logButton(is25DView ? 'Switch 2D View' : 'Switch 3D View')
-            }}
-            wide
-          />
-          <ZoomButton
-            label={hideModuleNames ? '이름 보기' : '이름 숨기기'}
-            active={hideModuleNames}
-            onClick={() => {
-              toggleHideModuleNames()
-              logButton(hideModuleNames ? 'Show Module Names' : 'Hide Module Names')
-            }}
-            wide
-          />
-          <ZoomButton
-            label="−"
-            onClick={() => {
-              transformRef.current?.zoomOut(0.35, 280, 'easeOut')
-              logButton('Zoom Out')
-            }}
-          />
-          <ZoomButton
-            label="+"
-            onClick={() => {
-              transformRef.current?.zoomIn(0.35, 280, 'easeOut')
-              logButton('Zoom In')
-            }}
-          />
-          <ZoomButton
-            label="라인 맞춤"
-            onClick={() => {
-              applyLineFocus(320)
-              logButton('Line Fit')
-            }}
-            wide
-          />
-          <ZoomButton
-            label="전체 맵"
-            onClick={() => {
-              if (transformRef.current) {
-                fitFullMapInView(transformRef.current, line, CELL_SIZE, 320)
-                window.setTimeout(() => {
-                  const ref = transformRef.current
-                  if (!ref) return
-                  const { scale: nextScale, positionX, positionY } = ref.instance.state
-                  setScale(nextScale)
-                  persistView(nextScale, positionX, positionY)
-                }, 370)
-              }
-              logButton('Full Map')
-            }}
-            wide
-          />
-        </div>
       </div>
 
       <PathSimulationBar
@@ -271,6 +212,52 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
         onDischargeIntervalSecChange={simulation.setDischargeIntervalSec}
         onTransitIntervalSecChange={simulation.setTransitIntervalSec}
         incompleteLoadCount={simulation.incompleteLoadCount}
+        tackTimeSummaries={simulation.tackTimeSummaries}
+        mapControls={
+          <MonitorMapControls
+            is25DView={is25DView}
+            hideModuleNames={hideModuleNames}
+            onToggle25DView={() => {
+              setIs25DView((current) => !current)
+              logButton(is25DView ? 'Switch 2D View' : 'Switch 3D View')
+            }}
+            onToggleHideModuleNames={() => {
+              toggleHideModuleNames()
+              logButton(hideModuleNames ? 'Show Module Names' : 'Hide Module Names')
+            }}
+            onZoomOut={() => {
+              transformRef.current?.zoomOut(0.35, 280, 'easeOut')
+              logButton('Zoom Out')
+            }}
+            onZoomIn={() => {
+              transformRef.current?.zoomIn(0.35, 280, 'easeOut')
+              logButton('Zoom In')
+            }}
+            onLineFit={() => {
+              applyLineFocus(320)
+              logButton('Line Fit')
+            }}
+            onFullMap={() => {
+              if (transformRef.current) {
+                fitFullMapInView(transformRef.current, line, CELL_SIZE, 320)
+                window.setTimeout(() => {
+                  const ref = transformRef.current
+                  if (!ref) return
+                  const { scale: nextScale, positionX, positionY } = ref.instance.state
+                  setScale(nextScale)
+                  persistView(nextScale, positionX, positionY)
+                }, 370)
+              }
+              logButton('Full Map')
+            }}
+          />
+        }
+      />
+
+      <PathSimulationPlaybackControls
+        plan={simulation.plan}
+        status={simulation.status}
+        canSimulate={simulation.canSimulate}
         onStart={() => {
           if (isLive) {
             setSimBlockPopupOpen(true)
@@ -364,8 +351,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
       </TransformWrapper>
 
       <p className="border-t border-slate-800 px-4 py-2 text-xs text-slate-500">
-        마우스 휠: 줌 · 드래그: 맵 이동 · 정보 표: 클릭 선택 후 드래그로 위치 고정 · 경로 시뮬레이션: 투입(IN) 또는 출고(OUT) 다중 동시 출발 (틱{' '}
-        {PATH_SIMULATION_STEP_MS / 1000}초)
+        마우스 휠: 줌 · 드래그: 맵 이동 · 정보 표: 클릭 선택 후 드래그로 위치 고정 · 경로 시뮬레이션: 투입(IN) 또는 출고(OUT) 다중 동시 출발
       </p>
 
       {simBlockPopupOpen && (
@@ -396,31 +382,5 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
         </div>
       )}
     </div>
-  )
-}
-
-function ZoomButton({
-  label,
-  onClick,
-  wide,
-  active = false,
-}: {
-  label: string
-  onClick: () => void
-  wide?: boolean
-  active?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded border bg-slate-800 text-sm hover:bg-slate-700 ${
-        active
-          ? 'border-cyan-500/70 text-cyan-200'
-          : 'border-slate-700 text-slate-200'
-      } ${wide ? 'px-2 py-3 sm:px-2.5 sm:py-1' : 'h-11 w-11 sm:h-7 sm:w-7'}`}
-    >
-      {label}
-    </button>
   )
 }
