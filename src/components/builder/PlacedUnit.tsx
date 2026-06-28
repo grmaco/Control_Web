@@ -136,6 +136,8 @@ export function PlacedUnit({
           height={spanHeight}
           status={unit.status}
           rotation={unit.rotation ?? 0}
+          flowInDir={flow?.inDir ?? null}
+          flowOutDir={flow?.outDir ?? null}
           isRunning={unit.status === 'running'}
           uid={`builder-${unit.id}`}
           isJunction={unit.type === 'junction'}
@@ -166,7 +168,7 @@ export function PlacedUnit({
               {showsTypeLabelInCell(unit.type) && (
                 <span className="text-white/70">{typeLabel(unit.type)}</span>
               )}
-              {showsRotation(unit.type) && (
+              {showsRotation(unit.type) && unit.type !== 'junction' && (
                 <span className="text-white/60">{formatRotationDisplay(unit, flow)}</span>
               )}
             </>

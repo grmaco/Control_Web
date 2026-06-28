@@ -6,6 +6,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MONITOR_CELL_SIZE } from '../../constants/grid'
 import { usePathSimulation } from '../../hooks/usePathSimulation'
+import { useTouchLayout } from '../../hooks/useTouchLayout'
 import { useLineCommStatus } from '../../hooks/useLineCommStatus'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { useMonitorStore, type MonitorViewTransform } from '../../store/useMonitorStore'
@@ -15,8 +16,12 @@ import { getBuilderViewport, getLineViewport } from '../../utils/lineViewport'
 import { fitFullMapInView, focusLineInView } from '../../utils/monitorView'
 import {
   areAllCvUnitsRunning,
+  areAllPortsRunning,
   lineWithAllCvUnitsRunning,
+  lineWithAllPortsRunning,
+  listNonRunningPorts,
 } from '../../utils/pathSimulation'
+import { unitTitle } from '../../constants/conveyorTypes'
 import { LineStatusGrid } from './LineStatusGrid'
 import { MonitorMapControls } from './MonitorMapControls'
 import { PathSimulationBar, PathSimulationPlaybackControls } from './PathSimulationBar'
@@ -54,6 +59,7 @@ function isSavedViewValid(
 }
 
 export function MonitorCanvas({ line }: MonitorCanvasProps) {
+  const touchLayout = useTouchLayout()
   const transformRef = useRef<ReactZoomPanPinchRef>(null)
   const initializedLineRef = useRef<string | null>(null)
   const layoutSignature = useMemo(() => lineLayoutSignature(line), [line])
@@ -105,13 +111,20 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   const lineComm = useLineCommStatus(line)
   const isLineV3Connected = lineComm?.state === 'online'
   const allCvRunning = useMemo(() => areAllCvUnitsRunning(line), [line])
+  const allPortsRunning = useMemo(() => areAllPortsRunning(line), [line])
+  const nonRunningPortLabels = useMemo(
+    () => listNonRunningPorts(line).map((unit) => unitTitle(unit)),
+    [line],
+  )
   const [scale, setScale] = useState(initialTransform.scale)
   const [is25DView, setIs25DView] = useState(false)
   const [calloutPanLock, setCalloutPanLock] = useState(false)
   const [calloutDeselectToken, setCalloutDeselectToken] = useState(0)
   const [simBlockPopupOpen, setSimBlockPopupOpen] = useState(false)
   const [runConfirmPopupOpen, setRunConfirmPopupOpen] = useState(false)
-  const pendingStartAfterRunRef = useRef(false)
+  const [portConfirmPopupOpen, setPortConfirmPopupOpen] = useState(false)
+  const pendingStartModeRef = useRef<'normal' | 'continuous' | null>(null)
+  const portConfirmRequestedRef = useRef(false)
   const viewStateRef = useRef(initialTransform)
 
   const logButton = (comment: string) => {
@@ -122,30 +135,101 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
     })
   }
 
+  const startPendingSimulation = useCallback(
+    (startMode: 'normal' | 'continuous') => {
+      if (startMode === 'continuous') {
+        simulation.startContinuous()
+        logButton('Path Simulation Continuous Input Start')
+      } else {
+        simulation.start()
+        logButton('Path Simulation Start')
+      }
+    },
+    [logButton, simulation],
+  )
+
   useEffect(() => {
-    if (!pendingStartAfterRunRef.current || !allCvRunning) return
-    pendingStartAfterRunRef.current = false
-    simulation.start()
-    logButton('Path Simulation Start')
-  }, [allCvRunning, line.id, simulation])
+    const pendingMode = pendingStartModeRef.current
+    if (!pendingMode || !allCvRunning) return
+
+    if (!allPortsRunning) {
+      if (!portConfirmRequestedRef.current) {
+        portConfirmRequestedRef.current = true
+        setPortConfirmPopupOpen(true)
+      }
+      return
+    }
+
+    portConfirmRequestedRef.current = false
+    pendingStartModeRef.current = null
+    startPendingSimulation(pendingMode)
+  }, [allCvRunning, allPortsRunning, startPendingSimulation])
+
+  const requestSimulationStart = useCallback(
+    (startMode: 'normal' | 'continuous') => {
+      if (isLineV3Connected) {
+        setSimBlockPopupOpen(true)
+        return
+      }
+
+      pendingStartModeRef.current = startMode
+      portConfirmRequestedRef.current = false
+
+      if (!allCvRunning) {
+        setRunConfirmPopupOpen(true)
+        return
+      }
+      if (!allPortsRunning) {
+        portConfirmRequestedRef.current = true
+        setPortConfirmPopupOpen(true)
+        return
+      }
+
+      pendingStartModeRef.current = null
+      startPendingSimulation(startMode)
+    },
+    [
+      allCvRunning,
+      allPortsRunning,
+      isLineV3Connected,
+      startPendingSimulation,
+    ],
+  )
 
   const handleSimulationStart = useCallback(() => {
-    if (isLineV3Connected) {
-      setSimBlockPopupOpen(true)
-      return
-    }
-    if (!allCvRunning) {
-      setRunConfirmPopupOpen(true)
-      return
-    }
-    simulation.start()
-    logButton('Path Simulation Start')
-  }, [allCvRunning, isLineV3Connected, simulation])
+    requestSimulationStart('normal')
+  }, [requestSimulationStart])
+
+  const handleSimulationStartContinuous = useCallback(() => {
+    requestSimulationStart('continuous')
+  }, [requestSimulationStart])
+
+  const dismissRunConfirmPopup = useCallback(() => {
+    setRunConfirmPopupOpen(false)
+    pendingStartModeRef.current = null
+    portConfirmRequestedRef.current = false
+  }, [])
 
   const handleConfirmRunAllAndStart = useCallback(async () => {
     setRunConfirmPopupOpen(false)
-    pendingStartAfterRunRef.current = true
+    if (!pendingStartModeRef.current) {
+      pendingStartModeRef.current = 'normal'
+    }
     await saveLine(lineWithAllCvUnitsRunning(line))
+  }, [line, saveLine])
+
+  const dismissPortConfirmPopup = useCallback(() => {
+    setPortConfirmPopupOpen(false)
+    pendingStartModeRef.current = null
+    portConfirmRequestedRef.current = false
+  }, [])
+
+  const handleConfirmPortRunAllAndStart = useCallback(async () => {
+    setPortConfirmPopupOpen(false)
+    if (!pendingStartModeRef.current) {
+      pendingStartModeRef.current = 'normal'
+    }
+    await saveLine(lineWithAllPortsRunning(line))
   }, [line, saveLine])
 
   const persistView = useCallback(
@@ -218,13 +302,167 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   )
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-800 bg-slate-900">
+    <div
+      className={`rounded-lg border border-slate-800 bg-slate-900 ${
+        touchLayout ? 'overflow-visible' : 'overflow-hidden'
+      }`}
+    >
       <div className="border-b border-slate-800 px-3 py-2 sm:px-4">
         <p className="text-sm text-slate-400">
           {line.name} · {viewport.cols}×{viewport.rows}
         </p>
       </div>
 
+      {touchLayout ? (
+        <>
+          <TransformWrapper
+            key={line.id}
+            ref={transformRef}
+            onInit={handleInit}
+            initialScale={initialTransform.scale}
+            initialPositionX={initialTransform.positionX}
+            initialPositionY={initialTransform.positionY}
+            onTransform={(_, state) => {
+              setScale(state.scale)
+              persistView(state.scale, state.positionX, state.positionY)
+            }}
+            {...zoomConfig}
+          >
+            <TransformComponent
+              wrapperClass={`!h-[min(520px,55vh)] !w-full overflow-visible ${
+                calloutPanLock ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
+              }`}
+              contentClass="!overflow-visible"
+            >
+              <LineStatusGrid
+                line={line}
+                viewport={viewport}
+                cellSize={CELL_SIZE}
+                scale={scale}
+                showLabels={showLabels}
+                hideModuleNames={hideModuleNames}
+                showFlowArrows={line.units.length > 0}
+                showFlowCallouts={line.units.length > 0}
+                simulationNeonUnitIds={simulation.neonUnitIds}
+                simulationActiveUnitIds={simulation.cstUnitIds}
+                simulationStaticTestMaterialUnitIds={[
+                  ...simulation.staticTestMaterialUnitIds,
+                ]}
+                simulationInProgress={
+                  simulation.status !== 'idle' && simulation.status !== 'complete'
+                }
+                simulationLoads={simulation.simulationFlowOverlayLoads}
+                simulationPathUnitIds={simulation.pathUnitIds}
+                continuousInputActive={simulation.continuousInputActive}
+                continuousGatherProbes={simulation.continuousGatherProbes}
+                continuousGatherAnimating={simulation.continuousGatherAnimating}
+                continuousInputIntervalSec={simulation.continuousInputIntervalSec}
+                warehouseFillCounts={simulation.warehouseFillCounts}
+                onCalloutPanLockChange={setCalloutPanLock}
+                calloutDeselectToken={calloutDeselectToken}
+                is25DView={is25DView}
+                className="pointer-events-none select-none"
+              />
+            </TransformComponent>
+          </TransformWrapper>
+
+          <PathSimulationBar
+            unitCount={line.units.length}
+            mode={simulation.mode}
+            onModeChange={simulation.changeMode}
+            conveyorOnlyLine={simulation.conveyorOnlyLine}
+            sources={simulation.sources}
+            selectedSourceUnitIds={simulation.selectedSourceUnitIds}
+            onToggleSource={simulation.toggleSourceUnitId}
+            plan={simulation.plan}
+            status={simulation.status}
+            progressLabel={simulation.progressLabel}
+            progressDetail={simulation.progressDetail}
+            canSimulate={simulation.canSimulate}
+            testMaterialCount={simulation.testMaterialUnits.length}
+            inputIntervalSec={simulation.inputIntervalSec}
+            dischargeIntervalSec={simulation.dischargeIntervalSec}
+            transitIntervalSec={simulation.transitIntervalSec}
+            onInputIntervalSecChange={simulation.setInputIntervalSec}
+            onDischargeIntervalSecChange={simulation.setDischargeIntervalSec}
+            onTransitIntervalSecChange={simulation.setTransitIntervalSec}
+            tackTimeSummaries={simulation.tackTimeSummaries}
+            continuousInputActive={simulation.continuousInputActive}
+            mapControlSummary={`${is25DView ? '3D' : '2D'} · ${hideModuleNames ? '이름 숨김' : '이름 표시'}`}
+            mapControls={
+              <MonitorMapControls
+                is25DView={is25DView}
+                hideModuleNames={hideModuleNames}
+                onToggle25DView={() => {
+                  setIs25DView((current) => !current)
+                  logButton(is25DView ? 'Switch 2D View' : 'Switch 3D View')
+                }}
+                onToggleHideModuleNames={() => {
+                  toggleHideModuleNames()
+                  logButton(hideModuleNames ? 'Show Module Names' : 'Hide Module Names')
+                }}
+                onZoomOut={() => {
+                  transformRef.current?.zoomOut(0.35, 280, 'easeOut')
+                  logButton('Zoom Out')
+                }}
+                onZoomIn={() => {
+                  transformRef.current?.zoomIn(0.35, 280, 'easeOut')
+                  logButton('Zoom In')
+                }}
+                onLineFit={() => {
+                  applyLineFocus(320)
+                  logButton('Line Fit')
+                }}
+                onFullMap={() => {
+                  if (transformRef.current) {
+                    fitFullMapInView(transformRef.current, line, CELL_SIZE, 320)
+                    window.setTimeout(() => {
+                      const ref = transformRef.current
+                      if (!ref) return
+                      const { scale: nextScale, positionX, positionY } = ref.instance.state
+                      setScale(nextScale)
+                      persistView(nextScale, positionX, positionY)
+                    }, 370)
+                  }
+                  logButton('Full Map')
+                }}
+              />
+            }
+          />
+
+          <PathSimulationPlaybackControls
+            plan={simulation.plan}
+            status={simulation.status}
+            mode={simulation.mode}
+            canSimulate={simulation.canSimulate}
+            continuousInputActive={simulation.continuousInputActive}
+            onStart={handleSimulationStart}
+            onStartContinuous={handleSimulationStartContinuous}
+            onPause={() => {
+              simulation.pause()
+              logButton('Path Simulation Pause')
+            }}
+            onResume={() => {
+              simulation.resume()
+              logButton('Path Simulation Resume')
+            }}
+            onReset={() => {
+              simulation.reset()
+              setCalloutDeselectToken((token) => token + 1)
+              logButton('Path Simulation Reset')
+            }}
+            onStepForward={() => {
+              if (isLineV3Connected) {
+                setSimBlockPopupOpen(true)
+                return
+              }
+              simulation.stepForward()
+              logButton('Path Simulation Step')
+            }}
+          />
+        </>
+      ) : (
+        <>
       <PathSimulationBar
         unitCount={line.units.length}
         mode={simulation.mode}
@@ -236,19 +474,18 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
         plan={simulation.plan}
         status={simulation.status}
         progressLabel={simulation.progressLabel}
+        progressDetail={simulation.progressDetail}
         canSimulate={simulation.canSimulate}
         testMaterialCount={simulation.testMaterialUnits.length}
-        activeUnitLabel={simulation.activeUnitLabel}
-        waitingLabels={simulation.waitingLabels}
         inputIntervalSec={simulation.inputIntervalSec}
         dischargeIntervalSec={simulation.dischargeIntervalSec}
         transitIntervalSec={simulation.transitIntervalSec}
         onInputIntervalSecChange={simulation.setInputIntervalSec}
         onDischargeIntervalSecChange={simulation.setDischargeIntervalSec}
         onTransitIntervalSecChange={simulation.setTransitIntervalSec}
-        incompleteLoadCount={simulation.incompleteLoadCount}
         tackTimeSummaries={simulation.tackTimeSummaries}
         continuousInputActive={simulation.continuousInputActive}
+        mapControlSummary={`${is25DView ? '3D' : '2D'} · ${hideModuleNames ? '이름 숨김' : '이름 표시'}`}
         mapControls={
           <MonitorMapControls
             is25DView={is25DView}
@@ -296,8 +533,8 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
         mode={simulation.mode}
         canSimulate={simulation.canSimulate}
         continuousInputActive={simulation.continuousInputActive}
-        onToggleContinuousInput={simulation.toggleContinuousInput}
         onStart={handleSimulationStart}
+        onStartContinuous={handleSimulationStartContinuous}
         onPause={() => {
           simulation.pause()
           logButton('Path Simulation Pause')
@@ -357,22 +594,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             simulationInProgress={
               simulation.status !== 'idle' && simulation.status !== 'complete'
             }
-            simulationLoads={
-              simulation.status === 'revealing' ||
-              simulation.status === 'playing' ||
-              simulation.status === 'paused' ||
-              simulation.status === 'endHold'
-                ? simulation.loads
-                    .filter(
-                      (load) =>
-                        !load.complete || simulation.status === 'endHold',
-                    )
-                    .map((load) => ({
-                      pathUnitIds: load.pathUnitIds,
-                      stepIndex: load.stepIndex,
-                    }))
-                : []
-            }
+            simulationLoads={simulation.simulationFlowOverlayLoads}
             simulationPathUnitIds={simulation.pathUnitIds}
             continuousInputActive={simulation.continuousInputActive}
             continuousGatherProbes={simulation.continuousGatherProbes}
@@ -386,6 +608,8 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
           />
         </TransformComponent>
       </TransformWrapper>
+        </>
+      )}
 
       <p className="border-t border-slate-800 px-4 py-2 text-xs text-slate-500">
         마우스 휠: 줌 · 드래그: 맵 이동 · 정보 표: 클릭 선택 후 드래그로 위치 고정 · 경로 시뮬레이션: 투입(IN) 또는 출고(OUT) 다중 동시 출발
@@ -394,7 +618,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
       {runConfirmPopupOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          onClick={() => setRunConfirmPopupOpen(false)}
+          onClick={dismissRunConfirmPopup}
         >
           <div
             className="mx-4 w-full max-w-sm rounded-lg border border-cyan-500/50 bg-slate-800 p-6 shadow-2xl"
@@ -409,7 +633,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setRunConfirmPopupOpen(false)}
+                onClick={dismissRunConfirmPopup}
                 className="app-btn app-btn-secondary app-btn-sm"
               >
                 취소
@@ -417,6 +641,48 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
               <button
                 type="button"
                 onClick={() => void handleConfirmRunAllAndStart()}
+                className="app-btn app-btn-primary app-btn-sm"
+              >
+                전환 후 시작
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {portConfirmPopupOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={dismissPortConfirmPopup}
+        >
+          <div
+            className="mx-4 w-full max-w-sm rounded-lg border border-violet-500/50 bg-slate-800 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mb-1 text-base font-bold text-violet-300">포트 가동 상태 전환</p>
+            <p className="mb-3 text-sm leading-relaxed text-slate-300">
+              포트는 가동 상태일 때만 STK 투입·출고가 가능합니다.
+              <br />
+              가동하지 않은 포트가 있어 시뮬레이션을 시작할 수 없습니다.
+            </p>
+            {nonRunningPortLabels.length > 0 ? (
+              <p className="mb-5 text-xs leading-relaxed text-slate-400">
+                비가동: {nonRunningPortLabels.join(', ')}
+              </p>
+            ) : (
+              <p className="mb-5 text-sm text-slate-400">비가동 포트가 있습니다.</p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={dismissPortConfirmPopup}
+                className="app-btn app-btn-secondary app-btn-sm"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleConfirmPortRunAllAndStart()}
                 className="app-btn app-btn-primary app-btn-sm"
               >
                 전환 후 시작

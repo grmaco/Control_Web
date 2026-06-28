@@ -65,6 +65,45 @@ body {
   animation: minimap-neon-flow 0.5s linear infinite;
 }
 
+/* 포트 — 삼각형 홀로그램 주변 네온 (외곽 글로우, 삼각형 선은 위에 유지) */
+.minimap-port-triangle-neon {
+  filter:
+    drop-shadow(0 0 3px rgba(34, 211, 238, 0.55))
+    drop-shadow(0 0 7px rgba(6, 182, 212, 0.35));
+}
+
+.minimap-port-triangle-neon .minimap-neon-halo {
+  animation: minimap-port-neon-halo-pulse 1.5s ease-in-out infinite;
+}
+
+.minimap-port-triangle-neon .minimap-neon-glow {
+  animation: minimap-port-neon-pulse 1.2s ease-in-out infinite;
+}
+
+.minimap-port-triangle-neon .minimap-neon-flow {
+  animation: minimap-neon-flow 0.5s linear infinite;
+}
+
+@keyframes minimap-port-neon-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.78;
+  }
+}
+
+@keyframes minimap-port-neon-halo-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
 /* ── HOME: 이상 복귀 비상 버튼 ── */
 @keyframes control-alarm-pulse {
   0%,

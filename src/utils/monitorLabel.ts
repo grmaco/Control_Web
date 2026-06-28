@@ -39,15 +39,10 @@ export function minimapInnerSize(
   return Math.max(3, Math.min(spanWidth, spanHeight) - inset)
 }
 
-export function minimapPortNameHalfInner(
-  cellSize: number,
-  dir: 'N' | 'E' | 'S' | 'W',
-): number {
-  const horizontalSplit = dir === 'E' || dir === 'W'
-  const w = horizontalSplit ? cellSize * 0.5 : cellSize
-  const h = horizontalSplit ? cellSize : cellSize * 0.5
-  const inset = Math.min(4, Math.min(w, h) * 0.12)
-  return Math.max(3, Math.min(w, h) - inset)
+function portCharWidthFactor(text: string): number {
+  if (/^\d+$/.test(text)) return 0.6
+  if (/[가-힣]/.test(text)) return 1.02
+  return 0.72
 }
 
 function minimapMinFont(innerSize: number): number {
@@ -74,45 +69,63 @@ export function pickMinimapLabelLines(
   return { lines, fontSize: fitVisualFontSize(innerSize, lines) }
 }
 
+export function minimapPortNameBandHeight(cellSize: number): number {
+  return Math.max(10, Math.round(cellSize * 0.4))
+}
+
+/** 홀로그램이 차지하는 상단 비율 (나머지는 이름) */
+export const PORT_HOLO_ZONE_RATIO = 0.58
+
+function minimapPortNameBandBounds(cellSize: number): { width: number; height: number } {
+  const inset = Math.min(4, cellSize * 0.06)
+  return {
+    width: Math.max(3, cellSize - inset * 2),
+    height: Math.max(8, minimapPortNameBandHeight(cellSize) - inset),
+  }
+}
+
+/** 포트 이름 — 박스 안에 전체 문자열이 들어가도록 축소 (잘림 없음) */
+export function fitPortNameInBox(
+  width: number,
+  height: number,
+  text: string,
+): number {
+  if (!text || width <= 0 || height <= 0) return 0
+
+  const chars = [...text].length
+  const byHeight = height / LABEL_LINE_HEIGHT
+  const byWidth = width / (chars * portCharWidthFactor(text))
+  return Math.max(3.5, Math.min(byHeight, byWidth))
+}
+
 /** 포트 표시명 — "30101 IN" → "30101" */
 export function portDisplayName(name: string): string {
   return name.replace(/\s+(IN|OUT)$/i, '').trim()
 }
 
-export function isPortNameVerticalLayout(dir: 'N' | 'E' | 'S' | 'W'): boolean {
-  return dir === 'E' || dir === 'W'
-}
-
-function fitVerticalPortNameFontSize(innerSize: number, text: string): number {
-  const chars = [...text]
-  if (chars.length === 0 || innerSize <= 0) return 0
-
-  const byHeight = innerSize / (chars.length * LABEL_LINE_HEIGHT)
-  const byWidth = innerSize / charWidthFactor(chars[0], true)
-  return Math.max(minimapMinFont(innerSize), Math.min(byHeight, byWidth))
-}
-
-/** 포트 이름 — 좌·우 절반(E/W)은 세로, 상·하(N/S)는 가로 */
+/** 포트 이름 — 셀 하단 가로 밴드 */
 export function pickMinimapPortName(
-  innerSize: number,
+  cellSize: number,
   unitName: string,
-  dir: 'N' | 'E' | 'S' | 'W',
-): { displayName: string; fontSize: number; vertical: boolean } {
+): { displayName: string; fontSize: number } {
   const displayName = portDisplayName(unitName)
-  if (!displayName || innerSize <= 0) {
-    return { displayName: '', fontSize: 0, vertical: false }
+  if (!displayName || cellSize <= 0) {
+    return { displayName: '', fontSize: 0 }
   }
 
-  if (isPortNameVerticalLayout(dir)) {
-    return {
-      displayName,
-      fontSize: fitVerticalPortNameFontSize(innerSize, displayName),
-      vertical: true,
-    }
+  const { width, height } = minimapPortNameBandBounds(cellSize)
+  return {
+    displayName,
+    fontSize: fitPortNameInBox(width, height, displayName),
   }
+}
 
-  const { fontSize } = pickMinimapLabelLines(innerSize, [displayName])
-  return { displayName, fontSize, vertical: false }
+/** flow 없을 때 포트 전체 셀에 이름 표시 */
+export function pickMinimapPortFullName(
+  cellSize: number,
+  unitName: string,
+): { displayName: string; fontSize: number } {
+  return pickMinimapPortName(cellSize, unitName)
 }
 
 /** 포트 미니맵 SVG text — viewBox(100) 기준 */

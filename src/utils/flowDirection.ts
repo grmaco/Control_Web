@@ -516,6 +516,77 @@ function pickFlowSuccessor(
   return pickNeighborThroughStorage(unit, unitMap, 'next')
 }
 
+/** 분기 유닛 — 평시 경유(직진) 물류 방향 */
+export function computeJunctionThroughFlow(
+  junction: ConveyorUnit,
+  unitMap: Map<string, ConveyorUnit>,
+  line: ConveyorLine,
+): { inDir: FlowDir | null; outDir: FlowDir | null } {
+  const { prev, next } = pickFlowNeighbors(junction, unitMap, line)
+  const inDir = prev ? flowEntryDir(prev, junction) : null
+  let outDir = next ? flowExitDir(junction, next) : null
+
+  if (inDir && outDir && !isPerpendicularFlow(inDir, outDir)) {
+    return { inDir, outDir }
+  }
+
+  if (inDir) {
+    const straightOut = oppositeFlowDir(inDir)
+    const neighbors = getConnectedNeighbors(junction, unitMap)
+    const collinear = neighbors.find((neighbor) => {
+      if (neighbor.id === prev?.id) return false
+      return flowExitDir(junction, neighbor) === straightOut
+    })
+    if (collinear) {
+      return { inDir, outDir: straightOut }
+    }
+  }
+
+  return { inDir, outDir }
+}
+
+/** 분기 요청 CV 기준 수직 전환 물류 (시뮬·검증용) */
+export function computeJunctionDivertFlow(
+  junction: ConveyorUnit,
+  unitMap: Map<string, ConveyorUnit>,
+  line: ConveyorLine,
+  requestUnitId: string,
+): { inDir: FlowDir | null; outDir: FlowDir | null } | null {
+  const requestUnit = unitMap.get(requestUnitId)
+  if (!requestUnit) return null
+
+  const through = computeJunctionThroughFlow(junction, unitMap, line)
+  const toRequest = flowExitDir(junction, requestUnit)
+  if (through.inDir && toRequest && isPerpendicularFlow(through.inDir, toRequest)) {
+    return { inDir: through.inDir, outDir: toRequest }
+  }
+
+  const fromRequest = flowEntryDir(requestUnit, junction)
+  if (fromRequest && through.outDir && isPerpendicularFlow(fromRequest, through.outDir)) {
+    return { inDir: fromRequest, outDir: through.outDir }
+  }
+
+  const toThrough = through.outDir
+    ? oppositeFlowDir(through.outDir)
+    : through.inDir
+      ? oppositeFlowDir(through.inDir)
+      : null
+  if (fromRequest && toThrough && isPerpendicularFlow(fromRequest, toThrough)) {
+    return { inDir: fromRequest, outDir: toThrough }
+  }
+
+  return null
+}
+
+/** 분기 유닛 — 평시 직진, 분기 요청 CV는 시뮬 경로에서 수직 전환 */
+function computeJunctionUnitFlow(
+  junction: ConveyorUnit,
+  unitMap: Map<string, ConveyorUnit>,
+  line: ConveyorLine,
+): { inDir: FlowDir | null; outDir: FlowDir | null } {
+  return computeJunctionThroughFlow(junction, unitMap, line)
+}
+
 /** 회전·분기 유닛 — 연결 이웃 + rotation 기준 in/out */
 function computeBranchUnitFlow(
   branch: ConveyorUnit,
@@ -690,6 +761,8 @@ function applyGlobalStartEndRoles(
   result: Map<string, UnitFlowDirs>,
   line: ConveyorLine,
 ): void {
+  ensureEndpointUnitsInFlowMap(result, line)
+
   const { startIds, endIds } = resolveGlobalFlowEndpoints(line)
   if (startIds.length === 0 && endIds.length === 0) return
 
@@ -698,14 +771,44 @@ function applyGlobalStartEndRoles(
 
   for (const [id, flow] of result) {
     if (startSet.has(id)) {
-      flow.role = flow.outDir ? 'start' : flow.inDir ? 'end' : 'single'
+      flow.role = 'start'
     } else if (endSet.has(id)) {
-      flow.role = flow.inDir ? 'end' : flow.outDir ? 'start' : 'single'
+      flow.role = 'end'
     } else if (flow.role === 'start' || flow.role === 'end') {
       if (flow.inDir && flow.outDir) flow.role = 'through'
       else flow.role = 'single'
     }
   }
+
+  // flowRole=entry/exit — in/out 추론과 무관하게 항상 시작·종료 (복수 투입점)
+  for (const unit of getEntryUnits(line)) {
+    const flow = result.get(unit.id)
+    if (flow) flow.role = 'start'
+  }
+  for (const unit of getExitUnits(line)) {
+    const flow = result.get(unit.id)
+    if (flow) flow.role = 'end'
+  }
+}
+
+/** flowRole=entry/exit — 이웃 없어도 START/END 콜아웃 대상에 포함 */
+function ensureEndpointUnitsInFlowMap(
+  result: Map<string, UnitFlowDirs>,
+  line: ConveyorLine,
+): void {
+  const addIfMissing = (unit: ConveyorUnit) => {
+    if (!FLOW_ARROW_TYPES.has(unit.type)) return
+    if (result.has(unit.id)) return
+    result.set(unit.id, {
+      inDir: null,
+      outDir: null,
+      cvNumber: cvSequenceNumber(unit),
+      role: 'single',
+    })
+  }
+
+  for (const unit of getEntryUnits(line)) addIfMissing(unit)
+  for (const unit of getExitUnits(line)) addIfMissing(unit)
 }
 
 export function computeUnitFlowMap(line: ConveyorLine): Map<string, UnitFlowDirs> {
@@ -718,7 +821,11 @@ export function computeUnitFlowMap(line: ConveyorLine): Map<string, UnitFlowDirs
     let inDir: FlowDir | null = null
     let outDir: FlowDir | null = null
 
-    if (unit.type === 'turn' || unit.type === 'junction') {
+    if (unit.type === 'junction') {
+      const junctionFlow = computeJunctionUnitFlow(unit, unitMap, line)
+      inDir = junctionFlow.inDir
+      outDir = junctionFlow.outDir
+    } else if (unit.type === 'turn') {
       const branchFlow = computeBranchUnitFlow(unit, unitMap, line)
       inDir = branchFlow.inDir
       outDir = branchFlow.outDir

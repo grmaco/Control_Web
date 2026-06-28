@@ -108,6 +108,221 @@ function resolveOpeningDirs(
   return OPENINGS[rotation] ?? OPENINGS[0]
 }
 
+/** 활성 벨트 축에서 화살표 진행 방향(unitTravelDir)과 동일한 이동 방향 */
+function resolveJunctionBeltTravelDir(
+  axis: 'horizontal' | 'vertical',
+  flowInDir?: FlowDir | null,
+  flowOutDir?: FlowDir | null,
+): FlowDir {
+  const isHorizontal = axis === 'horizontal'
+  const onAxis = (dir: FlowDir): boolean =>
+    isHorizontal ? dir === 'E' || dir === 'W' : dir === 'N' || dir === 'S'
+
+  const travel = unitTravelDir({
+    inDir: flowInDir ?? null,
+    outDir: flowOutDir ?? null,
+  })
+  if (travel && onAxis(travel)) return travel
+
+  if (flowInDir && onAxis(flowInDir)) return oppositeFlowDir(flowInDir)
+
+  return isHorizontal ? 'E' : 'S'
+}
+
+/** 분기 벨트 모션 축 — 이전 모듈이 위(N)·아래(S)면 세로, 좌(E)·우(W)면 가로 */
+function resolveJunctionBeltMotionAxis(
+  flowInDir?: FlowDir | null,
+  rotation = 0,
+): 'horizontal' | 'vertical' {
+  if (flowInDir === 'N' || flowInDir === 'S') return 'vertical'
+  if (flowInDir === 'E' || flowInDir === 'W') return 'horizontal'
+  const normalized = ((rotation % 360) + 360) % 360
+  return normalized === 0 || normalized === 180 ? 'horizontal' : 'vertical'
+}
+
+function JunctionConveyorCell({
+  width,
+  height,
+  status,
+  rotation = 0,
+  flowInDir = null,
+  flowOutDir = null,
+  isRunning = false,
+  uid,
+}: TurnConveyorCellProps) {
+  const cfg = COLORS[status]
+  const beltMotionAxis = resolveJunctionBeltMotionAxis(flowInDir, rotation)
+  const beltTravelDir = resolveJunctionBeltTravelDir(beltMotionAxis, flowInDir, flowOutDir)
+  const openingDirs = resolveOpeningDirs(rotation, flowInDir, flowOutDir)
+
+  const pad = 10
+  const inner = S - pad * 2
+  const beltThickness = 8
+  const beltLaneOffset = 16
+  const beltInset = pad + 4
+  const beltSpan = inner - 8
+  const segmentStep = 9
+  const segmentCount = Math.ceil(beltSpan / segmentStep) + 3
+
+  const horizontalLaneYs = [
+    CY - beltLaneOffset - beltThickness,
+    CY + beltLaneOffset - beltThickness + 5,
+  ]
+  const verticalLaneXs = [
+    CX - beltLaneOffset - beltThickness,
+    CX + beltLaneOffset - beltThickness + 5,
+  ]
+
+  const clipId = `jc-clip-${uid}`
+  const filtId = `jc-flt-${uid}`
+  const gradId = `jc-grd-${uid}`
+  const beltClipId = `jc-belt-clip-${uid}`
+
+  const beltAnim = linearRollAnim(beltTravelDir, segmentStep)
+  const animateHorizontal = isRunning && beltMotionAxis === 'horizontal'
+  const animateVertical = isRunning && beltMotionAxis === 'vertical'
+
+  return (
+    <svg
+      width={width}
+      height={height}
+      viewBox={`0 0 ${S} ${S}`}
+      xmlns="http://www.w3.org/2000/svg"
+      style={{ display: 'block', position: 'absolute', top: 0, left: 0 }}
+      aria-hidden
+    >
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={cfg.rollerHi} stopOpacity="0.85" />
+          <stop offset="45%" stopColor={cfg.roller} stopOpacity="1" />
+          <stop offset="100%" stopColor={cfg.rollerHi} stopOpacity="0.75" />
+        </linearGradient>
+        <clipPath id={clipId}>
+          <rect x={pad} y={pad} width={inner} height={inner} rx="6" />
+        </clipPath>
+        <clipPath id={beltClipId}>
+          <rect x={beltInset} y={pad + 2} width={beltSpan} height={inner - 4} rx="2" />
+        </clipPath>
+        {cfg.glowOp > 0 && (
+          <filter id={filtId} x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur" />
+            <feFlood floodColor={cfg.glow} floodOpacity={cfg.glowOp} result="color" />
+            <feComposite in="color" in2="blur" operator="in" result="glow" />
+            <feMerge>
+              <feMergeNode in="glow" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        )}
+      </defs>
+
+      <rect width={S} height={S} fill={cfg.base} />
+
+      <rect
+        x={pad - 2}
+        y={pad - 2}
+        width={inner + 4}
+        height={inner + 4}
+        rx="8"
+        fill={cfg.ringInner}
+        stroke={cfg.ring}
+        strokeWidth="2.5"
+        filter={cfg.glowOp > 0 ? `url(#${filtId})` : undefined}
+      />
+
+      <g clipPath={`url(#${clipId})`}>
+        <rect x={pad} y={pad} width={inner} height={inner} fill={cfg.ringInner} />
+
+        <g clipPath={`url(#${beltClipId})`}>
+          <g>
+            {horizontalLaneYs.flatMap((laneY, laneIndex) =>
+              Array.from({ length: segmentCount }, (_, segmentIndex) => (
+                <rect
+                  key={`h-${laneIndex}-${segmentIndex}`}
+                  x={beltInset + segmentIndex * segmentStep - segmentStep}
+                  y={laneY}
+                  width={segmentStep - 1.2}
+                  height={beltThickness}
+                  fill={`url(#${gradId})`}
+                  rx="0.8"
+                />
+              )),
+            )}
+            {animateHorizontal ? (
+              <animateTransform
+                attributeName="transform"
+                type="translate"
+                from={beltAnim.from}
+                to={beltAnim.to}
+                dur="0.55s"
+                repeatCount="indefinite"
+              />
+            ) : null}
+          </g>
+
+          <g>
+            {verticalLaneXs.flatMap((laneX, laneIndex) =>
+              Array.from({ length: segmentCount }, (_, segmentIndex) => (
+                <rect
+                  key={`v-${laneIndex}-${segmentIndex}`}
+                  x={laneX}
+                  y={beltInset + segmentIndex * segmentStep - segmentStep}
+                  width={beltThickness}
+                  height={segmentStep - 1.2}
+                  fill={`url(#${gradId})`}
+                  rx="0.8"
+                />
+              )),
+            )}
+            {animateVertical ? (
+              <animateTransform
+                attributeName="transform"
+                type="translate"
+                from={beltAnim.from}
+                to={beltAnim.to}
+                dur="0.55s"
+                repeatCount="indefinite"
+              />
+            ) : null}
+          </g>
+        </g>
+      </g>
+
+      <rect
+        x={CX - 4}
+        y={CY - 4}
+        width="8"
+        height="8"
+        rx="1.5"
+        fill={cfg.ring}
+        opacity="0.9"
+      />
+
+      {openingDirs.map(([dx, dy], i) => {
+        const nx = pad + inner / 2 + dx * (inner / 2 - 2)
+        const ny = pad + inner / 2 + dy * (inner / 2 - 2)
+        const angle = Math.atan2(dy, dx) * (180 / Math.PI)
+        return (
+          <g key={i} transform={`rotate(${angle} ${nx} ${ny})`}>
+            <polygon
+              points={`${nx + 6},${ny}  ${nx - 3},${ny - 4}  ${nx - 3},${ny + 4}`}
+              fill={cfg.notch}
+              opacity="0.95"
+              filter={cfg.glowOp > 0 ? `url(#${filtId})` : undefined}
+            />
+          </g>
+        )
+      })}
+
+      {status === 'error' && (
+        <rect width={S} height={S} fill={cfg.glow} opacity="0">
+          <animate attributeName="opacity" values="0;0.1;0" dur="1.2s" repeatCount="indefinite" />
+        </rect>
+      )}
+    </svg>
+  )
+}
+
 interface TurnConveyorCellProps {
   width: number
   height: number
@@ -132,6 +347,22 @@ export function TurnConveyorCell({
   uid,
   isJunction = false,
 }: TurnConveyorCellProps) {
+  if (isJunction) {
+    return (
+      <JunctionConveyorCell
+        width={width}
+        height={height}
+        status={status}
+        rotation={rotation}
+        flowInDir={flowInDir}
+        flowOutDir={flowOutDir}
+        isRunning={isRunning}
+        uid={uid}
+        isJunction
+      />
+    )
+  }
+
   const cfg = COLORS[status]
   const motion = resolveTurnMotion(flowInDir, flowOutDir)
   const openingDirs = resolveOpeningDirs(rotation, flowInDir, flowOutDir)
@@ -213,20 +444,6 @@ export function TurnConveyorCell({
               rx="0.8"
             />
           ))}
-
-          {isJunction &&
-            rollerPositions.map((y, i) => (
-              <rect
-                key={`h${i}`}
-                x={CX - R_INNER}
-                y={y}
-                width={R_INNER * 2}
-                height={rollerThickness}
-                fill={`url(#${gradId})`}
-                rx="0.8"
-                opacity="0.6"
-              />
-            ))}
 
           {isRunning && motion.kind === 'arc' && motion.rotateSign != null && (
             <animateTransform

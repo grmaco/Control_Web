@@ -1,4 +1,5 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
+import { useTouchLayout } from '../../hooks/useTouchLayout'
 import type {
   ConveyorLine,
   ConveyorUnit,
@@ -22,7 +23,6 @@ import {
   typeDescription,
   typeLabel,
 } from '../../constants/conveyorTypes'
-import { INTERFACE_UNIT_TYPES } from '../../constants/interfaceUnits'
 import {
   PORT_DIRECTIONS,
   PORT_RECIPES,
@@ -36,11 +36,11 @@ import {
   warehouseShapeLabel,
 } from '../../constants/warehouseUnit'
 import { updateUnitInLine, updateUnitsStatusInLine, updateUnitsTestMaterialInLine } from '../../utils/units'
-import type { InterfaceUnitType } from '../../types/conveyor'
 import { formatFlowRoleLabel } from '../../utils/flowEntries'
 import { RolePropertySections } from './UnitRolePropertySections'
 import { computeMinimapFlowMap } from '../../utils/flowDirection'
 import {
+  canSelectInterfaceUnit,
   getPortProperties,
   portRoleFromDirection,
   readPortProperties,
@@ -75,7 +75,17 @@ export function UnitPropertiesPanel({
   onStartPickOutputDestination,
   onCancelPickOutputDestination,
 }: UnitPropertiesPanelProps) {
+  const touchLayout = useTouchLayout()
+  const [propertiesOpen, setPropertiesOpen] = useState(false)
   const unitFlowMap = useMemo(() => computeMinimapFlowMap(line), [line])
+
+  const propertiesToggleLabel = unit
+    ? `${unit.name} 속성`
+    : selectedUnitIds.length > 1
+      ? `${selectedUnitIds.length}개 선택 속성`
+      : '속성 · V3 설정'
+
+  const showPropertyDetails = !touchLayout || propertiesOpen
 
   if (selectedUnitIds.length > 1) {
     const selectedUnits = line.units.filter((item) =>
@@ -94,6 +104,19 @@ export function UnitPropertiesPanel({
 
     return (
       <div className="space-y-4">
+        {touchLayout ? (
+          <button
+            type="button"
+            onClick={() => setPropertiesOpen((open) => !open)}
+            className="flex min-h-[40px] w-full items-center justify-between rounded-md border border-slate-700 bg-slate-800/80 px-3 py-2 text-sm text-slate-200"
+          >
+            <span className="font-medium">{propertiesToggleLabel}</span>
+            <span className="text-slate-500">{propertiesOpen ? '▲' : '▼'}</span>
+          </button>
+        ) : null}
+
+        {showPropertyDetails ? (
+          <>
         <p className="text-sm text-violet-300">
           {selectedUnitIds.length}개 모듈 선택됨
           {selectedUnitIds.length === line.units.length ? ' (전체)' : ''}
@@ -157,6 +180,8 @@ export function UnitPropertiesPanel({
           선택된 모듈을 드래그해 함께 이동할 수 있습니다. 상태·자재 설정은 선택된
           모듈에 일괄 적용됩니다.
         </p>
+          </>
+        ) : null}
       </div>
     )
   }
@@ -164,6 +189,19 @@ export function UnitPropertiesPanel({
   if (!unit) {
     return (
       <div className="space-y-4">
+        {touchLayout ? (
+          <button
+            type="button"
+            onClick={() => setPropertiesOpen((open) => !open)}
+            className="flex min-h-[40px] w-full items-center justify-between rounded-md border border-slate-700 bg-slate-800/80 px-3 py-2 text-sm text-slate-200"
+          >
+            <span className="font-medium">{propertiesToggleLabel}</span>
+            <span className="text-slate-500">{propertiesOpen ? '▲' : '▼'}</span>
+          </button>
+        ) : null}
+
+        {showPropertyDetails ? (
+          <>
         <p className="text-sm text-slate-500">
           유닛을 클릭해 선택하세요. 팔레트에서 그리드로 드래그해 배치할 수 있습니다.
         </p>
@@ -216,6 +254,8 @@ export function UnitPropertiesPanel({
             </p>
           </div>
         </div>
+          </>
+        ) : null}
       </div>
     )
   }
@@ -226,6 +266,19 @@ export function UnitPropertiesPanel({
 
   return (
     <div className="space-y-4">
+      {touchLayout ? (
+        <button
+          type="button"
+          onClick={() => setPropertiesOpen((open) => !open)}
+          className="flex min-h-[40px] w-full items-center justify-between rounded-md border border-slate-700 bg-slate-800/80 px-3 py-2 text-sm text-slate-200"
+        >
+          <span className="min-w-0 truncate font-medium">{propertiesToggleLabel}</span>
+          <span className="shrink-0 text-slate-500">{propertiesOpen ? '▲' : '▼'}</span>
+        </button>
+      ) : null}
+
+      {showPropertyDetails ? (
+        <>
       <div>
         <label className="mb-1 block text-xs text-slate-400">이름</label>
         <input
@@ -425,32 +478,7 @@ export function UnitPropertiesPanel({
             {WAREHOUSE_FOOTPRINT_SIZE}×{WAREHOUSE_FOOTPRINT_SIZE} 정사각형(9칸)을 차지합니다.
           </div>
         </>
-      ) : (
-        <div>
-          <label className="mb-1 block text-xs text-slate-400">연동 유닛</label>
-          <select
-            value={unit.interfaceUnit ?? ''}
-            onChange={(e) =>
-              onChange(
-                updateUnitInLine(line, unit.id, {
-                  interfaceUnit: (e.target.value || null) as InterfaceUnitType | null,
-                }),
-              )
-            }
-            className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
-          >
-            <option value="">없음</option>
-            {INTERFACE_UNIT_TYPES.map((type) => (
-              <option key={type} value={type}>
-                {type}
-              </option>
-            ))}
-          </select>
-          <p className="mt-1 text-xs text-slate-500">
-            외부 설비와 연동되는 유닛 타입을 선택하세요.
-          </p>
-        </div>
-      )}
+      ) : null}
 
       <div>
         <label className="mb-1 block text-xs text-slate-400">상태</label>
@@ -517,7 +545,7 @@ export function UnitPropertiesPanel({
 
       <div className="rounded-md border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-400">
         <p>위치: ({unit.gridX}, {unit.gridY})</p>
-        {canRotate && (
+        {canRotate && unit.type !== 'junction' && (
           <p>
             {isLiftUnit(unit) ? '높이' : '회전'}:{' '}
             {formatRotationDisplay(unit, unitFlowMap.get(unit.id) ?? null)}
@@ -556,12 +584,12 @@ export function UnitPropertiesPanel({
                 : 'ALL'}
             </p>
           </>
-        ) : (
+        ) : canSelectInterfaceUnit(unit) ? (
           <p>
             연동 유닛:{' '}
             {unit.interfaceUnit ? unit.interfaceUnit : '없음'}
           </p>
-        )}
+        ) : null}
         <p>연결: {unit.connections.length}개</p>
         {unit.flowRole && (
           <p className={unit.flowRole === 'entry' ? 'text-amber-300' : 'text-emerald-300'}>
@@ -570,6 +598,8 @@ export function UnitPropertiesPanel({
           </p>
         )}
       </div>
+        </>
+      ) : null}
 
       <div className="flex gap-2">
         {canRotate && (
@@ -578,7 +608,7 @@ export function UnitPropertiesPanel({
             onClick={() => onRotate(unit.id)}
             className="flex-1 rounded-md border border-slate-700 px-2 py-1.5 text-xs hover:bg-slate-800"
           >
-            회전 (R)
+            {unit.type === 'junction' ? '전환 (R)' : '회전 (R)'}
           </button>
         )}
         <button

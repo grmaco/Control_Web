@@ -143,6 +143,38 @@ export function buildTurnFlowPath(
   return null
 }
 
+function junctionElbowCorner(inDir: FlowDir, outDir: FlowDir): { x: number; y: number } {
+  const start = EDGE[inDir]
+  const inHorizontal = inDir === 'E' || inDir === 'W'
+  return {
+    x: inHorizontal ? 50 : start.x,
+    y: inHorizontal ? start.y : 50,
+  }
+}
+
+/** 분기 — 90° 꺾임 직각 화살표 (곡선 대신 L자) */
+export function buildJunctionElbowPath(
+  inDir: FlowDir,
+  outDir: FlowDir,
+): { d: string; tip: { x: number; y: number }; outDir: FlowDir } | null {
+  if (!isValidTurnArc(inDir, outDir)) return null
+
+  const start = EDGE[inDir]
+  const end = EDGE[outDir]
+  const corner = junctionElbowCorner(inDir, outDir)
+  return {
+    d: `M ${start.x},${start.y} L ${corner.x},${corner.y} L ${end.x},${end.y}`,
+    tip: end,
+    outDir,
+  }
+}
+
+export function buildJunctionElbowPathFull(inDir: FlowDir, outDir: FlowDir): string | null {
+  const path = buildJunctionElbowPath(inDir, outDir)
+  if (!path) return null
+  return `${path.d} ${arrowHeadSubpath(path.tip.x, path.tip.y, path.outDir)}`
+}
+
 /**
  * 미니맵 곡선 — 물리 입고·출고 방향 그대로 사용 (입고측=0° 기준).
  * 저장된 rotation 필드는 빌더 배치용이며 곡선 렌더에는 쓰지 않음.

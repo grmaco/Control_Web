@@ -28,6 +28,9 @@ import {
   planMultiTestMaterialLoadPaths,
   buildLoadTackTimeSummaries,
   clampSimIntervalSec,
+  createStkRoutingSessionState,
+  seedStkRoutingSessionFromLoads,
+  type StkRoutingSessionState,
   MIN_TACK_TIME_SEC,
   roundTackTimeSec,
   simulationCstUnitIds,
@@ -41,16 +44,59 @@ import {
   initGatherProbes,
   type GatherProbeState,
 } from '../utils/continuousInputGather'
+import { computeMinimapFlowMap } from '../utils/flowDirection'
 import {
+  anyInboundStkHasCapacity,
   detectWarehouseDeposits,
   resolveInboundStorageTarget,
-  WAREHOUSE_SLOT_CAPACITY,
 } from '../utils/warehouseSlots'
 
 function formatStatusTail(parts: string[], maxItems = 5): string {
   if (parts.length === 0) return ''
   if (parts.length <= maxItems) return parts.join(' · ')
   return `…${parts.length - maxItems}건 · ${parts.slice(-maxItems).join(' · ')}`
+}
+
+function formatLoadProgressLine(load: PathSimulationLoad): string {
+  if (load.pathUnitIds.length === 0) return load.label
+  const suffix = isLoadFullyDischarged(load) ? ' ✓' : load.waiting ? ' ⏸' : ''
+  return `${load.label} ${load.stepIndex + 1}/${load.pathUnitIds.length}${suffix}`
+}
+
+/** 진행 푸터 — headline 짧게, detail은 hover용 전체 목록 */
+function buildSimulationProgressSummary(
+  loads: PathSimulationLoad[],
+  incompleteLoadCount: number,
+): { headline: string | null; detail: string | null } {
+  if (loads.length === 0) return { headline: null, detail: null }
+
+  const detailLines = loads.map(formatLoadProgressLine)
+  const detail = detailLines.length > 1 ? detailLines.join(' · ') : null
+
+  if (loads.length <= 3) {
+    return {
+      headline: formatStatusTail(detailLines, 3),
+      detail,
+    }
+  }
+
+  const waitingCount = loads.filter((load) => load.waiting && !load.complete).length
+  const completedCount = loads.filter((load) => isLoadFullyDischarged(load)).length
+  const parts = [`${loads.length}건`]
+  if (completedCount > 0) parts.push(`완료 ${completedCount}`)
+  if (incompleteLoadCount > 0) parts.push(`잔여 ${incompleteLoadCount}`)
+  if (waitingCount > 0) parts.push(`대기 ${waitingCount}`)
+
+  const highlightLoads = loads
+    .filter((load) => load.pathUnitIds.length > 0 && !isLoadFullyDischarged(load))
+    .sort((a, b) => Number(b.waiting) - Number(a.waiting) || b.stepIndex - a.stepIndex)
+    .slice(0, 2)
+
+  if (highlightLoads.length > 0) {
+    parts.push(highlightLoads.map(formatLoadProgressLine).join(' · '))
+  }
+
+  return { headline: parts.join(' · '), detail }
 }
 
 export type PathSimulationStatus =
@@ -121,10 +167,13 @@ export function usePathSimulation(
   const injectSeqRef = useRef(0)
   const entryVacancyRef = useRef<Record<string, number>>({})
   const depositedLoadIdsRef = useRef<Set<string>>(new Set())
+  const stkRoutingSessionRef = useRef<StkRoutingSessionState>(createStkRoutingSessionState())
   const warehouseFillCountsRef = useRef(warehouseFillCounts)
   warehouseFillCountsRef.current = warehouseFillCounts
   const selectedSourceUnitIdsRef = useRef(selectedSourceUnitIds)
   selectedSourceUnitIdsRef.current = selectedSourceUnitIds
+  const onClearTestMaterialRef = useRef(options.onClearTestMaterial)
+  onClearTestMaterialRef.current = options.onClearTestMaterial
 
   const setInputIntervalSec = useCallback(
     (value: number) =>
@@ -288,6 +337,7 @@ export function usePathSimulation(
     injectSeqRef.current = 0
     entryVacancyRef.current = {}
     depositedLoadIdsRef.current = new Set()
+    stkRoutingSessionRef.current = createStkRoutingSessionState()
     setStatus('idle')
   }, [clearTackSession, line.id, mode])
 
@@ -301,11 +351,12 @@ export function usePathSimulation(
   const testMaterialUnits = useMemo(() => listTestMaterialUnits(line), [line])
 
   const previewPlan = useMemo((): MultiPathSimulationPlan | null => {
+    const routingSession = createStkRoutingSessionState()
     const primary =
       selectedSourceUnitIds.length === 0
         ? { loads: [], message: '' }
         : mode === 'inbound'
-          ? planMultiInboundLoadPaths(line, selectedSourceUnitIds)
+          ? planMultiInboundLoadPaths(line, selectedSourceUnitIds, routingSession)
           : planMultiOutboundLoadPaths(line, selectedSourceUnitIds)
 
     const testMaterialPlan = planMultiTestMaterialLoadPaths(line)
@@ -359,26 +410,24 @@ export function usePathSimulation(
     [],
   )
 
-  const toggleContinuousInput = useCallback(() => {
-    if (mode !== 'inbound') return
-    setContinuousInputActive((current) => {
-      const next = !current
-      if (next) {
-        setGatherProbes(
-          initGatherProbes(line, selectedSourceUnitIds, CONTINUOUS_INPUT_INTERVAL_SEC),
-        )
-        entryVacancyRef.current = {}
-        depositedLoadIdsRef.current = new Set()
-        simTickRef.current = 0
-        lastInjectTickRef.current = 0
-        injectSeqRef.current = 0
-        setWarehouseFullNotice(false)
-      } else {
-        setGatherProbes([])
-      }
-      return next
-    })
-  }, [line, mode, selectedSourceUnitIds])
+  const beginContinuousInputSession = useCallback(() => {
+    continuousInputActiveRef.current = true
+    setContinuousInputActive(true)
+    setGatherProbes(
+      initGatherProbes(line, selectedSourceUnitIds, CONTINUOUS_INPUT_INTERVAL_SEC),
+    )
+    entryVacancyRef.current = {}
+    simTickRef.current = 0
+    lastInjectTickRef.current = 0
+    injectSeqRef.current = 0
+    setWarehouseFullNotice(false)
+  }, [line, selectedSourceUnitIds])
+
+  const clearContinuousInputSession = useCallback(() => {
+    continuousInputActiveRef.current = false
+    setContinuousInputActive(false)
+    setGatherProbes([])
+  }, [])
 
   const isRevealComplete = useCallback(
     (steps: Record<string, number>, nextLoads: PathSimulationLoad[]) => {
@@ -411,62 +460,83 @@ export function usePathSimulation(
     setStatus('endHold')
   }, [])
 
-  const start = useCallback(() => {
-    const nextPlan = rebuildPlan()
-    const planLoads = nextPlan?.loads ?? []
+  const startWithMode = useCallback(
+    (startMode: 'normal' | 'continuous') => {
+      depositedLoadIdsRef.current = new Set()
+      stkRoutingSessionRef.current = createStkRoutingSessionState()
+      setWarehouseFillCounts({})
+      setWarehouseFullNotice(false)
 
-    if (
-      continuousInputActive &&
-      mode === 'inbound' &&
-      selectedSourceUnitIds.length > 0
-    ) {
-      const testOnlyLoads = planLoads.filter((load) => load.clearsTestMaterial)
-      const initialized =
-        testOnlyLoads.length > 0
-          ? initializeParallelLoads(testOnlyLoads, stepTiming, line)
-          : []
+      const nextPlan = rebuildPlan()
+      const planLoads = nextPlan?.loads ?? []
+      seedStkRoutingSessionFromLoads(stkRoutingSessionRef.current, planLoads)
+
+      if (
+        startMode === 'continuous' &&
+        mode === 'inbound' &&
+        selectedSourceUnitIds.length > 0
+      ) {
+        beginContinuousInputSession()
+        const testOnlyLoads = planLoads.filter((load) => load.clearsTestMaterial)
+        const initialized =
+          testOnlyLoads.length > 0
+            ? initializeParallelLoads(testOnlyLoads, stepTiming, line)
+            : []
+        setEndHoldActive(false)
+        setPlan(nextPlan)
+        sessionLoadIdsRef.current = initialized.map((load) => load.id)
+        setLoads(initialized)
+        setRevealSteps({})
+        setFinalHoldActive(false)
+        clearedTestMaterialLoadIdsRef.current = new Set()
+        pendingTestMaterialClearRef.current = new Set()
+        if (initialized.length > 0) {
+          beginPathReveal(initialized)
+        } else {
+          setStatus('playing')
+        }
+        return
+      }
+
+      clearContinuousInputSession()
+
+      if (!nextPlan || planLoads.length === 0) {
+        setPlan(nextPlan)
+        setLoads([])
+        setRevealSteps({})
+        setFinalHoldActive(false)
+        setEndHoldActive(false)
+        setStatus('idle')
+        return
+      }
       setEndHoldActive(false)
       setPlan(nextPlan)
+      const initialized = initializeParallelLoads(planLoads, stepTiming, line)
       sessionLoadIdsRef.current = initialized.map((load) => load.id)
       setLoads(initialized)
-      setRevealSteps({})
-      setFinalHoldActive(false)
+      beginPathReveal(initialized)
       clearedTestMaterialLoadIdsRef.current = new Set()
       pendingTestMaterialClearRef.current = new Set()
-      if (initialized.length > 0) {
-        beginPathReveal(initialized)
-      } else {
-        setStatus('playing')
-      }
-      return
-    }
+    },
+    [
+      beginContinuousInputSession,
+      beginPathReveal,
+      clearContinuousInputSession,
+      mode,
+      rebuildPlan,
+      line,
+      selectedSourceUnitIds.length,
+      stepTiming,
+    ],
+  )
 
-    if (!nextPlan || planLoads.length === 0) {
-      setPlan(nextPlan)
-      setLoads([])
-      setRevealSteps({})
-      setFinalHoldActive(false)
-      setEndHoldActive(false)
-      setStatus('idle')
-      return
-    }
-    setEndHoldActive(false)
-    setPlan(nextPlan)
-    const initialized = initializeParallelLoads(planLoads, stepTiming, line)
-    sessionLoadIdsRef.current = initialized.map((load) => load.id)
-    setLoads(initialized)
-    beginPathReveal(initialized)
-    clearedTestMaterialLoadIdsRef.current = new Set()
-    pendingTestMaterialClearRef.current = new Set()
-  }, [
-    beginPathReveal,
-    continuousInputActive,
-    mode,
-    rebuildPlan,
-    line,
-    selectedSourceUnitIds.length,
-    stepTiming,
-  ])
+  const start = useCallback(() => startWithMode('normal'), [startWithMode])
+
+  const startContinuous = useCallback(() => {
+    if (mode !== 'inbound') return
+    if (selectedSourceUnitIds.length === 0) return
+    startWithMode('continuous')
+  }, [mode, selectedSourceUnitIds.length, startWithMode])
 
   useEffect(() => {
     if (status !== 'playing') return
@@ -540,8 +610,12 @@ export function usePathSimulation(
     [line.units],
   )
 
+  const flowMap = useMemo(() => computeMinimapFlowMap(line), [line])
+
   const unitMapRef = useRef(unitMap)
   unitMapRef.current = unitMap
+  const flowMapRef = useRef(flowMap)
+  flowMapRef.current = flowMap
   const stepTimingRef = useRef(stepTiming)
   stepTimingRef.current = stepTiming
   const loadsRef = useRef(loads)
@@ -576,7 +650,7 @@ export function usePathSimulation(
 
     setPlan(nextPlan)
     const base = loads.length > 0 ? loads : initializeParallelLoads(nextPlan.loads, stepTiming, line)
-    const advanced = applySimulationStep(base, unitMap, stepTiming)
+    const advanced = applySimulationStep(base, unitMap, stepTiming, flowMap)
     if (status === 'paused') {
       if (tackSessionStartRef.current == null) {
         beginTackSession()
@@ -593,7 +667,7 @@ export function usePathSimulation(
     } else {
       setStatus('paused')
     }
-  }, [allLoadsComplete, beginEndHold, beginTackSession, clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTimer, loads, pauseTackSession, plan, rebuildPlan, status, stepTiming, unitMap])
+  }, [allLoadsComplete, beginEndHold, beginTackSession, clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTimer, flowMap, loads, pauseTackSession, plan, rebuildPlan, status, stepTiming, unitMap])
 
   useEffect(() => {
     if (status !== 'playing') return
@@ -611,12 +685,15 @@ export function usePathSimulation(
           nextLoads,
           unitMapRef.current,
           stepTimingRef.current,
+          flowMapRef.current,
         )
 
         if (continuousInputActiveRef.current && mode === 'inbound' && entryIds.length > 0) {
-          const stkId = storageTargetId
-          const totalFill = stkId ? (warehouseFillCountsRef.current[stkId] ?? 0) : 0
-          if (totalFill < WAREHOUSE_SLOT_CAPACITY) {
+          const hasWarehouseCapacity = anyInboundStkHasCapacity(
+            line,
+            warehouseFillCountsRef.current,
+          )
+          if (hasWarehouseCapacity) {
             const gatherResult = advanceGatherProbes(
               gatherProbesRef.current,
               nextLoads,
@@ -625,6 +702,7 @@ export function usePathSimulation(
               CONTINUOUS_INPUT_INTERVAL_SEC,
               injectSeqRef.current,
               entryVacancyRef.current,
+              stkRoutingSessionRef.current,
             )
             gatherProbesRef.current = gatherResult.probes
             setGatherProbes(gatherResult.probes)
@@ -636,35 +714,46 @@ export function usePathSimulation(
                 ...gatherResult.spawned.map((load) => load.id),
               ]
               nextLoads = [...nextLoads, ...gatherResult.spawned]
+              const testMaterialEntryIds = [
+                ...new Set(
+                  gatherResult.spawned
+                    .filter((load) => load.clearsTestMaterial)
+                    .map((load) => load.entryUnitId),
+                ),
+              ]
+              if (testMaterialEntryIds.length > 0) {
+                onClearTestMaterialRef.current?.(testMaterialEntryIds)
+              }
             }
           }
         }
 
         const advanced = nextLoads
 
-        if (
-          continuousInputActiveRef.current &&
-          storageTargetId &&
-          beforeStep !== advanced
-        ) {
+        if (beforeStep !== advanced) {
           const deposited = detectWarehouseDeposits(
             beforeStep,
             advanced,
-            storageTargetId,
             depositedLoadIdsRef.current,
           )
           if (deposited.length > 0) {
-            for (const loadId of deposited) {
+            for (const { loadId } of deposited) {
               depositedLoadIdsRef.current.add(loadId)
             }
             setWarehouseFillCounts((prev) => {
-              const nextCount = (prev[storageTargetId] ?? 0) + deposited.length
-              if (nextCount >= WAREHOUSE_SLOT_CAPACITY) {
+              const next = { ...prev }
+              for (const { stkId } of deposited) {
+                next[stkId] = (next[stkId] ?? 0) + 1
+              }
+              if (
+                continuousInputActiveRef.current &&
+                !anyInboundStkHasCapacity(line, next)
+              ) {
                 setContinuousInputActive(false)
                 setGatherProbes([])
                 setWarehouseFullNotice(true)
               }
-              return { ...prev, [storageTargetId]: nextCount }
+              return next
             })
           }
         }
@@ -678,7 +767,7 @@ export function usePathSimulation(
     }, PATH_SIMULATION_STEP_MS)
 
     return clearTimer
-  }, [allLoadsComplete, beginEndHold, clearTimer, line, mode, status, storageTargetId])
+  }, [allLoadsComplete, beginEndHold, clearTimer, line, mode, status])
 
   useEffect(() => {
     if (status !== 'revealing' || finalHoldActive) return
@@ -851,15 +940,12 @@ export function usePathSimulation(
     () => countIncompleteSimulationLoads(loads),
     [loads],
   )
-  const progressLabel =
-    loads.length > 0
-      ? `${incompleteLoadCount > 0 ? `잔여 ${incompleteLoadCount}개 · ` : ''}${formatStatusTail(
-          loads.map(
-            (load) =>
-              `${load.label} ${load.stepIndex + 1}/${load.pathUnitIds.length}${isLoadFullyDischarged(load) ? ' ✓' : ''}`,
-          ),
-        )}`
-      : null
+  const progressSummary = useMemo(
+    () => buildSimulationProgressSummary(loads, incompleteLoadCount),
+    [loads, incompleteLoadCount],
+  )
+  const progressLabel = progressSummary.headline
+  const progressDetail = progressSummary.detail
   const activeUnitLabel =
     cstUnitIds.length > 0
       ? loads
@@ -867,6 +953,38 @@ export function usePathSimulation(
           .map((load) => load.label)
           .join(', ')
       : null
+
+  const simulationFlowOverlayLoads = useMemo(() => {
+    const useRevealStep =
+      status === 'revealing' ||
+      finalHoldActive ||
+      (status === 'paused' && loads.length > 0 && !isRevealComplete(revealSteps, loads))
+
+    const overlayLoads =
+      loads.length > 0
+        ? loads.filter((load) => !load.complete || status === 'endHold')
+        : status === 'idle' && previewPlan && previewPlan.loads.length > 0
+          ? previewPlan.loads
+          : []
+
+    if (overlayLoads.length === 0) return []
+
+    return overlayLoads.map((load) => ({
+      pathUnitIds: load.pathUnitIds,
+      stepIndex: useRevealStep
+        ? (revealSteps[load.id] ?? 0)
+        : loads.length > 0
+          ? load.stepIndex
+          : Math.max(0, load.pathUnitIds.length - 1),
+    }))
+  }, [
+    finalHoldActive,
+    isRevealComplete,
+    loads,
+    previewPlan,
+    revealSteps,
+    status,
+  ])
 
   return {
     mode,
@@ -884,12 +1002,15 @@ export function usePathSimulation(
     neonUnitIds,
     activeUnitLabel,
     pathUnitIds,
+    simulationFlowOverlayLoads,
     staticTestMaterialUnitIds,
     waitingLabels,
     testMaterialUnits,
     canSimulate,
     progressLabel,
+    progressDetail,
     start,
+    startContinuous,
     pause,
     resume,
     reset,
@@ -909,7 +1030,6 @@ export function usePathSimulation(
     continuousInputIntervalSec: continuousInputActive
       ? CONTINUOUS_INPUT_INTERVAL_SEC
       : inputIntervalSec,
-    toggleContinuousInput,
     warehouseFillCounts,
     warehouseFullNotice,
     dismissWarehouseFullNotice: () => setWarehouseFullNotice(false),

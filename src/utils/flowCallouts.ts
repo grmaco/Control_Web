@@ -159,18 +159,20 @@ function buildUnitRects(
   })
 }
 
-export function collectCalloutTags(unit: ConveyorUnit, flow: UnitFlowDirs): FlowCalloutTag[] {
+export function collectCalloutTags(
+  unit: ConveyorUnit,
+  flow: UnitFlowDirs | undefined,
+): FlowCalloutTag[] {
   const tags: FlowCalloutTag[] = []
 
-  if (flow.role === 'start') {
+  if (flow?.role === 'start' || unit.flowRole === 'entry') {
     tags.push({ kind: 'start', text: '시작점' })
   }
-  if (flow.role === 'end') {
+  if (flow?.role === 'end' || unit.flowRole === 'exit') {
     tags.push({ kind: 'end', text: '종료점' })
   }
 
-  const isTurnLike = unit.type === 'turn' || unit.type === 'junction'
-  if (isTurnLike && flow.inDir && flow.outDir) {
+  if (unit.type === 'turn' && flow?.inDir && flow.outDir) {
     const angle = formatTurnFlowAngleLabel(flow.inDir, flow.outDir)
     if (angle) {
       tags.push({ kind: 'angle', text: `회전 ${angle}` })
@@ -186,7 +188,9 @@ function needsCallout(
   hasAlarm: boolean,
 ): boolean {
   if (isStorageUnit(unit) || isPortUnit(unit)) return false
+  if (unit.type === 'junction') return false
   if (hasAlarm) return true
+  if (unit.flowRole === 'entry' || unit.flowRole === 'exit') return true
   if (!flow) return false
   return collectCalloutTags(unit, flow).length > 0
 }
@@ -344,6 +348,55 @@ function placeCalloutPanel(
   return fallbackPlacement(bounds, panelWidth, panelHeight, unitRects, reservedPanels, spreadSeed)
 }
 
+/** 배치 후보가 모두 막혔을 때 — 모듈만 피하고 링형으로 강제 배치 */
+function forceCalloutPlacement(
+  bounds: PxRect & { cx: number; cy: number },
+  cellSize: number,
+  panelWidth: number,
+  panelHeight: number,
+  unitRects: PxRect[],
+  spreadSeed: number,
+): {
+  lineStart: { x: number; y: number }
+  lineEnd: { x: number; y: number }
+  panel: PxRect
+} | null {
+  const moduleGap = 2
+  const slots = 16
+
+  for (let ring = 0; ring < 14; ring += 1) {
+    const dist = cellSize * (2.2 + ring * 0.75)
+    for (let slot = 0; slot < slots; slot += 1) {
+      const angle = ((spreadSeed + slot * 5) % slots) * ((2 * Math.PI) / slots)
+      const cx = bounds.cx + Math.cos(angle) * dist
+      const cy = bounds.cy + Math.sin(angle) * dist
+      const panel: PxRect = {
+        left: cx - panelWidth / 2,
+        top: cy - panelHeight / 2,
+        right: cx + panelWidth / 2,
+        bottom: cy + panelHeight / 2,
+      }
+      if (panelOverlapsModule(panel, unitRects, moduleGap)) continue
+
+      const lineStart = lineAnchorOnBounds(bounds, cx, cy, spreadSeed)
+      const lineEnd = edgePointOnRect(panel, lineStart.x, lineStart.y)
+      return { lineStart, lineEnd, panel }
+    }
+  }
+
+  return null
+}
+
+function calloutSortPriority(
+  unit: ConveyorUnit,
+  flowMap: Map<string, UnitFlowDirs>,
+): number {
+  const flow = flowMap.get(unit.id)
+  if (flow?.role === 'start' || flow?.role === 'end') return 0
+  if (unit.flowRole === 'entry' || unit.flowRole === 'exit') return 1
+  return 2
+}
+
 /** 알람 한 줄 표시용 패널 너비 추정 (7px 폰트 기준) */
 export function estimateAlarmCalloutPanelWidth(
   alarmText: string | undefined,
@@ -371,6 +424,8 @@ export function computeFlowCallouts(
   const callouts: FlowCallout[] = []
 
   const units = [...line.units].sort((a, b) => {
+    const priority = calloutSortPriority(a, flowMap) - calloutSortPriority(b, flowMap)
+    if (priority !== 0) return priority
     const ay = a.gridY - a.gridX
     const by = b.gridY - b.gridX
     return ay - by || a.gridX - b.gridX
@@ -387,19 +442,28 @@ export function computeFlowCallouts(
       panelMinWidth,
     )
     const spreadSeed = unit.gridX * 11 + unit.gridY * 17 + unit.name.length
-    const placement = placeCalloutPanel(
-      bounds,
-      cellSize,
-      panelWidth,
-      panelHeight,
-      unitRects,
-      reservedPanels,
-      spreadSeed,
-    )
+    const placement =
+      placeCalloutPanel(
+        bounds,
+        cellSize,
+        panelWidth,
+        panelHeight,
+        unitRects,
+        reservedPanels,
+        spreadSeed,
+      ) ??
+      forceCalloutPlacement(
+        bounds,
+        cellSize,
+        panelWidth,
+        panelHeight,
+        unitRects,
+        spreadSeed,
+      )
     if (!placement) continue
 
     reservedPanels.push(placement.panel)
-    const tags = flow ? collectCalloutTags(unit, flow) : []
+    const tags = collectCalloutTags(unit, flow)
 
     callouts.push({
       unitId: unit.id,

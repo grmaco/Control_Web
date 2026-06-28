@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { useEffect, useId, useState } from 'react'
+import { useTouchLayout } from '../../hooks/useTouchLayout'
 import type { ConveyorUnit } from '../../types/conveyor'
 import type { MultiPathSimulationPlan } from '../../types/unitProperties'
 import { PATH_SIMULATION_STEP_MS } from '../../types/unitProperties'
@@ -20,20 +21,20 @@ interface PathSimulationBarProps {
   plan: MultiPathSimulationPlan | null
   status: PathSimulationStatus
   progressLabel: string | null
+  progressDetail?: string | null
   canSimulate: boolean
   testMaterialCount?: number
-  activeUnitLabel: string | null
-  waitingLabels: string[]
   inputIntervalSec: number
   dischargeIntervalSec: number
   transitIntervalSec: number
   onInputIntervalSecChange: (value: number) => void
   onDischargeIntervalSecChange: (value: number) => void
   onTransitIntervalSecChange: (value: number) => void
-  incompleteLoadCount?: number
   tackTimeSummaries?: LoadTackTimeSummary[]
   mapControls?: ReactNode
   continuousInputActive?: boolean
+  /** 모바일 접힘 요약 — 맵 제어 */
+  mapControlSummary?: string
 }
 
 interface PathSimulationPlaybackControlsProps {
@@ -42,12 +43,12 @@ interface PathSimulationPlaybackControlsProps {
   mode: PathSimulationMode
   canSimulate: boolean
   onStart: () => void
+  onStartContinuous?: () => void
   onPause: () => void
   onResume: () => void
   onReset: () => void
   onStepForward: () => void
   continuousInputActive?: boolean
-  onToggleContinuousInput?: () => void
 }
 
 export function PathSimulationPlaybackControls({
@@ -56,36 +57,34 @@ export function PathSimulationPlaybackControls({
   mode,
   canSimulate,
   onStart,
+  onStartContinuous,
   onPause,
   onResume,
   onReset,
   onStepForward,
   continuousInputActive = false,
-  onToggleContinuousInput,
 }: PathSimulationPlaybackControlsProps) {
   const isBusy = status === 'playing' || status === 'revealing' || status === 'endHold'
+  const sessionActive = status !== 'idle' && status !== 'complete'
+  const normalSessionActive = sessionActive && !continuousInputActive
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-1 border-b border-slate-800 bg-slate-900/80 px-3 py-2 sm:px-4">
       <SimButton
         label="시작"
-        disabled={!canSimulate || isBusy}
+        disabled={
+          !canSimulate || isBusy || continuousInputActive || normalSessionActive
+        }
         onClick={onStart}
         accent
       />
-      {mode === 'inbound' && onToggleContinuousInput ? (
-        <button
-          type="button"
-          disabled={!continuousInputActive && (status === 'idle' || status === 'complete')}
-          onClick={onToggleContinuousInput}
-          className={`rounded border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-            continuousInputActive
-              ? 'border-cyan-400/60 bg-cyan-500/15 text-cyan-200'
-              : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
-          }`}
-        >
-          연속 투입 {continuousInputActive ? 'ON' : 'OFF'}
-        </button>
+      {mode === 'inbound' && onStartContinuous ? (
+        <SimButton
+          label="연속 투입"
+          disabled={!canSimulate || isBusy || normalSessionActive}
+          onClick={onStartContinuous}
+          accent={continuousInputActive ? 'cyan' : undefined}
+        />
       ) : null}
       {isBusy ? (
         <SimButton label="일시정지" onClick={onPause} />
@@ -113,21 +112,22 @@ export function PathSimulationBar({
   plan,
   status,
   progressLabel,
+  progressDetail = null,
   canSimulate,
   testMaterialCount = 0,
-  activeUnitLabel,
-  waitingLabels,
   inputIntervalSec,
   dischargeIntervalSec,
   transitIntervalSec,
   onInputIntervalSecChange,
   onDischargeIntervalSecChange,
   onTransitIntervalSecChange,
-  incompleteLoadCount = 0,
   tackTimeSummaries = [],
   mapControls,
   continuousInputActive = false,
+  mapControlSummary,
 }: PathSimulationBarProps) {
+  const touchLayout = useTouchLayout()
+  const [mobilePanelsOpen, setMobilePanelsOpen] = useState(false)
   const statusText =
     status === 'revealing'
       ? '경로 점등'
@@ -158,8 +158,98 @@ export function PathSimulationBar({
         : '라인 빌더에서 투입점을 지정하세요.'
       : 'OUT 포트·출고구·연결 컨베이어를 확인하세요.'
 
+  const timingSummary = `투입 ${inputDisplaySec}s · 이송 ${transitIntervalSec}s · 출고 ${dischargeIntervalSec}s`
+  const directionSummary =
+    mode === 'inbound' ? '투입 (IN)' : '출고 (OUT)'
+  const sourceSummary =
+    selectedSourceUnitIds.length > 0
+      ? `${selectedSourceUnitIds.length}개 선택`
+      : sources.length > 0
+        ? '미선택'
+        : emptyHint
+  const tackSummary =
+    tackTimeSummaries.length > 0
+      ? `${tackTimeSummaries.length}경로 · ${formatTackTimeSec(tackTimeSummaries[0]!.tackTimeSec)}`
+      : '경로 미계산'
+
+  const isSimActive =
+    status === 'playing' ||
+    status === 'paused' ||
+    status === 'revealing' ||
+    status === 'endHold'
+
+  const progressFooter =
+    progressLabel ||
+    (!isSimActive && plan?.message) ||
+    !canSimulate ||
+    (!isSimActive && testMaterialCount > 0) ? (
+      <div
+        className="mt-1.5 text-xs leading-relaxed text-slate-400"
+        title={progressDetail ?? undefined}
+      >
+        {progressLabel ? (
+          <p className={isSimActive ? 'truncate' : undefined}>
+            <span className="text-slate-500">진행</span>{' '}
+            <span className="text-slate-200">{progressLabel}</span>
+          </p>
+        ) : null}
+        {!isSimActive && plan?.message ? (
+          <p className={progressLabel ? 'mt-1 truncate' : 'truncate'}>
+            <span className={mode === 'outbound' ? 'text-amber-300' : 'text-cyan-300'}>
+              {plan.message}
+            </span>
+          </p>
+        ) : !canSimulate ? (
+          <p className={progressLabel ? 'mt-1' : undefined}>
+            <span className="text-amber-300">{setupHint}</span>
+          </p>
+        ) : null}
+        {!isSimActive && testMaterialCount > 0 ? (
+          <p className="mt-1">
+            <span className="text-cyan-300">테스트 자재 {testMaterialCount}개 출고 포함</span>
+          </p>
+        ) : null}
+      </div>
+    ) : null
+
+  if (touchLayout && !mobilePanelsOpen) {
+    return (
+      <div className="border-b border-slate-800 px-3 py-2 sm:px-4">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <span className="text-sm font-medium text-slate-200">경로 시뮬레이션</span>
+          <span className="text-xs text-slate-400">
+            <span className="text-slate-500">상태</span>{' '}
+            <span className="text-violet-300">{statusText}</span>
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setMobilePanelsOpen(true)}
+          className="flex min-h-[44px] w-full items-center gap-2 rounded-lg border border-violet-600/50 bg-violet-950/30 px-3 py-2.5 text-left active:bg-violet-950/50"
+        >
+          <span className="shrink-0 text-sm font-medium text-violet-100">시뮬 설정 · 맵 제어</span>
+          <span className="min-w-0 flex-1 truncate text-[11px] text-slate-400">
+            {directionSummary} · {sourceSummary}
+          </span>
+          <span className="shrink-0 text-slate-500">▼</span>
+        </button>
+        {progressFooter}
+      </div>
+    )
+  }
+
   return (
     <div className="border-b border-slate-800 px-3 py-2 sm:px-4">
+      {touchLayout ? (
+        <button
+          type="button"
+          onClick={() => setMobilePanelsOpen(false)}
+          className="mb-2 flex min-h-[36px] w-full items-center justify-between rounded-md border border-slate-700 bg-slate-800/80 px-3 py-1.5 text-sm text-slate-300 active:bg-slate-700"
+        >
+          <span>시뮬 설정 접기</span>
+          <span className="text-slate-500">▲</span>
+        </button>
+      ) : null}
       <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-sm font-medium text-slate-200">경로 시뮬레이션</span>
         {unitCount != null ? (
@@ -175,7 +265,12 @@ export function PathSimulationBar({
       </div>
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <SimPanel title="시뮬레이션 설정">
+        <SimPanel
+          title="시뮬레이션 설정"
+          collapsible={touchLayout}
+          defaultOpen={false}
+          summary={timingSummary}
+        >
           <div className="flex flex-wrap items-end justify-center gap-3">
             <TimingField
               label="투입 대기 (초)"
@@ -201,7 +296,13 @@ export function PathSimulationBar({
           </div>
         </SimPanel>
 
-        <SimPanel title="방향 · 투입점" contentAlign="start">
+        <SimPanel
+          title="방향 · 투입점"
+          contentAlign="start"
+          collapsible={touchLayout}
+          defaultOpen={false}
+          summary={`${directionSummary} · ${sourceSummary}`}
+        >
           <div className="w-full space-y-2.5">
             <div className="flex w-full gap-2">
               <ModeButton
@@ -255,7 +356,13 @@ export function PathSimulationBar({
           </div>
         </SimPanel>
 
-        <SimPanel title="Tack Time" contentAlign="start">
+        <SimPanel
+          title="Tack Time"
+          contentAlign="start"
+          collapsible={touchLayout}
+          defaultOpen={false}
+          summary={tackSummary}
+        >
           {tackTimeSummaries.length > 0 ? (
             <div className="w-full">
               <ul className="space-y-1">
@@ -293,68 +400,19 @@ export function PathSimulationBar({
         </SimPanel>
 
         {mapControls ? (
-          <SimPanel title="맵 제어" contentAlign="start">
+          <SimPanel
+            title="맵 제어"
+            contentAlign="start"
+            collapsible={touchLayout}
+            defaultOpen={false}
+            summary={mapControlSummary ?? '줌 · 맞춤'}
+          >
             {mapControls}
           </SimPanel>
         ) : null}
       </div>
 
-      {(progressLabel ||
-        plan?.message ||
-        !canSimulate ||
-        testMaterialCount > 0 ||
-        activeUnitLabel ||
-        (incompleteLoadCount > 0 && status !== 'idle') ||
-        waitingLabels.length > 0) && (
-        <div className="mt-1.5 text-xs leading-relaxed text-slate-400">
-          {progressLabel ? (
-            <>
-              <span className="text-slate-500">진행</span>{' '}
-              <span className="text-slate-200">{progressLabel}</span>
-            </>
-          ) : null}
-          {plan?.message ? (
-            <>
-              {progressLabel ? ' · ' : null}
-              <span className={mode === 'outbound' ? 'text-amber-300' : 'text-cyan-300'}>
-                {plan.message}
-              </span>
-            </>
-          ) : !canSimulate ? (
-            <>
-              {progressLabel ? ' · ' : null}
-              <span className="text-amber-300">{setupHint}</span>
-            </>
-          ) : null}
-          {testMaterialCount > 0 ? (
-            <>
-              {' · '}
-              <span className="text-cyan-300">테스트 자재 {testMaterialCount}개 출고 포함</span>
-            </>
-          ) : null}
-          {activeUnitLabel ? (
-            <>
-              {' · '}
-              <span className="text-slate-500">자재</span>{' '}
-              <span className="text-emerald-300">{activeUnitLabel}</span>
-            </>
-          ) : null}
-          {incompleteLoadCount > 0 && status !== 'idle' ? (
-            <>
-              {' · '}
-              <span className="text-slate-500">잔여</span>{' '}
-              <span className="text-violet-300">{incompleteLoadCount}개</span>
-            </>
-          ) : null}
-          {waitingLabels.length > 0 ? (
-            <>
-              {' · '}
-              <span className="text-slate-500">대기</span>{' '}
-              <span className="text-amber-300">{waitingLabels.join(', ')}</span>
-            </>
-          ) : null}
-        </div>
-      )}
+      {progressFooter}
     </div>
   )
 }
@@ -363,21 +421,59 @@ function SimPanel({
   title,
   children,
   contentAlign = 'center',
+  collapsible = false,
+  defaultOpen = true,
+  summary,
 }: {
   title: string
   children: ReactNode
   contentAlign?: 'center' | 'start'
+  collapsible?: boolean
+  defaultOpen?: boolean
+  summary?: string
 }) {
+  const [open, setOpen] = useState(defaultOpen)
+
+  useEffect(() => {
+    setOpen(defaultOpen)
+  }, [defaultOpen, collapsible])
+
+  const panelOpen = collapsible ? open : true
+
   return (
-    <div className="flex min-h-[96px] flex-col rounded-lg border border-slate-700/70 bg-slate-800/35 px-3 py-2.5">
-      <p className="mb-1.5 text-[11px] font-semibold tracking-wide text-slate-400">{title}</p>
-      <div
-        className={`flex flex-1 flex-col justify-center ${
-          contentAlign === 'start' ? 'items-stretch' : 'items-center'
-        }`}
-      >
-        {children}
-      </div>
+    <div
+      className={`flex flex-col rounded-lg border border-slate-700/70 bg-slate-800/35 px-3 ${
+        collapsible && !panelOpen ? 'py-2' : 'py-2.5'
+      } ${!collapsible ? 'min-h-[96px]' : ''}`}
+    >
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={() => setOpen((value) => !value)}
+          className="flex min-h-[40px] w-full items-center gap-2 text-left"
+        >
+          <span className="shrink-0 text-[11px] font-semibold tracking-wide text-slate-300">
+            {title}
+          </span>
+          {!panelOpen && summary ? (
+            <span className="min-w-0 flex-1 truncate text-[10px] text-slate-500">{summary}</span>
+          ) : (
+            <span className="flex-1" />
+          )}
+          <span className="shrink-0 text-slate-500">{panelOpen ? '▲' : '▼'}</span>
+        </button>
+      ) : (
+        <p className="mb-1.5 text-[11px] font-semibold tracking-wide text-slate-400">{title}</p>
+      )}
+      {panelOpen ? (
+        <div
+          className={`flex flex-col ${collapsible ? 'pb-1 pt-1' : 'flex-1 justify-center'} ${
+            contentAlign === 'start' ? 'items-stretch' : 'items-center'
+          }`}
+        >
+          {children}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -531,18 +627,21 @@ function SimButton({
   label: string
   onClick: () => void
   disabled?: boolean
-  accent?: boolean
+  accent?: boolean | 'cyan'
 }) {
+  const accentClass =
+    accent === 'cyan'
+      ? 'border-cyan-600/70 bg-cyan-950/50 font-medium text-cyan-200 hover:bg-cyan-950'
+      : accent
+        ? 'border-emerald-700 bg-emerald-900/50 font-medium text-emerald-200 hover:bg-emerald-900'
+        : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
+
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`rounded border px-2.5 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${
-        accent
-          ? 'border-emerald-700 bg-emerald-900/50 text-emerald-200 hover:bg-emerald-900'
-          : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
-      }`}
+      className={`rounded border px-2.5 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${accentClass}`}
     >
       {label}
     </button>

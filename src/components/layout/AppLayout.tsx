@@ -59,7 +59,7 @@ export function AppLayout() {
               />
               <h1 className="app-header-title whitespace-nowrap text-base sm:text-lg">
                 <span className="app-header-title-text font-semibold tracking-wide">
-                  제어설비 관제시스템
+                  PC제어 관제시스템
                 </span>
               </h1>
             </div>

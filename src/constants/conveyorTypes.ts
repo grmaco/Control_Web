@@ -64,7 +64,7 @@ const TYPE_META: Record<
   junction: {
     showsRotation: true,
     isDualModule: true,
-    description: '한 모듈에 컨베이어 2개가 겹친 분기',
+    description: '직교 분기 — 평시 직진, 분기 요청 CV 지정 시 수직 전환',
   },
   lift: {
     showsRotation: true,
@@ -124,13 +124,14 @@ export interface TurnFlowDisplay {
   outDir: FlowDir | null
 }
 
-/** 리프트는 mm, 회전/분기는 입고 방향 기준 상대 각도(있으면), 없으면 저장 rotation */
+/** 리프트는 mm, 회전 유닛은 입고 방향 기준 상대 각도(있으면), 없으면 저장 rotation */
 export function formatRotationDisplay(
   unit: ConveyorUnit,
   flow?: TurnFlowDisplay | null,
 ): string {
   if (unit.type === 'lift') return `${unit.rotation}mm`
-  if (unit.type === 'turn' || unit.type === 'junction') {
+  if (unit.type === 'junction') return ''
+  if (unit.type === 'turn') {
     const flowAngle = formatTurnFlowAngleLabel(flow?.inDir, flow?.outDir)
     if (flowAngle) return flowAngle
   }
@@ -236,8 +237,9 @@ export function unitTitle(unit: ConveyorUnit, flow?: TurnFlowDisplay | null): st
   if (showsTypeLabelInCell(unit.type)) {
     parts.push(typeLabel(unit.type))
   }
-  if (showsRotation(unit.type)) {
-    parts.push(formatRotationDisplay(unit, flow))
+  if (showsRotation(unit.type) && unit.type !== 'junction') {
+    const rotationLabel = formatRotationDisplay(unit, flow)
+    if (rotationLabel) parts.push(rotationLabel)
   }
   if (isDualModule(unit.type)) {
     parts.push('2모듈 겹침')

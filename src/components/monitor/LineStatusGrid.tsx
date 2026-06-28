@@ -78,40 +78,50 @@ function resolveSimulationUnitFlow(
   const activeLoad = [...simulationLoads]
     .reverse()
     .find((load) => load.pathUnitIds[load.stepIndex] === unitId)
-  if (!activeLoad) return flowMap.get(unitId) ?? null
-
-  const pathIndex = activeLoad.stepIndex
-  if (activeLoad.pathUnitIds[pathIndex] !== unitId) {
-    return flowMap.get(unitId) ?? null
-  }
 
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
   const unit = unitMap.get(unitId)
   if (!unit) return null
 
-  // 포트(IN/OUT) 삼각형은 STK·LOAD UNIT 기준 고정 — 경로 오버레이 시 방향이 뒤집히지 않도록 유지
-  if (isPortUnit(unit)) {
-    return flowMap.get(unitId) ?? null
+  if (activeLoad) {
+    const pathIndex = activeLoad.stepIndex
+    if (activeLoad.pathUnitIds[pathIndex] !== unitId) {
+      return flowMap.get(unitId) ?? null
+    }
+
+    const prev = pathIndex > 0 ? unitMap.get(activeLoad.pathUnitIds[pathIndex - 1]!) : null
+    const next =
+      pathIndex < activeLoad.pathUnitIds.length - 1
+        ? unitMap.get(activeLoad.pathUnitIds[pathIndex + 1]!)
+        : null
+
+    const inDir = prev ? flowEntryDir(prev, unit) : null
+    const outDir = next ? flowExitDir(unit, next) : null
+    const existing = flowMap.get(unitId)
+
+    if (isPortUnit(unit)) {
+      if (!inDir && !outDir) return existing ?? null
+      return {
+        inDir,
+        outDir,
+        cvNumber: existing?.cvNumber ?? null,
+        role: simulationPathFlowRole(unit, inDir, outDir, existing),
+        portDirection: existing?.portDirection ?? unit.portDirection ?? 'IN',
+      }
+    }
+
+    if (!inDir && !outDir) return existing ?? null
+
+    return {
+      inDir,
+      outDir,
+      cvNumber: existing?.cvNumber ?? null,
+      role: simulationPathFlowRole(unit, inDir, outDir, existing),
+      portDirection: existing?.portDirection,
+    }
   }
 
-  const prev = pathIndex > 0 ? unitMap.get(activeLoad.pathUnitIds[pathIndex - 1]!) : null
-  const next =
-    pathIndex < activeLoad.pathUnitIds.length - 1
-      ? unitMap.get(activeLoad.pathUnitIds[pathIndex + 1]!)
-      : null
-
-  const inDir = prev ? flowEntryDir(prev, unit) : null
-  const outDir = next ? flowExitDir(unit, next) : null
-  if (!inDir && !outDir) return flowMap.get(unitId) ?? null
-
-  const existing = flowMap.get(unitId)
-  return {
-    inDir,
-    outDir,
-    cvNumber: existing?.cvNumber ?? null,
-    role: simulationPathFlowRole(unit, inDir, outDir, existing),
-    portDirection: existing?.portDirection,
-  }
+  return flowMap.get(unitId) ?? null
 }
 
 function storageFootprintOutlineClass(
@@ -409,6 +419,8 @@ export function LineStatusGrid({
                 unit={unit}
                 cellSize={cellSize}
                 showName={!hideModuleNames}
+                flow={flowByUnitId.get(unit.id) ?? null}
+                hasMaterial={showSimMaterial}
               />
             ) : null}
             {showStorageOutline ? (

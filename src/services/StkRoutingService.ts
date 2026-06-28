@@ -23,7 +23,7 @@ export class StkRoutingService {
       .filter(isStorageUnit)
       .filter((stk) => {
         const props = getStkProperties(stk)
-        return props?.enabled !== false && (allowed.size === 0 || allowed.has(stk.id))
+        return props?.enabled !== false && allowed.has(stk.id)
       })
       .sort((a, b) => {
         const orderA = getStkProperties(a)?.stkOrder ?? 999

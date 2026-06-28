@@ -23,6 +23,13 @@ export interface StkRoutingProperties {
   description?: string
 }
 
+/** 분기 유닛 — 분기 요청 컨베이어 지정 (평시 직진, 요청 시 수직 전환) */
+export interface JunctionRoutingProperties {
+  /** 분기 요청 컨베이어 — 이 인접 CV가 요청할 때 수직 전환 */
+  requestUnitId: string
+  description?: string
+}
+
 /** 포트 — STK 투입고·출고구 공통 속성 */
 export interface PortProperties {
   enabled: boolean

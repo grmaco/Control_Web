@@ -9,9 +9,9 @@ import {
   DEFAULT_SIM_INPUT_INTERVAL_SEC,
   PATH_SIMULATION_STEP_MS,
 } from '../types/unitProperties'
-import { isStorageUnit } from '../constants/conveyorTypes'
+import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
 import { getEntryUnits, getExitUnits, isFlowCapableUnit } from './flowEntries'
-import { computeMinimapFlowMap, type UnitFlowDirs } from './flowDirection'
+import { computeMinimapFlowMap, flowEntryDir, type UnitFlowDirs } from './flowDirection'
 import { computeFlowOrder, parseTrailingNumber } from './sequentialNaming'
 import { isCvUnit } from './unitMaterial'
 import { stkRoutingService } from '../services/StkRoutingService'
@@ -26,9 +26,55 @@ import {
   listOutboundPorts,
 } from './outboundFlow'
 
+/** 회전/분기 유닛별 마지막 배정 STK — ROUND_ROBIN 순환용 */
+export type StkRoutingSessionState = Record<string, string>
+
+export function createStkRoutingSessionState(): StkRoutingSessionState {
+  return {}
+}
+
+const builderStkRoutingSessions = new Map<string, StkRoutingSessionState>()
+
+/** 빌더 STK 라우팅 시뮬 — 라인별 순환 상태 (컴포넌트 리마운트 후에도 유지) */
+export function getBuilderStkRoutingSession(lineId: string): StkRoutingSessionState {
+  let session = builderStkRoutingSessions.get(lineId)
+  if (!session) {
+    session = createStkRoutingSessionState()
+    builderStkRoutingSessions.set(lineId, session)
+  }
+  return session
+}
+
+export function clearBuilderStkRoutingSession(lineId: string): void {
+  builderStkRoutingSessions.delete(lineId)
+}
+
+export function advanceStkRoutingSessionForPlan(
+  session: StkRoutingSessionState,
+  plan: Pick<PathSimulationPlan, 'routingUnitId' | 'targetStkId'>,
+): void {
+  if (plan.routingUnitId && plan.targetStkId) {
+    session[plan.routingUnitId] = plan.targetStkId
+  }
+}
+
+export function seedStkRoutingSessionFromLoads(
+  session: StkRoutingSessionState,
+  loads: PathSimulationLoad[],
+): void {
+  for (const load of loads) {
+    advanceStkRoutingSessionForPlan(session, load)
+  }
+}
+
 /** 경로 시뮬레이션 — 경유 가능(가동) 여부. 출발·도착은 상태와 무관하게 허용 */
 export function isSimulationTransitPassable(unit: ConveyorUnit): boolean {
   return unit.status === 'running'
+}
+
+/** 포트 — 가동 중일 때만 STK 투입(IN)·출고(OUT) 경로 통과 */
+export function isSimulationPortOperable(unit: ConveyorUnit | undefined): boolean {
+  return unit != null && isPortUnit(unit) && isSimulationTransitPassable(unit)
 }
 
 /** 컨베이어(CV) 모듈이 모두 가동 중인지 */
@@ -36,6 +82,22 @@ export function areAllCvUnitsRunning(line: ConveyorLine): boolean {
   const cvUnits = line.units.filter(isCvUnit)
   if (cvUnits.length === 0) return true
   return cvUnits.every((unit) => unit.status === 'running')
+}
+
+/** 포트 모듈이 모두 가동 중인지 (STK 투입·출고 가능) */
+export function areAllPortsRunning(line: ConveyorLine): boolean {
+  const ports = line.units.filter(isPortUnit)
+  if (ports.length === 0) return true
+  return ports.every((unit) => isSimulationPortOperable(unit))
+}
+
+/** 시뮬 시작 전 — CV·포트 모두 가동 여부 */
+export function areAllSimulationUnitsRunning(line: ConveyorLine): boolean {
+  return areAllCvUnitsRunning(line) && areAllPortsRunning(line)
+}
+
+export function listNonRunningPorts(line: ConveyorLine): ConveyorUnit[] {
+  return line.units.filter((unit) => isPortUnit(unit) && !isSimulationPortOperable(unit))
 }
 
 /** 컨베이어(CV) 모듈 전체를 가동 상태로 */
@@ -52,11 +114,30 @@ export function lineWithAllCvUnitsRunning(line: ConveyorLine): ConveyorLine {
   }
 }
 
+/** 포트 모듈 전체를 가동 상태로 */
+export function lineWithAllPortsRunning(line: ConveyorLine): ConveyorLine {
+  const now = new Date().toISOString()
+  return {
+    ...line,
+    updatedAt: now,
+    units: line.units.map((unit) =>
+      isPortUnit(unit)
+        ? { ...unit, status: 'running' as const, updatedAt: now }
+        : unit,
+    ),
+  }
+}
+
+/** CV·포트 모듈 전체를 가동 상태로 */
+export function lineWithAllSimulationUnitsRunning(line: ConveyorLine): ConveyorLine {
+  return lineWithAllPortsRunning(lineWithAllCvUnitsRunning(line))
+}
+
 export function bfsPath(
   startId: string,
   targetId: string,
   unitMap: Map<string, ConveyorUnit>,
-  options?: { allowIdleTransit?: boolean },
+  options?: { allowIdleTransit?: boolean; forSimulationPlan?: boolean },
 ): string[] | null {
   if (startId === targetId) return [startId]
 
@@ -64,6 +145,16 @@ export function bfsPath(
     const unit = unitMap.get(unitId)
     if (!unit) return false
     if (unitId === startId || unitId === targetId) return true
+
+    if (options?.forSimulationPlan) {
+      if (isPortUnit(unit)) return isSimulationTransitPassable(unit)
+      if (isStorageUnit(unit)) return unitId === targetId
+      if (isFlowCapableUnit(unit)) {
+        return options.allowIdleTransit ? true : isSimulationTransitPassable(unit)
+      }
+      return isSimulationTransitPassable(unit)
+    }
+
     if (options?.allowIdleTransit) {
       return isFlowCapableUnit(unit)
     }
@@ -91,7 +182,7 @@ export function bfsPath(
   return null
 }
 
-function eligibleStkCandidates(
+export function listEligibleStkCandidates(
   turn: ConveyorUnit,
   allUnits: ConveyorUnit[],
 ): ConveyorUnit[] {
@@ -101,7 +192,7 @@ function eligibleStkCandidates(
     .filter(isStorageUnit)
     .filter((stk) => {
       const props = getStkProperties(stk)
-      return props?.enabled !== false && (allowed.size === 0 || allowed.has(stk.id))
+      return props?.enabled !== false && allowed.has(stk.id)
     })
     .sort((a, b) => {
       const orderA = getStkProperties(a)?.stkOrder ?? 999
@@ -110,19 +201,36 @@ function eligibleStkCandidates(
     })
 }
 
+function eligibleStkCandidates(
+  turn: ConveyorUnit,
+  allUnits: ConveyorUnit[],
+): ConveyorUnit[] {
+  return listEligibleStkCandidates(turn, allUnits)
+}
+
 function resolveStkWithPath(
   turn: ConveyorUnit,
   allUnits: ConveyorUnit[],
   unitMap: Map<string, ConveyorUnit>,
+  routingSession?: StkRoutingSessionState,
 ): { stk: ConveyorUnit; tail: string[] } | null {
-  const primary = stkRoutingService.resolveTargetStk(turn, allUnits)
+  const lastStkId = routingSession?.[turn.id]
+  const primary = stkRoutingService.resolveTargetStk(
+    turn,
+    allUnits,
+    undefined,
+    lastStkId,
+  )
   const candidates = eligibleStkCandidates(turn, allUnits)
   const ordered = primary
     ? [primary, ...candidates.filter((stk) => stk.id !== primary.id)]
     : candidates
 
   for (const stk of ordered) {
-    const tail = bfsPath(turn.id, stk.id, unitMap)
+    const tail = bfsPath(turn.id, stk.id, unitMap, {
+      forSimulationPlan: true,
+      allowIdleTransit: true,
+    })
     if (tail && tail.length > 0) {
       return { stk, tail }
     }
@@ -359,7 +467,10 @@ function buildFlowChain(
     })
 
   for (const stk of allStks) {
-    const path = bfsPath(entryId, stk.id, unitMap, { allowIdleTransit: true })
+    const path = bfsPath(entryId, stk.id, unitMap, {
+      forSimulationPlan: true,
+      allowIdleTransit: true,
+    })
     if (path && path.length > 1) return path
   }
 
@@ -370,6 +481,7 @@ function buildFlowChain(
 export function planInboundLoadPath(
   line: ConveyorLine,
   entryUnitId: string,
+  routingSession?: StkRoutingSessionState,
 ): PathSimulationPlan {
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
   const entry = unitMap.get(entryUnitId)
@@ -396,10 +508,13 @@ export function planInboundLoadPath(
     })
 
   for (const turn of routingTurns) {
-    const head = bfsPath(entryUnitId, turn.id, unitMap)
+    const head = bfsPath(entryUnitId, turn.id, unitMap, {
+      forSimulationPlan: true,
+      allowIdleTransit: true,
+    })
     if (!head || head.length === 0) continue
 
-    const resolved = resolveStkWithPath(turn, line.units, unitMap)
+    const resolved = resolveStkWithPath(turn, line.units, unitMap, routingSession)
     if (!resolved) continue
 
     const { stk, tail } = resolved
@@ -409,7 +524,13 @@ export function planInboundLoadPath(
     )
 
     const policy = getStkRoutingProperties(turn)?.targetStkPolicy ?? 'MANUAL_ORDER'
-    const primary = stkRoutingService.resolveTargetStk(turn, line.units)
+    const lastStkId = routingSession?.[turn.id]
+    const primary = stkRoutingService.resolveTargetStk(
+      turn,
+      line.units,
+      undefined,
+      lastStkId,
+    )
     const altStkNote =
       primary && primary.id !== stk.id ? ' · 대체 STK' : ''
 
@@ -667,19 +788,21 @@ function createSimulationLoadInbound(
   line: ConveyorLine,
   entryUnitId: string,
   unitMap: Map<string, ConveyorUnit>,
+  routingSession?: StkRoutingSessionState,
 ): PathSimulationLoad {
   const unit = unitMap.get(entryUnitId)
-  return createSimulationLoad(
-    planInboundLoadPath(line, entryUnitId),
-    unit,
-    'inbound',
-  )
+  const plan = planInboundLoadPath(line, entryUnitId, routingSession)
+  if (routingSession) {
+    advanceStkRoutingSessionForPlan(routingSession, plan)
+  }
+  return createSimulationLoad(plan, unit, 'inbound')
 }
 
 /** 선택한 투입점마다 경로를 계산 — 동시 출발용 */
 export function planMultiInboundLoadPaths(
   line: ConveyorLine,
   entryUnitIds: string[],
+  routingSession?: StkRoutingSessionState,
 ): MultiPathSimulationPlan {
   if (entryUnitIds.length === 0) {
     return { loads: [], message: '투입점을 선택하세요.' }
@@ -687,7 +810,7 @@ export function planMultiInboundLoadPaths(
 
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
   const loads = entryUnitIds.map((entryUnitId) =>
-    createSimulationLoadInbound(line, entryUnitId, unitMap),
+    createSimulationLoadInbound(line, entryUnitId, unitMap, routingSession),
   )
 
   return finalizeMultiPathLoads(loads, '투입점을 선택하세요.')
@@ -716,6 +839,95 @@ export function planMultiOutboundLoadPaths(
 
 function isAtDestination(load: PathSimulationLoad): boolean {
   return load.pathUnitIds.length > 0 && load.stepIndex >= load.pathUnitIds.length - 1
+}
+
+interface MergeProposal {
+  index: number
+  from: string
+  to: string
+  stepIndex: number
+  pathUnitIds: string[]
+}
+
+/** 합류점 — 물류 inDir(이전 CV) 쪽 진입 우선, 동률이면 경로상 선행·stepIndex */
+function pickMergeProposalWinner(
+  contenders: MergeProposal[],
+  unitMap: Map<string, ConveyorUnit> | undefined,
+  flowMap: Map<string, UnitFlowDirs> | undefined,
+): number {
+  if (contenders.length === 0) return 0
+  if (contenders.length === 1) return contenders[0]!.index
+
+  const target = unitMap?.get(contenders[0]!.to)
+  const flow = flowMap?.get(contenders[0]!.to)
+
+  if (unitMap && target && flow?.inDir) {
+    const upstream = contenders.filter((candidate) => {
+      const from = unitMap.get(candidate.from)
+      if (!from) return false
+      return flowEntryDir(from, target) === flow.inDir
+    })
+    if (upstream.length > 0) {
+      return upstream.sort(
+        (a, b) => b.stepIndex - a.stepIndex || a.index - b.index,
+      )[0]!.index
+    }
+  }
+
+  const onOwnPath = contenders.filter(
+    (candidate) =>
+      candidate.pathUnitIds[candidate.stepIndex] === candidate.from &&
+      candidate.pathUnitIds[candidate.stepIndex + 1] === candidate.to,
+  )
+  if (onOwnPath.length > 0) {
+    return onOwnPath.sort(
+      (a, b) => b.stepIndex - a.stepIndex || a.index - b.index,
+    )[0]!.index
+  }
+
+  return contenders.sort(
+    (a, b) => b.stepIndex - a.stepIndex || a.index - b.index,
+  )[0]!.index
+}
+
+function resolveMergeWinnersByTarget(
+  proposals: Map<number, number>,
+  loads: PathSimulationLoad[],
+  posAt: (index: number, step: number) => string,
+  unitMap: Map<string, ConveyorUnit> | undefined,
+  flowMap: Map<string, UnitFlowDirs> | undefined,
+): Map<string, number> {
+  const byTarget = new Map<string, number[]>()
+
+  for (const [index, targetStep] of proposals) {
+    const to = posAt(index, targetStep)
+    const indices = byTarget.get(to) ?? []
+    indices.push(index)
+    byTarget.set(to, indices)
+  }
+
+  const winners = new Map<string, number>()
+  for (const [to, indices] of byTarget) {
+    if (indices.length <= 1) {
+      winners.set(to, indices[0]!)
+      continue
+    }
+
+    const winner = pickMergeProposalWinner(
+      indices.map((index) => ({
+        index,
+        from: posAt(index, loads[index]!.stepIndex),
+        to,
+        stepIndex: loads[index]!.stepIndex,
+        pathUnitIds: loads[index]!.pathUnitIds,
+      })),
+      unitMap,
+      flowMap,
+    )
+    winners.set(to, winner)
+  }
+
+  return winners
 }
 
 /** 물류 순서(투입점 기준)로 자재 load 정렬 */
@@ -814,8 +1026,9 @@ export function applySimulationStep(
   loads: PathSimulationLoad[],
   unitMap?: Map<string, ConveyorUnit>,
   timing?: SimulationStepTiming,
+  flowMap?: Map<string, UnitFlowDirs>,
 ): PathSimulationLoad[] {
-  return advanceSimulationLoads(loads, unitMap, timing)
+  return advanceSimulationLoads(loads, unitMap, timing, flowMap)
 }
 
 export function countIncompleteSimulationLoads(loads: PathSimulationLoad[]): number {
@@ -843,6 +1056,7 @@ export function advanceSimulationLoads(
     dischargeIntervalSec: 0.5,
     transitIntervalSec: 0.5,
   },
+  flowMap?: Map<string, UnitFlowDirs>,
 ): PathSimulationLoad[] {
   const entryTicksRequired = requiredDwellTicks(timing.inputIntervalSec)
   const exitTicksRequired = requiredDwellTicks(timing.dischargeIntervalSec)
@@ -916,6 +1130,13 @@ export function advanceSimulationLoads(
 
   const posAt = (index: number, step: number) => next[index]!.pathUnitIds[step]!
   const approved = new Set<number>()
+  const mergeWinnerByTarget = resolveMergeWinnersByTarget(
+    proposals,
+    next,
+    posAt,
+    unitMap,
+    flowMap,
+  )
 
   const proposalEntries = [...proposals.entries()].sort(
     ([indexA], [indexB]) => next[indexB]!.stepIndex - next[indexA]!.stepIndex,
@@ -926,19 +1147,13 @@ export function advanceSimulationLoads(
     const to = posAt(index, targetStep)
     if (from === to) continue
 
-    let blocked = false
-
-    for (const [otherIndex, otherTargetStep] of proposals) {
-      if (otherIndex === index) continue
-      if (posAt(otherIndex, otherTargetStep) === to) {
-        blocked = true
-        break
-      }
-    }
-    if (blocked) {
+    const mergeWinner = mergeWinnerByTarget.get(to)
+    if (mergeWinner != null && mergeWinner !== index) {
       next[index]!.waiting = true
       continue
     }
+
+    let blocked = false
 
     for (let otherIndex = 0; otherIndex < next.length; otherIndex += 1) {
       if (otherIndex === index) continue
@@ -964,9 +1179,20 @@ export function advanceSimulationLoads(
 
     if (unitMap) {
       const targetUnit = unitMap.get(to)
+      const fromUnit = unitMap.get(from)
       const destinationId = next[index]!.pathUnitIds[next[index]!.pathUnitIds.length - 1]
       const isDestination = to === destinationId
       const onPlannedPath = next[index]!.pathUnitIds.includes(to)
+
+      if (fromUnit && isPortUnit(fromUnit) && !isSimulationPortOperable(fromUnit)) {
+        next[index]!.waiting = true
+        continue
+      }
+      if (targetUnit && isPortUnit(targetUnit) && !isSimulationPortOperable(targetUnit)) {
+        next[index]!.waiting = true
+        continue
+      }
+
       if (
         targetUnit &&
         !isDestination &&
@@ -1155,31 +1381,44 @@ export function canContinuousInjectAtEntry(
   return isEntryPointReadyForContinuousInject(entryUnitId, loads, vacancy)
 }
 
+/** 연속 투입 — 투입점 1곳에 자재 1개 생성 (경로 없으면 null) */
+export function spawnContinuousInjectLoad(
+  line: ConveyorLine,
+  entryUnitId: string,
+  seq: number,
+  routingSession?: StkRoutingSessionState,
+): PathSimulationLoad | null {
+  const plan = planInboundLoadPath(line, entryUnitId, routingSession)
+  if (plan.pathUnitIds.length === 0) return null
+  if (routingSession) {
+    advanceStkRoutingSessionForPlan(routingSession, plan)
+  }
+
+  const unit = line.units.find((item) => item.id === entryUnitId)
+  const load = createSimulationLoad(plan, unit, 'inbound', {
+    loadIdSuffix: `-ci-${seq}`,
+    clearsTestMaterial: unit?.testMaterial === 1,
+  })
+  return {
+    ...load,
+    id: `${load.id}-${entryUnitId}-${seq}`,
+    continuousInject: true,
+    released: true,
+    entryTicks: 0,
+    exitTicks: 0,
+    transitTicks: 0,
+  }
+}
+
 /** 연속 투입 — 선택 투입점마다 자재 1개 생성 */
 export function spawnInboundSimulationLoads(
   line: ConveyorLine,
   entryUnitIds: string[],
   seq: number,
 ): PathSimulationLoad[] {
-  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
-  return entryUnitIds.map((entryUnitId) => {
-    const plan = planInboundLoadPath(line, entryUnitId)
-    const load = createSimulationLoad(
-      plan,
-      unitMap.get(entryUnitId),
-      'inbound',
-      { loadIdSuffix: `-ci-${seq}` },
-    )
-    return {
-      ...load,
-      id: `${load.id}-${entryUnitId}-${seq}`,
-      continuousInject: true,
-      released: true,
-      entryTicks: 0,
-      exitTicks: 0,
-      transitTicks: 0,
-    }
-  })
+  return entryUnitIds
+    .map((entryUnitId) => spawnContinuousInjectLoad(line, entryUnitId, seq))
+    .filter((load): load is PathSimulationLoad => load != null)
 }
 
 export function roundTackTimeSec(sec: number): number {

@@ -5,9 +5,9 @@ import { dirToward } from './flowDirection'
 import { getFootprintCells, getUnitFootprint } from './unitFootprint'
 import {
   continuousEntryVacantTicksRequired,
-  isEntryPointReadyForContinuousInject,
-  spawnInboundSimulationLoads,
+  spawnContinuousInjectLoad,
   tickEntryVacancy,
+  type StkRoutingSessionState,
 } from './pathSimulation'
 
 function tickAllEntryVacancy(
@@ -25,8 +25,11 @@ function tickAllEntryVacancy(
   return next
 }
 
-function isEntryUnoccupied(loads: PathSimulationLoad[], entryUnitId: string): boolean {
-  return !loads.some(
+function isEntryOccupiedByLoad(
+  loads: PathSimulationLoad[],
+  entryUnitId: string,
+): boolean {
+  return loads.some(
     (load) =>
       !load.complete &&
       load.pathUnitIds.length > 0 &&
@@ -34,23 +37,39 @@ function isEntryUnoccupied(loads: PathSimulationLoad[], entryUnitId: string): bo
   )
 }
 
+function isEntryUnoccupied(
+  loads: PathSimulationLoad[],
+  _line: ConveyorLine,
+  entryUnitId: string,
+): boolean {
+  return !isEntryOccupiedByLoad(loads, entryUnitId)
+}
+
 function resolveEntryVacantTicks(
   loads: PathSimulationLoad[],
   entryUnitId: string,
   tickVacantByEntry: Record<string, number>,
 ): number {
+  if (isEntryOccupiedByLoad(loads, entryUnitId)) return 0
   return tickEntryVacancy(entryUnitId, loads, {
     vacantTicks: tickVacantByEntry[entryUnitId] ?? 0,
   }).vacantTicks
 }
 
-function canInjectAtEntry(
+/** 내려놓기 시점 — 시작점에 자재/점유만 없으면 즉시 투입 */
+function canProbeDepositInjectNow(
   loads: PathSimulationLoad[],
+  line: ConveyorLine,
   entryUnitId: string,
-  tickVacantByEntry: Record<string, number>,
 ): boolean {
-  const vacantTicks = resolveEntryVacantTicks(loads, entryUnitId, tickVacantByEntry)
-  return isEntryPointReadyForContinuousInject(entryUnitId, loads, { vacantTicks })
+  return isEntryUnoccupied(loads, line, entryUnitId)
+}
+
+function markEntryOccupied(
+  tickVacantByEntry: Record<string, number>,
+  entryUnitId: string,
+): void {
+  tickVacantByEntry[entryUnitId] = 0
 }
 
 export type GatherProbePhase =
@@ -213,9 +232,6 @@ export const CONTINUOUS_PROBE_COUNT = 2
 /** 연속투입 시 고정 투입 간격 (초) */
 export const CONTINUOUS_INPUT_INTERVAL_SEC = 4
 
-/** 연속투입 — 시작점 자재 On은 이 슬롯 프로브 내려놓기와 동기화 (0=첫 교대, 1=둘째 교대) */
-export const CONTINUOUS_INJECT_PROBE_SLOT = 1
-
 export function resolveGatherInputIntervalSec(
   continuousInputActive: boolean,
   userInputIntervalSec: number,
@@ -317,13 +333,17 @@ function msUntilInjectAllowed(vacantTicks: number): number {
 /** 투입구 도착 시점에 투입 가능할 때만 출발 — 미리 투입구에서 대기하지 않음 */
 function canStartToDepot(
   loads: PathSimulationLoad[],
+  line: ConveyorLine,
   entryUnitId: string,
   tickVacantByEntry: Record<string, number>,
   _inputIntervalSec: number,
   toDepotMs: number,
+  carryingFromMineral = false,
 ): boolean {
+  if (!isEntryUnoccupied(loads, line, entryUnitId)) return false
+  if (carryingFromMineral) return true
+
   const vacantTicks = resolveEntryVacantTicks(loads, entryUnitId, tickVacantByEntry)
-  if (!canInjectAtEntry(loads, entryUnitId, tickVacantByEntry)) return false
   return msUntilInjectAllowed(vacantTicks) <= toDepotMs
 }
 
@@ -335,10 +355,6 @@ function holdProbeAtMineral(probe: GatherProbeState, deltaMs: number, miningMs: 
   return { ...probe, phase: 'mining', phaseElapsedMs }
 }
 
-function probeSpawnsContinuousInject(probe: GatherProbeState): boolean {
-  return probe.probeSlot === CONTINUOUS_INJECT_PROBE_SLOT
-}
-
 function applyDepositInject(
   probe: GatherProbeState,
   loads: PathSimulationLoad[],
@@ -347,6 +363,7 @@ function applyDepositInject(
   loadSequence: number,
   tickVacantByEntry: Record<string, number>,
   _inputIntervalSec: number,
+  routingSession?: StkRoutingSessionState,
 ): {
   probe: GatherProbeState
   loads: PathSimulationLoad[]
@@ -357,16 +374,14 @@ function applyDepositInject(
     return { probe, loads, spawned: [], nextSequence: loadSequence }
   }
 
-  if (!probeSpawnsContinuousInject(probe)) {
-    return {
-      probe: { ...probe, carrying: false, bootstrapFromMining: false },
-      loads,
-      spawned: [],
-      nextSequence: loadSequence,
-    }
-  }
-
-  const inject = spawnAtEntryIfReady(loads, line, entryUnitId, loadSequence, tickVacantByEntry)
+  const inject = spawnAtEntryIfReady(
+    loads,
+    line,
+    entryUnitId,
+    loadSequence,
+    tickVacantByEntry,
+    routingSession,
+  )
   if (inject.spawned.length === 0) {
     return { probe, loads, spawned: [], nextSequence: loadSequence }
   }
@@ -390,6 +405,7 @@ function tryDepositInjectForProbe(
   elapsedBeforeStep: number,
   tickVacantByEntry: Record<string, number>,
   inputIntervalSec: number,
+  routingSession?: StkRoutingSessionState,
 ): {
   probe: GatherProbeState
   loads: PathSimulationLoad[]
@@ -397,7 +413,6 @@ function tryDepositInjectForProbe(
   nextSequence: number
 } {
   if (
-    probe.awaitingEntryClear ||
     probe.phase !== 'depositing' ||
     !probe.carrying
   ) {
@@ -428,6 +443,7 @@ function tryDepositInjectForProbe(
     loadSequence,
     tickVacantByEntry,
     inputIntervalSec,
+    routingSession,
   )
   return {
     probe: inject.probe,
@@ -445,6 +461,7 @@ function finishDepositingPhase(
   loadSequence: number,
   tickVacantByEntry: Record<string, number>,
   inputIntervalSec: number,
+  routingSession?: StkRoutingSessionState,
 ): {
   probe: GatherProbeState
   loads: PathSimulationLoad[]
@@ -460,6 +477,7 @@ function finishDepositingPhase(
       loadSequence,
       tickVacantByEntry,
       inputIntervalSec,
+      routingSession,
     )
   }
 
@@ -484,6 +502,7 @@ function completeDepositingPhase(
   loadSequence: number,
   tickVacantByEntry: Record<string, number>,
   inputIntervalSec: number,
+  routingSession?: StkRoutingSessionState,
 ): {
   probe: GatherProbeState
   loads: PathSimulationLoad[]
@@ -504,6 +523,7 @@ function completeDepositingPhase(
       nextSequence,
       tickVacantByEntry,
       inputIntervalSec,
+      routingSession,
     )
     nextProbe = inject.probe
     nextLoads = inject.loads
@@ -619,6 +639,7 @@ function advanceProbeByDelta(
   loadSequence: number,
   tickVacantByEntry: Record<string, number>,
   inputIntervalSec: number,
+  routingSession?: StkRoutingSessionState,
 ): {
   probe: GatherProbeState
   loads: PathSimulationLoad[]
@@ -643,13 +664,14 @@ function advanceProbeByDelta(
   }
 
   if (next.phase === 'toDepot' && next.phaseElapsedMs >= durations.toDepot) {
-    const injectReady = canInjectAtEntry(loads, entryUnitId, tickVacantByEntry)
+    const injectReady = canProbeDepositInjectNow(loads, line, entryUnitId)
     if (injectReady) {
       next = {
         ...next,
         phase: 'depositing',
         phaseElapsedMs: next.phaseElapsedMs - durations.toDepot,
         carrying: true,
+        awaitingEntryClear: false,
       }
     } else {
       next = {
@@ -657,6 +679,7 @@ function advanceProbeByDelta(
         phase: 'mining',
         phaseElapsedMs: 0,
         carrying: true,
+        awaitingEntryClear: true,
       }
     }
   }
@@ -673,6 +696,7 @@ function advanceProbeByDelta(
       elapsedBeforeStep,
       tickVacantByEntry,
       inputIntervalSec,
+      routingSession,
     )
     next = injected.probe
     loads = injected.loads
@@ -688,6 +712,7 @@ function advanceProbeByDelta(
         nextSequence,
         tickVacantByEntry,
         inputIntervalSec,
+        routingSession,
       )
       next = finished.probe
       loads = finished.loads
@@ -701,10 +726,18 @@ function advanceProbeByDelta(
   if (next.phase === 'mining' || next.awaitingEntryClear) {
     next = { ...next, phase: 'mining' as const }
 
-    const entryClear = isEntryUnoccupied(loads, entryUnitId)
+    const entryClear = isEntryUnoccupied(loads, line, entryUnitId)
     const readyToDepart =
       entryClear &&
-      canStartToDepot(loads, entryUnitId, tickVacantByEntry, inputIntervalSec, durations.toDepot)
+      canStartToDepot(
+        loads,
+        line,
+        entryUnitId,
+        tickVacantByEntry,
+        inputIntervalSec,
+        durations.toDepot,
+        next.carrying,
+      )
 
     if (next.carrying && readyToDepart) {
       return {
@@ -1029,21 +1062,43 @@ function spawnAtEntryIfReady(
   entryUnitId: string,
   loadSequence: number,
   tickVacantByEntry: Record<string, number>,
+  routingSession?: StkRoutingSessionState,
 ): { loads: PathSimulationLoad[]; spawned: PathSimulationLoad[]; nextSequence: number } {
-  if (!canInjectAtEntry(loads, entryUnitId, tickVacantByEntry)) {
+  if (!canProbeDepositInjectNow(loads, line, entryUnitId)) {
     return { loads, spawned: [], nextSequence: loadSequence }
   }
 
-  const batch = spawnInboundSimulationLoads(line, [entryUnitId], loadSequence + 1)
-  if (batch.length === 0) {
+  const nextSeq = loadSequence + 1
+  const batchLoad = spawnContinuousInjectLoad(line, entryUnitId, nextSeq, routingSession)
+  if (!batchLoad) {
     return { loads, spawned: [], nextSequence: loadSequence }
   }
+
+  markEntryOccupied(tickVacantByEntry, entryUnitId)
 
   return {
-    loads: [...loads, ...batch],
-    spawned: batch,
-    nextSequence: loadSequence + 1,
+    loads: [...loads, batchLoad],
+    spawned: [batchLoad],
+    nextSequence: nextSeq,
   }
+}
+
+function finalizeEntryVacantTicks(
+  loads: PathSimulationLoad[],
+  entryUnitIds: string[],
+  tickStartVacancy: Record<string, number>,
+): Record<string, number> {
+  const next: Record<string, number> = {}
+  for (const entryUnitId of entryUnitIds) {
+    if (isEntryOccupiedByLoad(loads, entryUnitId)) {
+      next[entryUnitId] = 0
+      continue
+    }
+    next[entryUnitId] = tickEntryVacancy(entryUnitId, loads, {
+      vacantTicks: tickStartVacancy[entryUnitId] ?? 0,
+    }).vacantTicks
+  }
+  return next
 }
 
 export function advanceGatherProbes(
@@ -1054,6 +1109,7 @@ export function advanceGatherProbes(
   inputIntervalSec: number,
   loadSequence: number,
   entryVacantTicks: Record<string, number>,
+  routingSession?: StkRoutingSessionState,
 ): AdvanceGatherProbesResult {
   if (entryUnitIds.length === 0) {
     return { probes: [], spawned: [], nextSequence: loadSequence, entryVacantTicks: {} }
@@ -1061,7 +1117,7 @@ export function advanceGatherProbes(
 
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
   const durations = gatherPhaseDurationsMs(inputIntervalSec)
-  const vacantTicksByEntry = tickAllEntryVacancy(loads, entryUnitIds, entryVacantTicks)
+  const vacantTicksByEntry = { ...tickAllEntryVacancy(loads, entryUnitIds, entryVacantTicks) }
   const probeByKey = new Map(
     probes.map((probe) => [`${probe.entryUnitId}:${probe.probeSlot}`, { ...probe }]),
   )
@@ -1106,6 +1162,7 @@ export function advanceGatherProbes(
           nextSequence,
           vacantTicksByEntry,
           inputIntervalSec,
+          routingSession,
         )
         probe = stepped.probe
         loads = stepped.loads
@@ -1123,7 +1180,12 @@ export function advanceGatherProbes(
     ).filter((probe): probe is GatherProbeState => probe != null),
   )
 
-  return { probes: orderedProbes, spawned, nextSequence, entryVacantTicks: vacantTicksByEntry }
+  return {
+    probes: orderedProbes,
+    spawned,
+    nextSequence,
+    entryVacantTicks: finalizeEntryVacantTicks(loads, entryUnitIds, entryVacantTicks),
+  }
 }
 
 /** 한 틱당 수집 애니메이션 진행 시간(초) */

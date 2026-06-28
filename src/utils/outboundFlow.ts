@@ -285,6 +285,15 @@ export function buildOutboundSimulationPath(
     }
   }
 
+  if (transitPassable && !transitPassable(port)) {
+    return {
+      pathUnitIds: [],
+      stkId: null,
+      exitId: null,
+      message: `${port.name} 비가동 — STK 출고 불가`,
+    }
+  }
+
   const dest = resolveOutputDestination(port, line, unitMap)
   if (!dest) {
     return {

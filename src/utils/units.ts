@@ -19,7 +19,7 @@ import type {
   TestMaterialFlag,
 } from '../types/conveyor'
 import { parseTrailingNumber, formatConveyorName } from './sequentialNaming'
-import { defaultPropertiesForRole } from './unitPropertyHelpers'
+import { defaultPropertiesForRole, normalizeUnitRoleFields } from './unitPropertyHelpers'
 import {
   findUnitAtCell,
   getUnitFootprint,
@@ -291,9 +291,15 @@ export function addUnitToLine(
   }
 
   const unit = createUnit(type, gridX, gridY, line.units)
+  const unitsWithNew = [...line.units, unit]
+  const normalizedUnit = normalizeUnitRoleFields(unit, {
+    units: unitsWithNew,
+    baseUnitId: line.baseUnitId,
+    gridSize: line.gridSize,
+  })
   const units = syncConnectionsForUnit(
-    [...line.units, unit],
-    unit.id,
+    [...line.units, normalizedUnit],
+    normalizedUnit.id,
     line.gridSize.cols,
     line.gridSize.rows,
   )
@@ -433,6 +439,7 @@ export function updateUnitInLine(
       | 'role'
       | 'properties'
       | 'stkRouting'
+      | 'junctionRouting'
     >
   >,
 ): ConveyorLine {
@@ -484,6 +491,15 @@ export function updateUnitInLine(
         storageRobotCount: null,
         storageMaintenanceArea: null,
       }
+    }
+
+    if (next.type === 'turn' || next.type === 'junction') {
+      const contextUnits = line.units.map((item) => (item.id === unitId ? next : item))
+      next = normalizeUnitRoleFields(next, {
+        units: contextUnits,
+        baseUnitId: line.baseUnitId,
+        gridSize: line.gridSize,
+      })
     }
 
     return next

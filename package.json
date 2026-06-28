@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host",
+    "dev:mobile": "node scripts/dev-mobile.mjs",
+    "dev:mobile:preview": "node scripts/dev-mobile.mjs --preview",
     "dev:semicnv-mock": "node scripts/mock-semicnv-ws.mjs",
     "build": "tsc -b && vite build",
     "lint": "eslint .",

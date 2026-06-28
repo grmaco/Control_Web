@@ -290,13 +290,19 @@ export function assignSequentialNamesFromBase(
 
   const withEntry: ConveyorLine = {
     ...line,
-    units: line.units.map((unit) =>
-      unit.id === baseUnitId
-        ? { ...unit, flowRole: 'entry' as const }
-        : unit.flowRole === 'entry' && unit.id !== baseUnitId
-          ? { ...unit, flowRole: null }
-          : unit,
-    ),
+    units: line.units.map((unit) => {
+      if (unit.id === baseUnitId) {
+        return { ...unit, flowRole: 'entry' as const, role: 'INPUT' as const }
+      }
+      if (unit.flowRole === 'entry' && unit.id !== baseUnitId) {
+        return {
+          ...unit,
+          flowRole: null,
+          role: unit.role === 'INPUT' ? ('TRANSFER' as const) : unit.role,
+        }
+      }
+      return unit
+    }),
     baseUnitId: null,
   }
 

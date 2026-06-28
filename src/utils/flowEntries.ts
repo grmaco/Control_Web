@@ -1,5 +1,4 @@
-import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
-import type { FlowRole } from '../types/conveyor'
+import type { ConveyorLine, ConveyorUnit, FlowRole } from '../types/conveyor'
 import { DEFAULT_GRID_SIZE } from '../constants/grid'
 import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
 import { resolveOutputDestinationId } from './unitRefs'
@@ -158,7 +157,9 @@ export function migrateLineFlowRoles<
   return {
     ...line,
     units: line.units.map((unit) =>
-      unit.id === line.baseUnitId ? { ...unit, flowRole: 'entry' as FlowRole } : unit,
+      unit.id === line.baseUnitId
+        ? { ...unit, flowRole: 'entry' as FlowRole, role: 'INPUT' as const }
+        : unit,
     ),
     baseUnitId: null,
   }

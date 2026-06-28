@@ -2,6 +2,7 @@ import type { ConveyorLine } from '../types/conveyor'
 import { isStorageUnit } from '../constants/conveyorTypes'
 import type { PathSimulationLoad } from '../types/unitProperties'
 import { planInboundLoadPath } from './pathSimulation'
+import { getStkProperties } from './unitPropertyHelpers'
 
 export const WAREHOUSE_SLOT_CAPACITY = 48
 
@@ -27,25 +28,42 @@ export function resolveInboundStorageTarget(
   return last && isStorageUnit(last) ? last.id : null
 }
 
-/** STK 도착(첫 진입)한 연속 투입 자재 load id */
+/** 활성 STK 중 적재 여유가 하나라도 있으면 true */
+export function anyInboundStkHasCapacity(
+  line: ConveyorLine,
+  fillCounts: Record<string, number>,
+): boolean {
+  return line.units.some(
+    (unit) =>
+      isStorageUnit(unit) &&
+      getStkProperties(unit)?.enabled !== false &&
+      (fillCounts[unit.id] ?? 0) < WAREHOUSE_SLOT_CAPACITY,
+  )
+}
+
+/** STK 도착(첫 진입)한 투입 자재 — load별 targetStkId 기준 */
 export function detectWarehouseDeposits(
   prevLoads: PathSimulationLoad[],
   nextLoads: PathSimulationLoad[],
-  stkId: string | null,
   alreadyCounted: ReadonlySet<string>,
-): string[] {
-  if (!stkId) return []
-
-  const deposited: string[] = []
+): Array<{ loadId: string; stkId: string }> {
+  const deposited: Array<{ loadId: string; stkId: string }> = []
   for (const next of nextLoads) {
-    if (!next.continuousInject || alreadyCounted.has(next.id)) continue
+    if (alreadyCounted.has(next.id)) continue
+    const stkId = next.targetStkId
+    if (!stkId) continue
+
+    const isInboundToStk =
+      next.direction === 'inbound' || next.continuousInject === true
+    if (!isInboundToStk) continue
+
     const stkIndex = next.pathUnitIds.indexOf(stkId)
     if (stkIndex < 0) continue
 
     const prev = prevLoads.find((load) => load.id === next.id)
     const prevIndex = prev?.stepIndex ?? 0
     if (prevIndex < stkIndex && next.stepIndex >= stkIndex) {
-      deposited.push(next.id)
+      deposited.push({ loadId: next.id, stkId })
     }
   }
   return deposited

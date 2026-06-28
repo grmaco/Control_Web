@@ -13,6 +13,7 @@ import {
 } from '@dnd-kit/core'
 import { TransformComponent, TransformWrapper } from 'react-zoom-pan-pinch'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useTouchLayout } from '../../hooks/useTouchLayout'
 import {
   BUILDER_PALETTE_TYPES,
   typeLabel,
@@ -41,8 +42,8 @@ import {
 } from './dnd'
 import type { LineViewport } from '../../utils/lineViewport'
 import { assignSequentialNamesFromEntries } from '../../utils/sequentialNaming'
-import { hasFlowEntries, isFlowCapableUnit, isOutputDestinationCandidate } from '../../utils/flowEntries'
-import { isStkRoutingSourceUnit, updatePortPropertiesInLine } from '../../utils/unitPropertyHelpers'
+import { hasFlowEntries, isFlowCapableUnit, isOutputDestinationCandidate, getEntryUnits, getExitUnits } from '../../utils/flowEntries'
+import { isStkRoutingSourceUnit, syncFlowRoleUnitRole, updatePortPropertiesInLine } from '../../utils/unitPropertyHelpers'
 import {
   isCellInRoutingPath,
   routingTooltipForUnit,
@@ -85,11 +86,14 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   const [outputDestinationPickPortId, setOutputDestinationPickPortId] = useState<
     string | null
   >(null)
+  const [mobileToolbarOpen, setMobileToolbarOpen] = useState(false)
+  const touchLayout = useTouchLayout()
   const logApplication = useConveyorStore((s) => s.logApplication)
   const draftRef = useRef(draft)
   draftRef.current = draft
   const selectedUnitIdsRef = useRef(selectedUnitIds)
   selectedUnitIdsRef.current = selectedUnitIds
+  const routingSimPressRef = useRef<Record<string, number>>({})
 
   useEffect(() => {
     setDraft(line)
@@ -98,6 +102,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     setRoutingSimulation(null)
     setRoutingSimulationMessage(null)
     setOutputDestinationPickPortId(null)
+    routingSimPressRef.current = {}
   }, [line.id])
 
   useEffect(() => {
@@ -369,7 +374,11 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
       const unit = draft.units.find((item) => item.id === unitId)
       if (!unit || !isFlowCapableUnit(unit)) return
 
-      const next = updateUnitInLine(draft, unitId, { flowRole: role })
+      const next = updateUnitInLine(
+        draft,
+        unitId,
+        syncFlowRoleUnitRole(unit, { flowRole: role }),
+      )
       await persist({
         ...next,
         baseUnitId: null,
@@ -394,7 +403,10 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
 
   const handleRoutingSimulation = useCallback(() => {
     if (!selectedUnit) return
-    const result = simulateStkRouting(draft, selectedUnit.id)
+    const unitId = selectedUnit.id
+    const pressIndex = routingSimPressRef.current[unitId] ?? 0
+    const result = simulateStkRouting(draft, unitId, { pressIndex })
+    routingSimPressRef.current[unitId] = pressIndex + 1
     setRoutingSimulation(result)
     setRoutingSimulationMessage(result.message)
   }, [draft, selectedUnit])
@@ -402,6 +414,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   const handleClearRoutingSimulation = useCallback(() => {
     setRoutingSimulation(null)
     setRoutingSimulationMessage(null)
+    routingSimPressRef.current = {}
   }, [])
 
   const handleCompletePlacement = useCallback(async () => {
@@ -431,6 +444,12 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   }, [draft, persist, logApplication])
 
   useEffect(() => {
+    if (activeDrag?.source === 'palette') {
+      setMobileToolbarOpen(false)
+    }
+  }, [activeDrag])
+
+  useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) {
         return
@@ -457,6 +476,15 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   const computedViewport = useMemo(() => getBuilderViewport(draft), [draft])
   const viewport = frozenViewport ?? computedViewport
   const unitFlowMap = useMemo(() => computeMinimapFlowMap(draft), [draft])
+  const canCompletePlacement = draft.units.length > 0 && hasFlowEntries(draft)
+  const mobileEntryLabel = useMemo(() => {
+    const entries = getEntryUnits(draft)
+    return entries.length > 0 ? entries.map((unit) => unit.name).join(', ') : '미지정'
+  }, [draft])
+  const mobileExitLabel = useMemo(() => {
+    const exits = getExitUnits(draft)
+    return exits.length > 0 ? exits.map((unit) => unit.name).join(', ') : '미지정'
+  }, [draft])
 
   return (
     <DndContext
@@ -484,63 +512,54 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
         </aside>
 
         <section className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-sm">
-            <span className="text-slate-300">{draft.name}</span>
-            <span className="text-slate-500">
-              작업 영역 {viewport.cols}×{viewport.rows} · {draft.units.length} /{' '}
-              {draft.gridSize.cols * draft.gridSize.rows} 유닛
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm lg:mb-3">
+            <span className="max-w-[55%] truncate text-slate-300">{draft.name}</span>
+            <span className="text-xs text-slate-500 lg:text-sm">
+              {viewport.cols}×{viewport.rows} · {draft.units.length}유닛
             </span>
           </div>
 
-          <PlacementToolbar
-            line={draft}
-            selectedUnit={primarySelectedUnit}
-            selectedCount={selectedCount}
-            allSelected={allSelected}
-            completionMessage={completionMessage}
-            canRoutingSimulation={canRoutingSimulation}
-            routingSimulationMessage={routingSimulationMessage}
-            onSetFlowRole={handleSetFlowRole}
-            onComplete={handleCompletePlacement}
-            onRoutingSimulation={handleRoutingSimulation}
-            onClearRoutingSimulation={handleClearRoutingSimulation}
-            onSelectAll={handleSelectAll}
-            onClearSelection={handleClearSelection}
-          />
+          <div className="flex flex-col gap-3">
+            {outputDestinationPickPortId ? (
+              <p className="order-0 rounded-md border border-emerald-800/60 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
+                출고구 CV 선택 중 — 캔버스에서 CV를 클릭하세요 (Esc 취소)
+              </p>
+            ) : null}
 
-          {outputDestinationPickPortId ? (
-            <p className="mb-2 rounded-md border border-emerald-800/60 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
-              출고구 CV 선택 중 — 캔버스에서 CV를 클릭하세요 (Esc 취소)
-            </p>
-          ) : null}
-          <div className="h-[520px] overflow-hidden rounded border border-slate-800 bg-slate-950">
-            <TransformWrapper
-              limitToBounds={false}
-              minScale={0.2}
-              maxScale={4}
-              smooth
-              wheel={{ step: 0.004 }}
-              panning={{
-                velocityDisabled: true,
-                disabled: panLocked || activeDrag !== null,
-                excluded: ['builder-no-pan'],
-              }}
-              doubleClick={{ disabled: true }}
+            <div
+              className={
+                touchLayout
+                  ? 'order-1 h-[min(520px,52vh)] overflow-hidden rounded border border-slate-800 bg-slate-950'
+                  : 'order-2 h-[520px] overflow-hidden rounded border border-slate-800 bg-slate-950'
+              }
             >
-              <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }}>
-                <div
-                  className="inline-grid gap-0 select-none"
-                  style={{
-                    gridTemplateColumns: `repeat(${viewport.cols}, ${BUILDER_CELL_SIZE}px)`,
-                    gridTemplateRows: `repeat(${viewport.rows}, ${BUILDER_CELL_SIZE}px)`,
-                  }}
-                  onClick={() => {
-                    if (outputDestinationPickPortId) {
-                      setOutputDestinationPickPortId(null)
-                    }
-                    setSelectedUnitIds([])
-                  }}
-                >
+              <TransformWrapper
+                limitToBounds={false}
+                minScale={0.2}
+                maxScale={4}
+                smooth
+                wheel={{ step: 0.004 }}
+                panning={{
+                  velocityDisabled: true,
+                  disabled: panLocked || activeDrag !== null,
+                  excluded: ['builder-no-pan'],
+                }}
+                doubleClick={{ disabled: true }}
+              >
+                <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }}>
+                  <div
+                    className="inline-grid gap-0 select-none"
+                    style={{
+                      gridTemplateColumns: `repeat(${viewport.cols}, ${BUILDER_CELL_SIZE}px)`,
+                      gridTemplateRows: `repeat(${viewport.rows}, ${BUILDER_CELL_SIZE}px)`,
+                    }}
+                    onClick={() => {
+                      if (outputDestinationPickPortId) {
+                        setOutputDestinationPickPortId(null)
+                      }
+                      setSelectedUnitIds([])
+                    }}
+                  >
             {Array.from({ length: viewport.cols * viewport.rows }).map((_, index) => {
               const localX = index % viewport.cols
               const localY = Math.floor(index / viewport.cols)
@@ -620,18 +639,72 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                 </GridCell>
               )
             })}
+                  </div>
+                </TransformComponent>
+              </TransformWrapper>
+            </div>
+
+            <div className={touchLayout ? 'order-2' : 'order-1'}>
+              {touchLayout ? (
+                <div className="mb-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMobileToolbarOpen((open) => !open)}
+                    className="flex min-h-[40px] flex-1 items-center gap-2 rounded-md border border-slate-700 bg-slate-800/80 px-3 py-2 text-sm text-slate-200"
+                  >
+                    <span className="shrink-0 font-medium">배치 도구</span>
+                    <span className="min-w-0 flex-1 truncate text-xs text-slate-400">
+                      투입 {mobileEntryLabel} · 출고 {mobileExitLabel}
+                    </span>
+                    <span className="shrink-0 text-slate-500">
+                      {mobileToolbarOpen ? '▲' : '▼'}
+                    </span>
+                  </button>
+                  {!mobileToolbarOpen ? (
+                    <button
+                      type="button"
+                      disabled={!canCompletePlacement}
+                      onClick={handleCompletePlacement}
+                      className="min-h-[40px] shrink-0 rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      배치 완료
+                    </button>
+                  ) : null}
                 </div>
-              </TransformComponent>
-            </TransformWrapper>
+              ) : null}
+
+              {!touchLayout || mobileToolbarOpen ? (
+                <PlacementToolbar
+                  line={draft}
+                  selectedUnit={primarySelectedUnit}
+                  selectedCount={selectedCount}
+                  allSelected={allSelected}
+                  completionMessage={completionMessage}
+                  canRoutingSimulation={canRoutingSimulation}
+                  routingSimulationMessage={routingSimulationMessage}
+                  onSetFlowRole={handleSetFlowRole}
+                  onComplete={handleCompletePlacement}
+                  onRoutingSimulation={handleRoutingSimulation}
+                  onClearRoutingSimulation={handleClearRoutingSimulation}
+                  onSelectAll={handleSelectAll}
+                  onClearSelection={handleClearSelection}
+                />
+              ) : null}
+            </div>
           </div>
-          <p className="mt-2 text-xs text-slate-500">
-            배치된 영역 중심 작업 화면 · 저장 맵 {draft.gridSize.cols}×
-            {draft.gridSize.rows} · 빈 칸 드래그로 맵 이동 · 모듈 드래그로 배치 변경
-          </p>
+
+          {!touchLayout ? (
+            <p className="mt-2 text-xs text-slate-500">
+              배치된 영역 중심 작업 화면 · 저장 맵 {draft.gridSize.cols}×
+              {draft.gridSize.rows} · 빈 칸 드래그로 맵 이동 · 모듈 드래그로 배치 변경
+            </p>
+          ) : null}
         </section>
 
         <aside className="rounded-lg border border-slate-800 bg-slate-900 p-4">
-          <h3 className="mb-3 text-sm font-medium text-slate-300">속성</h3>
+          {!touchLayout ? (
+            <h3 className="mb-3 text-sm font-medium text-slate-300">속성</h3>
+          ) : null}
           <UnitPropertiesPanel
             line={draft}
             unit={selectedUnit}

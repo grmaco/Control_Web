@@ -1,15 +1,16 @@
-import type { CSSProperties, ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import type { ConveyorType, ConveyorUnit, Rotation } from '../../types/conveyor'
 import type { FlowDir, UnitFlowDirs } from '../../utils/flowDirection'
 import {
   LABEL_LINE_HEIGHT,
   minimapInnerSize,
-  minimapPortNameHalfInner,
+  minimapPortNameBandHeight,
   pickMinimapLabelLines,
   pickMinimapPortName,
-  portDisplayName,
 } from '../../utils/monitorLabel'
 import {
+  buildJunctionElbowPath,
+  buildJunctionElbowPathFull,
   buildTurnFlowPath,
   buildTurnFlowPathFull,
   TURN_EDGE,
@@ -42,6 +43,14 @@ function flowDir(flow: UnitFlowDirs): FlowDir | null {
   if (flow.outDir) return flow.outDir
   if (flow.inDir) return oppositeDir(flow.inDir)
   return null
+}
+
+/** 포트 홀로 — IN은 STK(outDir), OUT은 라인(outDir) */
+function portHoloDir(flow: UnitFlowDirs): FlowDir | null {
+  if (flow.portDirection === 'IN') {
+    return flow.outDir ?? null
+  }
+  return flow.outDir ?? (flow.inDir ? oppositeDir(flow.inDir) : null)
 }
 
 function arrowHead(tipX: number, tipY: number, dir: FlowDir, size = 10): string {
@@ -371,6 +380,47 @@ function StraightFlowArrow({
   )
 }
 
+function JunctionFlowArrow({
+  flow,
+  hasMaterial,
+  filterId,
+}: {
+  flow: UnitFlowDirs
+  hasMaterial: boolean
+  filterId: string
+}) {
+  const { inDir, outDir } = flow
+
+  if (inDir && outDir) {
+    const pathInfo = buildJunctionElbowPath(inDir, outDir)
+    if (pathInfo) {
+      if (hasMaterial) {
+        const neonPath = buildJunctionElbowPathFull(inDir, outDir)
+        if (neonPath) {
+          return <FlowPath d={neonPath} hasMaterial filterId={filterId} />
+        }
+      }
+
+      return (
+        <g>
+          <FlowPath d={pathInfo.d} hasMaterial={false} filterId={filterId} />
+          <FlowHead
+            tipX={pathInfo.tip.x}
+            tipY={pathInfo.tip.y}
+            dir={pathInfo.outDir}
+            hasMaterial={false}
+            filterId={filterId}
+          />
+        </g>
+      )
+    }
+  }
+
+  return (
+    <TurnFlowArrow flow={flow} hasMaterial={hasMaterial} filterId={filterId} />
+  )
+}
+
 function TurnFlowArrow({
   flow,
   hasMaterial,
@@ -419,107 +469,351 @@ function TurnFlowArrow({
   )
 }
 
-/** 포트 전용 — 방향 삼각형 + 이름 (CV 화살표와 별도) */
-const PORT_DIRECTION_TRIANGLE: Record<FlowDir, string> = {
-  E: 'M 50,0 L 100,50 L 50,100 Z',
-  W: 'M 50,0 L 0,50 L 50,100 Z',
-  N: 'M 0,50 L 50,0 L 100,50 Z',
-  S: 'M 0,50 L 50,100 L 100,50 Z',
+/** 포트 — 프로토스 홀로그램 방향 삼각형 + 하단 가로 이름 */
+const PORT_HOLO = {
+  IN: {
+    glow: '#fcd34d',
+    line: '#fef3c7',
+    core: '#fffef8',
+    beam: '#fbbf24',
+    fill: 'rgba(251,191,36,0.1)',
+    fillInner: 'rgba(254,240,138,0.16)',
+    ring: 'rgba(251,191,36,0.35)',
+  },
+  OUT: {
+    glow: '#67e8f9',
+    line: '#cffafe',
+    core: '#f0fdff',
+    beam: '#22d3ee',
+    fill: 'rgba(34,211,238,0.09)',
+    fillInner: 'rgba(125,211,252,0.14)',
+    ring: 'rgba(34,211,238,0.38)',
+  },
+} as const
+
+interface PortHoloGraphic {
+  outer: string
+  inner: string
+  spine: string
+  base: string
+  ring: string
+  arc: string
+  scans: string
+  tipX: number
+  tipY: number
 }
 
-function portNameHalfStyle(dir: FlowDir): CSSProperties {
+/** tip = dir 방향(좁은 점), base = 반대쪽(넓은 변) */
+function buildPortHoloGraphic(dir: FlowDir): PortHoloGraphic {
+  const cy = 34
   switch (dir) {
     case 'E':
-      return { left: 0, top: 0, width: '50%', height: '100%' }
+      return {
+        outer: `M 74,${cy} L 36,${cy - 16} L 36,${cy + 16} Z`,
+        inner: `M 66,${cy} L 42,${cy - 10} L 42,${cy + 10} Z`,
+        spine: `M 36,${cy} L 74,${cy}`,
+        base: `M 36,${cy - 12} L 36,${cy + 12}`,
+        ring: `M 50,${cy - 22} A 22,22 0 1,1 49.9,${cy - 22}`,
+        arc: `M 28,${cy - 20} A 24,24 0 0,1 28,${cy + 20}`,
+        scans: `M 44,${cy - 6} L 68,${cy - 6} M 44,${cy} L 64,${cy} M 44,${cy + 6} L 60,${cy + 6}`,
+        tipX: 74,
+        tipY: cy,
+      }
     case 'W':
-      return { right: 0, top: 0, width: '50%', height: '100%' }
+      return {
+        outer: `M 26,${cy} L 64,${cy - 16} L 64,${cy + 16} Z`,
+        inner: `M 34,${cy} L 58,${cy - 10} L 58,${cy + 10} Z`,
+        spine: `M 64,${cy} L 26,${cy}`,
+        base: `M 64,${cy - 12} L 64,${cy + 12}`,
+        ring: `M 50,${cy - 22} A 22,22 0 1,1 49.9,${cy - 22}`,
+        arc: `M 72,${cy - 20} A 24,24 0 0,0 72,${cy + 20}`,
+        scans: `M 56,${cy - 6} L 32,${cy - 6} M 56,${cy} L 36,${cy} M 56,${cy + 6} L 40,${cy + 6}`,
+        tipX: 26,
+        tipY: cy,
+      }
     case 'N':
-      return { left: 0, bottom: 0, width: '100%', height: '50%' }
+      return {
+        outer: `M 50,18 L 34,${cy + 14} L 66,${cy + 14} Z`,
+        inner: `M 50,26 L 38,${cy + 6} L 62,${cy + 6} Z`,
+        spine: `M 50,${cy + 14} L 50,18`,
+        base: `M 38,${cy + 14} L 62,${cy + 14}`,
+        ring: `M 50,${cy - 8} A 20,20 0 1,1 49.9,${cy - 8}`,
+        arc: `M 30,${cy + 8} A 22,22 0 0,1 70,${cy + 8}`,
+        scans: `M 42,${cy + 2} L 42,24 M 50,${cy + 2} L 50,26 M 58,${cy + 2} L 58,28`,
+        tipX: 50,
+        tipY: 18,
+      }
     case 'S':
-      return { left: 0, top: 0, width: '100%', height: '50%' }
+      return {
+        outer: `M 50,${cy + 20} L 34,${cy - 4} L 66,${cy - 4} Z`,
+        inner: `M 50,${cy + 12} L 38,${cy} L 62,${cy} Z`,
+        spine: `M 50,${cy - 4} L 50,${cy + 20}`,
+        base: `M 38,${cy - 4} L 62,${cy - 4}`,
+        ring: `M 50,${cy - 2} A 20,20 0 1,1 49.9,${cy - 2}`,
+        arc: `M 30,${cy - 8} A 22,22 0 0,0 70,${cy - 8}`,
+        scans: `M 42,${cy + 4} L 42,${cy + 16} M 50,${cy + 4} L 50,${cy + 14} M 58,${cy + 4} L 58,${cy + 12}`,
+        tipX: 50,
+        tipY: cy + 20,
+      }
   }
 }
 
-function PortNameHalf({
-  dir,
+function PortHoloDefs({
+  id,
+  variant,
+  tipX,
+  tipY,
+}: {
+  id: string
+  variant: 'IN' | 'OUT'
+  tipX: number
+  tipY: number
+}) {
+  const c = PORT_HOLO[variant]
+  const safeId = id.replace(/[^a-zA-Z0-9_-]/g, '')
+  return (
+    <defs>
+      <radialGradient
+        id={`${safeId}-tip-glow`}
+        cx={tipX}
+        cy={tipY}
+        r="28"
+        gradientUnits="userSpaceOnUse"
+      >
+        <stop offset="0%" stopColor={c.core} stopOpacity={0.95} />
+        <stop offset="35%" stopColor={c.glow} stopOpacity={0.45} />
+        <stop offset="100%" stopColor={c.beam} stopOpacity={0} />
+      </radialGradient>
+      <linearGradient id={`${safeId}-holo-fill`} x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor={c.core} stopOpacity={0.5} />
+        <stop offset="45%" stopColor={c.glow} stopOpacity={0.22} />
+        <stop offset="100%" stopColor={c.beam} stopOpacity={0.04} />
+      </linearGradient>
+      <linearGradient id={`${safeId}-holo-stroke`} x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor={c.glow} stopOpacity={0.2} />
+        <stop offset="40%" stopColor={c.line} />
+        <stop offset="100%" stopColor={c.core} stopOpacity={0.9} />
+      </linearGradient>
+      <filter id={`${safeId}-holo-bloom`} x="-140%" y="-140%" width="380%" height="380%">
+        <feGaussianBlur stdDeviation="2.8" result="b1" />
+        <feGaussianBlur stdDeviation="5.5" result="b2" />
+        <feGaussianBlur stdDeviation="9" result="b3" />
+        <feMerge>
+          <feMergeNode in="b3" />
+          <feMergeNode in="b2" />
+          <feMergeNode in="b1" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+      <filter id={`${safeId}-holo-soft`} x="-70%" y="-70%" width="240%" height="240%">
+        <feGaussianBlur stdDeviation="0.9" result="b" />
+        <feMerge>
+          <feMergeNode in="b" />
+          <feMergeNode in="SourceGraphic" />
+        </feMerge>
+      </filter>
+      <pattern
+        id={`${safeId}-grid`}
+        width="6"
+        height="6"
+        patternUnits="userSpaceOnUse"
+      >
+        <path
+          d="M 6,0 L 0,0 0,6"
+          fill="none"
+          stroke={c.glow}
+          strokeOpacity={0.08}
+          strokeWidth={0.35}
+        />
+      </pattern>
+    </defs>
+  )
+}
+
+function PortNameOverlay({
   unitName,
   cellSize,
 }: {
-  dir: FlowDir
   unitName: string
   cellSize: number
 }) {
-  const { displayName, fontSize, vertical } = pickMinimapPortName(
-    minimapPortNameHalfInner(cellSize, dir),
-    unitName,
-    dir,
-  )
+  const { displayName, fontSize } = pickMinimapPortName(cellSize, unitName)
   if (!displayName || fontSize <= 0) return null
+
+  const bandHeight = minimapPortNameBandHeight(cellSize)
 
   return (
     <div
-      className="pointer-events-none absolute z-[6] flex flex-col items-center justify-center overflow-hidden px-0.5 text-center font-bold text-white"
+      className="pointer-events-none absolute inset-x-0 bottom-0 z-[6] flex items-center justify-center px-1 text-center font-bold text-white"
       style={{
-        ...portNameHalfStyle(dir),
+        height: bandHeight,
         fontSize,
-        lineHeight: vertical ? 1 : LABEL_LINE_HEIGHT,
-        textShadow: '0 1px 2px rgba(0,0,0,0.85)',
+        lineHeight: 1,
+        whiteSpace: 'nowrap',
+        textShadow: '0 0 8px rgba(0,0,0,0.95), 0 0 12px rgba(103,232,249,0.35)',
       }}
     >
-      {vertical ? (
-        [...displayName].map((char, index) => (
-          <span key={index} className="block leading-none">
-            {char}
-          </span>
-        ))
-      ) : (
-        <span className="block max-w-full truncate leading-none">{displayName}</span>
-      )}
+      {displayName}
     </div>
   )
 }
 
-function PortTriangleHalf({
+function PortHoloArrow({
   dir,
   flow,
   hasMaterial,
   filterId,
+  gfxId,
 }: {
   dir: FlowDir
   flow: UnitFlowDirs
   hasMaterial: boolean
   filterId: string
+  gfxId: string
 }) {
-  const triangle = PORT_DIRECTION_TRIANGLE[dir]
-  const fill = flow.portDirection === 'OUT' ? '#1d4ed8' : '#b45309'
+  const g = buildPortHoloGraphic(dir)
+  const variant = flow.portDirection === 'OUT' ? 'OUT' : 'IN'
+  const c = PORT_HOLO[variant]
+  const safeId = gfxId.replace(/[^a-zA-Z0-9_-]/g, '')
 
   return (
     <>
-      {dir === 'E' || dir === 'W' ? (
-        <line x1={50} y1={0} x2={50} y2={100} stroke="#ffffff" strokeWidth={0.5} opacity={0.15} />
-      ) : (
-        <line x1={0} y1={50} x2={100} y2={50} stroke="#ffffff" strokeWidth={0.5} opacity={0.15} />
-      )}
+      <PortHoloDefs id={gfxId} variant={variant} tipX={g.tipX} tipY={g.tipY} />
+      <rect x="4" y="4" width="92" height="52" fill={`url(#${safeId}-grid)`} opacity={0.55} />
+      <circle
+        cx={g.tipX}
+        cy={g.tipY}
+        r="26"
+        fill={`url(#${safeId}-tip-glow)`}
+        opacity={0.7}
+      />
+      <path
+        d={g.ring}
+        fill="none"
+        stroke={c.ring}
+        strokeWidth={0.7}
+        strokeDasharray="3 2.5"
+        opacity={0.55}
+        filter={`url(#${safeId}-holo-bloom)`}
+      />
+      <path
+        d={g.arc}
+        fill="none"
+        stroke={c.line}
+        strokeWidth={0.55}
+        strokeOpacity={0.35}
+        strokeDasharray="1.5 3"
+      />
+      <path d={g.outer} fill={c.fill} />
+      <path d={g.inner} fill={c.fillInner} />
+      <path d={g.outer} fill={`url(#${safeId}-holo-fill)`} opacity={0.9} />
       {hasMaterial ? (
-        <>
+        <g className="minimap-port-triangle-neon">
           <path
-            d={triangle}
+            d={g.outer}
             fill={NEON.outer}
-            opacity={0.45}
+            opacity={0.1}
             filter={`url(#${neonHaloId(filterId)})`}
             className="minimap-neon-halo"
           />
           <path
-            d={triangle}
+            d={g.outer}
+            fill="none"
+            stroke={NEON.outer}
+            strokeWidth={8}
+            strokeLinejoin="round"
+            opacity={0.38}
+            filter={`url(#${neonHaloId(filterId)})`}
+            className="minimap-neon-halo"
+          />
+          <path
+            d={g.outer}
+            fill="none"
+            stroke={NEON.glow}
+            strokeWidth={4.5}
+            strokeLinejoin="round"
+            opacity={0.62}
+            filter={`url(#${filterId})`}
+            className="minimap-neon-glow"
+          />
+        </g>
+      ) : null}
+      <path
+        d={g.scans}
+        fill="none"
+        stroke={c.line}
+        strokeWidth={0.45}
+        strokeOpacity={0.4}
+        strokeLinecap="round"
+      />
+      <path
+        d={g.outer}
+        fill="none"
+        stroke={c.glow}
+        strokeWidth={2.8}
+        strokeOpacity={0.22}
+        strokeLinejoin="round"
+        filter={`url(#${safeId}-holo-bloom)`}
+      />
+      <path
+        d={g.outer}
+        fill="none"
+        stroke={`url(#${safeId}-holo-stroke)`}
+        strokeWidth={1.15}
+        strokeLinejoin="round"
+        filter={`url(#${safeId}-holo-soft)`}
+      />
+      <path
+        d={g.inner}
+        fill="none"
+        stroke={c.core}
+        strokeWidth={0.7}
+        strokeOpacity={0.8}
+        strokeLinejoin="round"
+      />
+      <path
+        d={g.spine}
+        fill="none"
+        stroke={c.beam}
+        strokeWidth={1.1}
+        strokeOpacity={0.75}
+        strokeLinecap="round"
+        filter={`url(#${safeId}-holo-bloom)`}
+      />
+      <path
+        d={g.base}
+        fill="none"
+        stroke={c.glow}
+        strokeWidth={1.4}
+        strokeOpacity={0.45}
+        strokeLinecap="round"
+        filter={`url(#${safeId}-holo-soft)`}
+      />
+      <circle cx={g.tipX} cy={g.tipY} r="2.2" fill={c.core} filter={`url(#${safeId}-holo-bloom)`} />
+      {hasMaterial ? (
+        <>
+          <path
+            d={g.outer}
+            fill="none"
+            stroke={NEON.hot}
+            strokeWidth={2}
+            strokeLinejoin="round"
+            strokeDasharray="5 3"
+            opacity={0.72}
+            filter={`url(#${filterId})`}
+            className="minimap-neon-flow"
+          />
+          <circle
+            cx={g.tipX}
+            cy={g.tipY}
+            r="3.5"
             fill={NEON.glow}
-            opacity={0.35}
+            opacity={0.45}
             filter={`url(#${filterId})`}
             className="minimap-neon-glow"
           />
         </>
       ) : null}
-      <path d={triangle} fill={fill} opacity={0.88} />
-      <path d={triangle} fill="none" stroke="#ffffff" strokeWidth={1} opacity={0.35} />
     </>
   )
 }
@@ -539,59 +833,57 @@ function MinimapPortFlow({
   hasMaterial: boolean
   filterId: string
 }) {
-  const dir = flowDir(flow)
+  const dir = portHoloDir(flow)
   if (!dir) return null
 
   const neonId = hasMaterial ? filterId : 'neon'
 
   return (
-    <div
-      className={`pointer-events-none absolute inset-0 overflow-hidden ${
-        hasMaterial ? 'minimap-flow-neon' : ''
-      }`}
-      aria-hidden
-    >
+    <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
       <FlowSvg filterId={neonId} hasMaterial={hasMaterial}>
-        <PortTriangleHalf dir={dir} flow={flow} hasMaterial={hasMaterial} filterId={neonId} />
+        <PortHoloArrow
+          dir={dir}
+          flow={flow}
+          hasMaterial={hasMaterial}
+          filterId={neonId}
+          gfxId={filterId}
+        />
       </FlowSvg>
-      <PortNameHalf
-        dir={dir}
-        unitName={showUnitName ? unitName : ''}
-        cellSize={cellSize}
-      />
+      <PortNameOverlay unitName={showUnitName ? unitName : ''} cellSize={cellSize} />
     </div>
   )
 }
 
-/** 포트 — 적재창고 미연결 등 flow 없을 때 */
+/** 포트 — flow 맵만 있을 때(경로 미포함) 이름 표시 */
 export function MinimapPortFallback({
   unit,
   cellSize,
   showName = true,
+  flow = null,
+  hasMaterial = false,
 }: {
   unit: ConveyorUnit
   cellSize: number
   showName?: boolean
+  flow?: UnitFlowDirs | null
+  hasMaterial?: boolean
 }) {
+  if (flow && flowDir(flow)) {
+    return (
+      <MinimapPortFlow
+        flow={flow}
+        unitName={unit.name}
+        showUnitName={showName}
+        cellSize={cellSize}
+        hasMaterial={hasMaterial}
+        filterId={`neon-${unit.id.replace(/[^a-zA-Z0-9_-]/g, '')}`}
+      />
+    )
+  }
+
   if (!showName) return null
 
-  const displayName = portDisplayName(unit.name)
-  const { fontSize } = pickMinimapLabelLines(minimapInnerSize(cellSize, 1, 1), [displayName])
-  if (!displayName || fontSize <= 0) return null
-
-  return (
-    <div
-      className="pointer-events-none absolute inset-0 z-[6] flex flex-col items-center justify-center overflow-hidden px-0.5 text-center font-bold text-white"
-      style={{
-        fontSize,
-        lineHeight: LABEL_LINE_HEIGHT,
-        textShadow: '0 1px 2px rgba(0,0,0,0.85)',
-      }}
-      aria-hidden
-    >
-      <span className="block max-w-full truncate leading-none">{displayName}</span>
-    </div>
-  )
+  return <PortNameOverlay unitName={unit.name} cellSize={cellSize} />
 }
 
 export function MinimapStorageLabel({
@@ -668,11 +960,18 @@ export function MinimapFlowArrow({
   const dir = flowDir(flow)
   if (!dir) return null
 
-  const isTurnLike = unitType === 'turn' || unitType === 'junction'
+  const isTurn = unitType === 'turn'
+  const isJunction = unitType === 'junction'
 
   return (
     <FlowSvg filterId={neonId} hasMaterial={hasMaterial}>
-      {isTurnLike ? (
+      {isJunction ? (
+        <JunctionFlowArrow
+          flow={flow}
+          hasMaterial={hasMaterial}
+          filterId={neonId}
+        />
+      ) : isTurn ? (
         <TurnFlowArrow
           flow={flow}
           hasMaterial={hasMaterial}
