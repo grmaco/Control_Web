@@ -7,7 +7,7 @@ import { PATH_SIMULATION_STEP_MS } from '../../types/unitProperties'
 import type { PathSimulationMode, PathSimulationStatus } from '../../hooks/usePathSimulation'
 import type { LoadTackTimeSummary } from '../../utils/pathSimulation'
 import { formatTackTimeSec } from '../../utils/pathSimulation'
-import { CONTINUOUS_INPUT_INTERVAL_SEC } from '../../utils/continuousInputGather'
+import { CONTINUOUS_INPUT_INTERVAL_SEC, CONTINUOUS_PROBE_CYCLE_SEC } from '../../utils/continuousInputGather'
 import { unitDisplayCode } from '../../utils/unitPropertyHelpers'
 
 interface PathSimulationBarProps {
@@ -274,7 +274,11 @@ export function PathSimulationBar({
           <div className="flex flex-wrap items-end justify-center gap-3">
             <TimingField
               label="투입 대기 (초)"
-              hint={continuousInputActive ? '연속 투입 4초 고정' : '시작점 체류'}
+              hint={
+                continuousInputActive
+                  ? `프로브 2대 ${CONTINUOUS_INPUT_INTERVAL_SEC}초 교대 · ${CONTINUOUS_PROBE_CYCLE_SEC}초 왕복`
+                  : '시작점 체류'
+              }
               value={inputDisplaySec}
               disabled={inputLocked}
               onChange={onInputIntervalSecChange}

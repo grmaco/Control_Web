@@ -32,7 +32,7 @@ export function ContinuousInputGatherOverlay({
   const tickKey = probes
     .map(
       (p) =>
-        `${p.entryUnitId}:${p.probeSlot}:${p.phase}:${p.phaseElapsedMs}:${p.carrying}:${p.awaitingEntryClear}`,
+        `${p.entryUnitId}:${p.probeSlot}:${p.phase}:${p.phaseElapsedMs}:${p.carrying}`,
     )
     .join('|')
   const tickKeyRef = useRef(tickKey)
@@ -169,7 +169,11 @@ export function ContinuousInputGatherOverlay({
             {entryVisuals.map((visual) => (
               <g key={`${visual.entryUnitId}:${visual.probeSlot}`}>
                 {visual.carriedMineralX != null && visual.carriedMineralY != null ? (
-                  <CarriedMineral x={visual.carriedMineralX} y={visual.carriedMineralY} />
+                  <CarriedMineral
+                    x={visual.carriedMineralX}
+                    y={visual.carriedMineralY}
+                    opacity={visual.carriedMineralOpacity}
+                  />
                 ) : null}
                 <ProbeUnit
                   x={visual.probeX}
@@ -354,9 +358,9 @@ function MineralCrystal({
   )
 }
 
-function CarriedMineral({ x, y }: { x: number; y: number }) {
+function CarriedMineral({ x, y, opacity = 1 }: { x: number; y: number; opacity?: number }) {
   return (
-    <g transform={`translate(${x}, ${y})`}>
+    <g transform={`translate(${x}, ${y})`} opacity={opacity}>
       <ellipse cx="0" cy="2.5" rx="4.2" ry="1.6" fill="#020617" opacity="0.28" />
       <polygon
         points="0,-5.5 5.5,-0.5 3.5,4.5 -3.5,4.5 -5.5,-0.5"

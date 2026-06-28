@@ -4,7 +4,7 @@ import { PATH_SIMULATION_STEP_MS } from '../types/unitProperties'
 import { dirToward } from './flowDirection'
 import { getFootprintCells, getUnitFootprint } from './unitFootprint'
 import {
-  continuousEntryVacantTicksRequired,
+  planInboundLoadPath,
   spawnContinuousInjectLoad,
   tickEntryVacancy,
   type StkRoutingSessionState,
@@ -45,24 +45,16 @@ function isEntryUnoccupied(
   return !isEntryOccupiedByLoad(loads, entryUnitId)
 }
 
-function resolveEntryVacantTicks(
-  loads: PathSimulationLoad[],
-  entryUnitId: string,
-  tickVacantByEntry: Record<string, number>,
-): number {
-  if (isEntryOccupiedByLoad(loads, entryUnitId)) return 0
-  return tickEntryVacancy(entryUnitId, loads, {
-    vacantTicks: tickVacantByEntry[entryUnitId] ?? 0,
-  }).vacantTicks
-}
-
-/** 내려놓기 시점 — 시작점에 자재/점유만 없으면 즉시 투입 */
+/** 내려놓기 시점 — 시작점 비었고 투입 경로가 있을 때만 투입 */
 function canProbeDepositInjectNow(
   loads: PathSimulationLoad[],
   line: ConveyorLine,
   entryUnitId: string,
+  routingSession?: StkRoutingSessionState,
 ): boolean {
-  return isEntryUnoccupied(loads, line, entryUnitId)
+  if (!isEntryUnoccupied(loads, line, entryUnitId)) return false
+  const plan = planInboundLoadPath(line, entryUnitId, routingSession)
+  return plan.pathUnitIds.length > 0
 }
 
 function markEntryOccupied(
@@ -89,10 +81,6 @@ export interface GatherProbeState {
   depotDx: number
   depotDy: number
   carrying: boolean
-  /** 연속투입 직후 — 투입구가 비워질 때까지 광맥에서 채굴만 */
-  awaitingEntryClear: boolean
-  /** 첫 운반 사이클은 복귀(toMineral) 없이 채굴에서 시작 */
-  bootstrapFromMining: boolean
 }
 
 export interface GatherProbeVisual {
@@ -106,10 +94,15 @@ export interface GatherProbeVisual {
   probeY: number
   carriedMineralX: number | null
   carriedMineralY: number | null
+  /** 투입구 핸드오프·틱 보간 시 미네랄 페이드 */
+  carriedMineralOpacity: number
   carrying: boolean
   phase: GatherProbePhase
   travelT: number
 }
+
+/** 프로브 위 미네랄 Y 오프셋 (cellSize 배수) */
+const MINERAL_CARRY_OFFSET = 0.14
 
 const MINERAL_DISTANCE_CELLS = 2.75
 const DEPOT_EDGE_PADDING = 0.45
@@ -229,8 +222,19 @@ function pickGatherLayout(
 /** 연속투입 — 투입 시간과 무관하게 프로브 2대 교대 */
 export const CONTINUOUS_PROBE_COUNT = 2
 
-/** 연속투입 시 고정 투입 간격 (초) */
+/** 연속투입 시 고정 투입 간격 (초) — 프로브 2대 교대 간격 */
 export const CONTINUOUS_INPUT_INTERVAL_SEC = 4
+
+/** 프로브 1대 왕복 사이클(초) = 교대 간격 × 프로브 수 */
+export const CONTINUOUS_PROBE_CYCLE_SEC =
+  CONTINUOUS_INPUT_INTERVAL_SEC * CONTINUOUS_PROBE_COUNT
+
+function roundToGatherTick(ms: number): number {
+  return Math.max(
+    PATH_SIMULATION_STEP_MS,
+    Math.round(ms / PATH_SIMULATION_STEP_MS) * PATH_SIMULATION_STEP_MS,
+  )
+}
 
 export function resolveGatherInputIntervalSec(
   continuousInputActive: boolean,
@@ -240,17 +244,10 @@ export function resolveGatherInputIntervalSec(
 }
 
 /** 투입 시간(초) = 프로브 2대 기준 1회 투입 간격. 비율 합계 1.0 */
-const MINING_RATIO = 0.32
-const TRAVEL_LEG_RATIO = 0.3
-const DEPOSITING_RATIO = 0.08
-/** 이동 구간 최소 시간 — 부드러운 가감속 우선 */
-const TRAVEL_MIN_MS = 490
-const MINING_MIN_MS = 140
-const DEPOSITING_MIN_MS = 90
-/** 시뮬 틱(500ms) 내부 프로브 진행 단위 — 작을수록 이동이 매끄러움 */
-const GATHER_SUBSTEP_MS = 8
-/** depositing 진행률 — 시각적 내려놓기와 동일 시점에 투입(On) */
-const DEPOSIT_INJECT_RATIO = 0.45
+/** 광맥 복귀·채굴 — 사이클 전반부 */
+const RETURN_MINERAL_RATIO = 0.3
+/** 시뮬 틱 내부 프로브 진행 단위 */
+const GATHER_SUBSTEP_MS = 10
 
 /** @deprecated 연속투입은 항상 {@link CONTINUOUS_PROBE_COUNT}대 */
 export const DUAL_PROBE_THRESHOLD_SEC = 2
@@ -279,80 +276,131 @@ export function gatherPhaseDurationsMs(inputIntervalSec: number): {
   toDepot: number
   depositing: number
   cycleMs: number
+  staggerMs: number
   probeCount: number
-  /** 사이클 내 자재 On(투입) 시점 — 내려놓기 연출과 동일 */
+  /** 사이클 내 투입 시점 — toMineral + mining + toDepot */
   injectAtCycleMs: number
 } {
   const probeCount = CONTINUOUS_PROBE_COUNT
-  const cycleMs = gatherEffectiveCycleMs(inputIntervalSec)
+  const staggerMs = gatherInjectIntervalMs(inputIntervalSec)
+  const cycleMs = staggerMs * probeCount
+  const halfCycle = cycleMs / probeCount
 
-  let mining = Math.max(MINING_MIN_MS, cycleMs * MINING_RATIO)
-  let toMineral = Math.max(TRAVEL_MIN_MS, cycleMs * TRAVEL_LEG_RATIO)
-  let toDepot = toMineral
-  let depositing = Math.max(DEPOSITING_MIN_MS, cycleMs * DEPOSITING_RATIO)
+  // 후반부 전체 = 투입구 이동·투입 → 교대 간격의 절반마다 1대가 도착
+  const toDepot = roundToGatherTick(halfCycle)
+  const toMineral = roundToGatherTick(halfCycle * RETURN_MINERAL_RATIO)
+  const mining = roundToGatherTick(halfCycle - toMineral)
 
-  const overhead = toMineral + toDepot + mining + depositing
-  if (overhead > cycleMs) {
-    const scale = cycleMs / overhead
-    mining *= scale
-    toMineral *= scale
-    toDepot *= scale
-    depositing *= scale
-  }
-
-  const injectAtCycleMs =
-    toMineral + mining + toDepot + depositing * DEPOSIT_INJECT_RATIO
+  const injectAtCycleMs = toMineral + mining + toDepot
 
   return {
     toMineral,
     mining,
     toDepot,
-    depositing,
+    depositing: 0,
     cycleMs,
+    staggerMs,
     probeCount,
     injectAtCycleMs,
   }
 }
 
-function depositInjectAtMs(depositingMs: number): number {
-  if (depositingMs <= 0) return 0
-  return Math.max(1, depositingMs * DEPOSIT_INJECT_RATIO)
+function holdProbeAtMineral(
+  probe: GatherProbeState,
+  miningMs: number,
+  carrying: boolean,
+): GatherProbeState {
+  return {
+    ...probe,
+    phase: 'mining',
+    phaseElapsedMs: miningMs,
+    carrying,
+  }
 }
 
-function depositVisualElapsedMs(probe: GatherProbeState, depositingMs: number): number {
-  if (probe.phase !== 'depositing') return 0
-  return Math.min(probe.phaseElapsedMs, depositingMs)
+/** 투입 실패 시 광맥 복귀 대신 투입구에서 대기 */
+function holdProbeAtDepot(
+  probe: GatherProbeState,
+  toDepotMs: number,
+): GatherProbeState {
+  return {
+    ...probe,
+    phase: 'toDepot',
+    phaseElapsedMs: toDepotMs,
+    carrying: true,
+  }
 }
 
-function msUntilInjectAllowed(vacantTicks: number): number {
-  const required = continuousEntryVacantTicksRequired()
-  const ticksRemaining = Math.max(0, required - vacantTicks)
-  return ticksRemaining * PATH_SIMULATION_STEP_MS
-}
-
-/** 투입구 도착 시점에 투입 가능할 때만 출발 — 미리 투입구에서 대기하지 않음 */
-function canStartToDepot(
+/** 투입구 도착 — 실제 투입 성공 시에만 자재 제거, 실패 시 투입구 대기 */
+function attemptProbeDepotInject(
+  probe: GatherProbeState,
   loads: PathSimulationLoad[],
   line: ConveyorLine,
   entryUnitId: string,
+  loadSequence: number,
   tickVacantByEntry: Record<string, number>,
-  _inputIntervalSec: number,
   toDepotMs: number,
-  carryingFromMineral = false,
-): boolean {
-  if (!isEntryUnoccupied(loads, line, entryUnitId)) return false
-  if (carryingFromMineral) return true
-
-  const vacantTicks = resolveEntryVacantTicks(loads, entryUnitId, tickVacantByEntry)
-  return msUntilInjectAllowed(vacantTicks) <= toDepotMs
-}
-
-function holdProbeAtMineral(probe: GatherProbeState, deltaMs: number, miningMs: number): GatherProbeState {
-  let phaseElapsedMs = probe.phaseElapsedMs + deltaMs
-  if (phaseElapsedMs >= miningMs) {
-    phaseElapsedMs %= Math.max(1, miningMs)
+  routingSession?: StkRoutingSessionState,
+): {
+  probe: GatherProbeState
+  loads: PathSimulationLoad[]
+  spawned: PathSimulationLoad[]
+  nextSequence: number
+} {
+  if (!probe.carrying) {
+    return {
+      probe: {
+        ...probe,
+        phase: 'toMineral',
+        phaseElapsedMs: 0,
+        carrying: false,
+      },
+      loads,
+      spawned: [],
+      nextSequence: loadSequence,
+    }
   }
-  return { ...probe, phase: 'mining', phaseElapsedMs }
+
+  if (!canProbeDepositInjectNow(loads, line, entryUnitId, routingSession)) {
+    return {
+      probe: holdProbeAtDepot(probe, toDepotMs),
+      loads,
+      spawned: [],
+      nextSequence: loadSequence,
+    }
+  }
+
+  const inject = applyDepositInject(
+    probe,
+    loads,
+    line,
+    entryUnitId,
+    loadSequence,
+    tickVacantByEntry,
+    0,
+    routingSession,
+  )
+
+  if (inject.spawned.length > 0) {
+    return {
+      probe: {
+        ...inject.probe,
+        phase: 'toMineral',
+        phaseElapsedMs: 0,
+        carrying: false,
+      },
+      loads: inject.loads,
+      spawned: inject.spawned,
+      nextSequence: inject.nextSequence,
+    }
+  }
+
+  return {
+    probe: holdProbeAtDepot(probe, toDepotMs),
+    loads: inject.loads,
+    spawned: [],
+    nextSequence: inject.nextSequence,
+  }
 }
 
 function applyDepositInject(
@@ -387,174 +435,13 @@ function applyDepositInject(
   }
 
   return {
-    probe: { ...probe, carrying: false, bootstrapFromMining: false },
+    probe: { ...probe, carrying: false },
     loads: inject.loads,
     spawned: inject.spawned,
     nextSequence: inject.nextSequence,
   }
 }
 
-function tryDepositInjectForProbe(
-  probe: GatherProbeState,
-  loads: PathSimulationLoad[],
-  line: ConveyorLine,
-  entryUnitId: string,
-  loadSequence: number,
-  depositingMs: number,
-  phaseBeforeStep: GatherProbePhase,
-  elapsedBeforeStep: number,
-  tickVacantByEntry: Record<string, number>,
-  inputIntervalSec: number,
-  routingSession?: StkRoutingSessionState,
-): {
-  probe: GatherProbeState
-  loads: PathSimulationLoad[]
-  spawned: PathSimulationLoad[]
-  nextSequence: number
-} {
-  if (
-    probe.phase !== 'depositing' ||
-    !probe.carrying
-  ) {
-    return { probe, loads, spawned: [], nextSequence: loadSequence }
-  }
-
-  const injectAtMs = depositInjectAtMs(depositingMs)
-  const depositBefore =
-    phaseBeforeStep === 'depositing'
-      ? Math.min(elapsedBeforeStep, depositingMs)
-      : 0
-  const depositAfter = depositVisualElapsedMs(probe, depositingMs)
-  const crossedInject = depositBefore < injectAtMs && depositAfter >= injectAtMs
-  const missedInject =
-    depositBefore < injectAtMs &&
-    depositAfter >= depositingMs &&
-    probe.carrying
-
-  if (!crossedInject && !missedInject) {
-    return { probe, loads, spawned: [], nextSequence: loadSequence }
-  }
-
-  const inject = applyDepositInject(
-    probe,
-    loads,
-    line,
-    entryUnitId,
-    loadSequence,
-    tickVacantByEntry,
-    inputIntervalSec,
-    routingSession,
-  )
-  return {
-    probe: inject.probe,
-    loads: inject.loads,
-    spawned: inject.spawned,
-    nextSequence: inject.nextSequence,
-  }
-}
-
-function finishDepositingPhase(
-  probe: GatherProbeState,
-  loads: PathSimulationLoad[],
-  line: ConveyorLine,
-  entryUnitId: string,
-  loadSequence: number,
-  tickVacantByEntry: Record<string, number>,
-  inputIntervalSec: number,
-  routingSession?: StkRoutingSessionState,
-): {
-  probe: GatherProbeState
-  loads: PathSimulationLoad[]
-  spawned: PathSimulationLoad[]
-  nextSequence: number
-} {
-  if (probe.carrying) {
-    return completeDepositingPhase(
-      probe,
-      loads,
-      line,
-      entryUnitId,
-      loadSequence,
-      tickVacantByEntry,
-      inputIntervalSec,
-      routingSession,
-    )
-  }
-
-  return {
-    probe: {
-      ...probe,
-      phase: 'toMineral',
-      phaseElapsedMs: 0,
-      carrying: false,
-      bootstrapFromMining: false,
-    },
-    loads,
-    spawned: [],
-    nextSequence: loadSequence,
-  }
-}
-function completeDepositingPhase(
-  probe: GatherProbeState,
-  loads: PathSimulationLoad[],
-  line: ConveyorLine,
-  entryUnitId: string,
-  loadSequence: number,
-  tickVacantByEntry: Record<string, number>,
-  inputIntervalSec: number,
-  routingSession?: StkRoutingSessionState,
-): {
-  probe: GatherProbeState
-  loads: PathSimulationLoad[]
-  spawned: PathSimulationLoad[]
-  nextSequence: number
-} {
-  let nextProbe = probe
-  let nextLoads = loads
-  let nextSequence = loadSequence
-  const batchSpawned: PathSimulationLoad[] = []
-
-  if (nextProbe.carrying) {
-    const inject = applyDepositInject(
-      nextProbe,
-      nextLoads,
-      line,
-      entryUnitId,
-      nextSequence,
-      tickVacantByEntry,
-      inputIntervalSec,
-      routingSession,
-    )
-    nextProbe = inject.probe
-    nextLoads = inject.loads
-    nextSequence = inject.nextSequence
-    batchSpawned.push(...inject.spawned)
-  }
-
-  if (nextProbe.carrying) {
-    nextProbe = {
-      ...nextProbe,
-      phase: 'mining',
-      phaseElapsedMs: 0,
-      carrying: true,
-    }
-  } else {
-    nextProbe = {
-      ...nextProbe,
-      phase: 'toMineral',
-      phaseElapsedMs: 0,
-      carrying: false,
-      bootstrapFromMining: false,
-    }
-  }
-
-  return {
-    probe: nextProbe,
-    loads: nextLoads,
-    spawned: batchSpawned,
-    nextSequence,
-  }
-}
 export function gatherPhaseTickBudget(inputIntervalSec: number): {
   toMineral: number
   mining: number
@@ -569,15 +456,19 @@ export function gatherPhaseTickBudget(inputIntervalSec: number): {
   }
 }
 
-/** 사이클 오프셋 → phase (교대 투입용 초기 배치) */
+/** 사이클 오프셋 → phase (FSM 순서: toMineral → mining → toDepot → 투입) */
 function probeAtCycleOffset(
   offsetMs: number,
   durations: ReturnType<typeof gatherPhaseDurationsMs>,
 ): Pick<GatherProbeState, 'phase' | 'phaseElapsedMs' | 'carrying'> {
-  const { mining, toDepot, depositing, cycleMs } = durations
+  const { mining, toDepot, toMineral, cycleMs } = durations
   const t = ((offsetMs % cycleMs) + cycleMs) % cycleMs
 
   let cursor = 0
+  if (t < cursor + toMineral) {
+    return { phase: 'toMineral', phaseElapsedMs: t - cursor, carrying: false }
+  }
+  cursor += toMineral
   if (t < cursor + mining) {
     return { phase: 'mining', phaseElapsedMs: t - cursor, carrying: false }
   }
@@ -585,12 +476,18 @@ function probeAtCycleOffset(
   if (t < cursor + toDepot) {
     return { phase: 'toDepot', phaseElapsedMs: t - cursor, carrying: true }
   }
-  cursor += toDepot
-  if (t < cursor + depositing) {
-    return { phase: 'depositing', phaseElapsedMs: t - cursor, carrying: true }
+  return { phase: 'toMineral', phaseElapsedMs: 0, carrying: false }
+}
+
+/** 2대 교대 — 0번 투입구 출발, 1번 반 사이클 뒤(광맥 복귀) */
+function gatherProbeInitOffsetMs(
+  slot: number,
+  durations: ReturnType<typeof gatherPhaseDurationsMs>,
+): number {
+  if (slot === 0) {
+    return durations.toMineral + durations.mining
   }
-  cursor += depositing
-  return { phase: 'toMineral', phaseElapsedMs: t - cursor, carrying: false }
+  return 0
 }
 
 export function initGatherProbes(
@@ -600,7 +497,6 @@ export function initGatherProbes(
 ): GatherProbeState[] {
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
   const durations = gatherPhaseDurationsMs(inputIntervalSec)
-  const staggerMs = gatherInjectIntervalMs(inputIntervalSec)
   const probes: GatherProbeState[] = []
 
   for (const [index, entryUnitId] of entryUnitIds.entries()) {
@@ -609,20 +505,18 @@ export function initGatherProbes(
     const layout = pickGatherLayout(unit, line, index)
 
     for (let slot = 0; slot < CONTINUOUS_PROBE_COUNT; slot += 1) {
-      const offset = slot * staggerMs
+      const offset = gatherProbeInitOffsetMs(slot, durations)
       const cyclePose = probeAtCycleOffset(offset, durations)
       probes.push({
         entryUnitId,
         probeSlot: slot,
-        phase: 'mining',
-        phaseElapsedMs: cyclePose.phaseElapsedMs % Math.max(1, durations.mining),
+        phase: cyclePose.phase,
+        phaseElapsedMs: cyclePose.phaseElapsedMs,
         mineralDx: layout.mineralDx,
         mineralDy: layout.mineralDy,
         depotDx: layout.depotDx,
         depotDy: layout.depotDy,
-        carrying: false,
-        awaitingEntryClear: true,
-        bootstrapFromMining: true,
+        carrying: cyclePose.carrying,
       })
     }
   }
@@ -638,7 +532,7 @@ function advanceProbeByDelta(
   entryUnitId: string,
   loadSequence: number,
   tickVacantByEntry: Record<string, number>,
-  inputIntervalSec: number,
+  _inputIntervalSec: number,
   routingSession?: StkRoutingSessionState,
 ): {
   probe: GatherProbeState
@@ -649,8 +543,10 @@ function advanceProbeByDelta(
   const spawned: PathSimulationLoad[] = []
   let nextSequence = loadSequence
 
-  const phaseBeforeStep = probe.phase
-  const elapsedBeforeStep = probe.phaseElapsedMs
+  if (probe.phase === 'depositing') {
+    probe = holdProbeAtDepot(probe, durations.toDepot)
+  }
+
   let next: GatherProbeState = { ...probe, phaseElapsedMs: probe.phaseElapsedMs + deltaMs }
 
   if (next.phase === 'toMineral' && next.phaseElapsedMs >= durations.toMineral) {
@@ -659,95 +555,45 @@ function advanceProbeByDelta(
       phase: 'mining',
       phaseElapsedMs: next.phaseElapsedMs - durations.toMineral,
       carrying: false,
-      bootstrapFromMining: false,
     }
   }
 
   if (next.phase === 'toDepot' && next.phaseElapsedMs >= durations.toDepot) {
-    const injectReady = canProbeDepositInjectNow(loads, line, entryUnitId)
-    if (injectReady) {
-      next = {
-        ...next,
-        phase: 'depositing',
-        phaseElapsedMs: next.phaseElapsedMs - durations.toDepot,
-        carrying: true,
-        awaitingEntryClear: false,
-      }
-    } else {
-      next = {
-        ...next,
-        phase: 'mining',
-        phaseElapsedMs: 0,
-        carrying: true,
-        awaitingEntryClear: true,
-      }
-    }
-  }
-
-  if (next.phase === 'depositing') {
-    const injected = tryDepositInjectForProbe(
+    const injected = attemptProbeDepotInject(
       next,
       loads,
       line,
       entryUnitId,
       nextSequence,
-      durations.depositing,
-      phaseBeforeStep,
-      elapsedBeforeStep,
       tickVacantByEntry,
-      inputIntervalSec,
+      durations.toDepot,
       routingSession,
     )
-    next = injected.probe
-    loads = injected.loads
     spawned.push(...injected.spawned)
-    nextSequence = injected.nextSequence
-
-    if (next.phase === 'depositing' && next.phaseElapsedMs >= durations.depositing) {
-      const finished = finishDepositingPhase(
-        next,
-        loads,
-        line,
-        entryUnitId,
-        nextSequence,
-        tickVacantByEntry,
-        inputIntervalSec,
-        routingSession,
-      )
-      next = finished.probe
-      loads = finished.loads
-      spawned.push(...finished.spawned)
-      nextSequence = finished.nextSequence
+    return {
+      probe: injected.probe,
+      loads: injected.loads,
+      spawned,
+      nextSequence: injected.nextSequence,
     }
-
-    return { probe: next, loads, spawned, nextSequence }
   }
 
-  if (next.phase === 'mining' || next.awaitingEntryClear) {
-    next = { ...next, phase: 'mining' as const }
-
+  if (next.phase === 'mining') {
     const entryClear = isEntryUnoccupied(loads, line, entryUnitId)
-    const readyToDepart =
-      entryClear &&
-      canStartToDepot(
-        loads,
-        line,
-        entryUnitId,
-        tickVacantByEntry,
-        inputIntervalSec,
-        durations.toDepot,
-        next.carrying,
-      )
 
-    if (next.carrying && readyToDepart) {
+    if (!next.carrying && next.phaseElapsedMs >= durations.mining) {
+      next = holdProbeAtMineral(next, durations.mining, true)
+    } else if (next.carrying) {
+      next = holdProbeAtMineral(next, durations.mining, true)
+    }
+
+    if (next.carrying && entryClear) {
       return {
         probe: {
           ...next,
-          awaitingEntryClear: false,
           phase: 'toDepot',
           phaseElapsedMs: 0,
           carrying: true,
-          bootstrapFromMining: false,
         },
         loads,
         spawned,
@@ -755,36 +601,6 @@ function advanceProbeByDelta(
       }
     }
 
-    if (!next.carrying && next.phaseElapsedMs >= durations.mining) {
-      if (readyToDepart) {
-        return {
-          probe: {
-            ...next,
-            awaitingEntryClear: false,
-            phase: 'toDepot',
-            phaseElapsedMs: next.phaseElapsedMs - durations.mining,
-            carrying: true,
-            bootstrapFromMining: false,
-          },
-          loads,
-          spawned,
-          nextSequence,
-        }
-      }
-      next = holdProbeAtMineral(next, 0, durations.mining)
-      if (entryClear) {
-        next = { ...next, awaitingEntryClear: false, bootstrapFromMining: probe.bootstrapFromMining }
-      }
-      return { probe: next, loads, spawned, nextSequence }
-    }
-
-    if (next.carrying) {
-      return { probe: holdProbeAtMineral(next, 0, durations.mining), loads, spawned, nextSequence }
-    }
-
-    if (entryClear) {
-      next = { ...next, awaitingEntryClear: false }
-    }
     return { probe: next, loads, spawned, nextSequence }
   }
 
@@ -801,12 +617,9 @@ function easeSmooth(t: number): number {
   return clamped * clamped * clamped * (clamped * (clamped * 6 - 15) + 10)
 }
 
-/** 이동 구간 — 코사인 가감속 중심 (급가속·급정거 최소화) */
+/** 이동 구간 — 등속(선형). 끝에서 빨려 들어가는 느낌을 줄임 */
 function easeTravel(t: number): number {
-  const clamped = Math.min(1, Math.max(0, t))
-  const sine = 0.5 - Math.cos(Math.PI * clamped) / 2
-  const smooth = clamped * clamped * clamped * (clamped * (clamped * 6 - 15) + 10)
-  return sine * 0.86 + smooth * 0.14
+  return Math.min(1, Math.max(0, t))
 }
 
 function phaseProgress(elapsedMs: number, durationMs: number): number {
@@ -900,6 +713,7 @@ export function gatherProbeVisuals(
     let carrying = probe.carrying
     let carriedMineralX: number | null = null
     let carriedMineralY: number | null = null
+    let carriedMineralOpacity = 1
     let travelT = 0
 
     if (probe.phase === 'toMineral') {
@@ -915,30 +729,25 @@ export function gatherProbeVisuals(
       if (probe.carrying) {
         const carryBob = Math.sin(travelT * Math.PI * 2) * cellSize * 0.02
         carriedMineralX = probeX
-        carriedMineralY = probeY - cellSize * 0.14 + carryBob
+        carriedMineralY = probeY - cellSize * MINERAL_CARRY_OFFSET + carryBob
       }
     } else if (probe.phase === 'toDepot') {
       travelT = travelProgress(elapsed, durations.toDepot)
       probeX = lerp(mineralX, depotX, travelT)
       probeY = lerp(mineralY, depotY, travelT)
-      carrying = true
-      const carryBob = Math.sin(travelT * Math.PI) * cellSize * 0.022
-      carriedMineralX = probeX
-      carriedMineralY = probeY - cellSize * 0.14 + carryBob
-    } else if (probe.phase === 'depositing') {
-      travelT = phaseProgress(elapsed, durations.depositing)
-      const settleT = easeSmooth(Math.min(1, travelT / 0.55))
-      const releaseT = easeSmooth(Math.max(0, (travelT - 0.45) / 0.55))
-      const depotRestX = depotX - (mineralX - depotX) * 0.05
-      const depotRestY = depotY - (mineralY - depotY) * 0.05
-
-      probeX = lerp(depotX, depotRestX, releaseT * 0.4)
-      probeY = lerp(depotY, depotRestY, releaseT * 0.4)
       carrying = probe.carrying
-
       if (probe.carrying) {
-        carriedMineralX = lerp(probeX, depotX, settleT)
-        carriedMineralY = lerp(probeY - cellSize * 0.14, depotY - cellSize * 0.08, settleT)
+        carriedMineralX = probeX
+        carriedMineralY = probeY - cellSize * MINERAL_CARRY_OFFSET
+      }
+    } else if (probe.phase === 'depositing') {
+      travelT = 1
+      probeX = depotX
+      probeY = depotY
+      carrying = probe.carrying
+      if (probe.carrying) {
+        carriedMineralX = probeX
+        carriedMineralY = probeY - cellSize * MINERAL_CARRY_OFFSET
       }
     }
 
@@ -968,6 +777,7 @@ export function gatherProbeVisuals(
         probeY,
         carriedMineralX,
         carriedMineralY,
+        carriedMineralOpacity,
         carrying,
         phase: probe.phase,
         travelT,
@@ -990,18 +800,53 @@ function blendGatherProbeVisuals(
     const fromV = fromMap.get(`${toV.entryUnitId}:${toV.probeSlot}`)
     if (!fromV || alpha <= 0) return fromV ?? toV
     if (alpha >= 1) return toV
-    const lerpNullable = (a: number | null, b: number | null): number | null => {
+    const injectHandoffBlend =
+      fromV.carrying &&
+      fromV.phase === 'toDepot' &&
+      toV.phase === 'toMineral' &&
+      fromV.carriedMineralX != null &&
+      fromV.carriedMineralY != null
+    const lerpCarried = (
+      a: number | null,
+      b: number | null,
+      handoff: number,
+    ): number | null => {
       if (a != null && b != null) return lerp(a, b, alpha)
-      return alpha < 0.5 ? a : b
+      if (a != null && b == null) {
+        if (injectHandoffBlend) return lerp(a, handoff, alpha)
+        return alpha < 0.92 ? a : b
+      }
+      if (a == null && b != null) return alpha > 0.08 ? b : a
+      return null
     }
+    const handoffX = toV.carriedMineralX ?? fromV.carriedMineralX ?? toV.depotX
+    const handoffY = toV.carriedMineralY ?? fromV.carriedMineralY ?? toV.depotY
     return {
       ...toV,
       probeX: lerp(fromV.probeX, toV.probeX, alpha),
       probeY: lerp(fromV.probeY, toV.probeY, alpha),
-      carriedMineralX: lerpNullable(fromV.carriedMineralX, toV.carriedMineralX),
-      carriedMineralY: lerpNullable(fromV.carriedMineralY, toV.carriedMineralY),
+      carriedMineralX: lerpCarried(fromV.carriedMineralX, toV.carriedMineralX, handoffX),
+      carriedMineralY: lerpCarried(fromV.carriedMineralY, toV.carriedMineralY, handoffY),
+      carriedMineralOpacity: injectHandoffBlend
+        ? 1
+        : lerp(fromV.carriedMineralOpacity, toV.carriedMineralOpacity, alpha),
       travelT: lerp(fromV.travelT, toV.travelT, alpha),
     }
+  })
+}
+
+/** 투입 성공 틱 — toDepot(운반) → toMineral(비운반) 전환 */
+export function isGatherInjectTransition(
+  tickStartProbes: GatherProbeState[],
+  tickEndProbes: GatherProbeState[],
+): boolean {
+  const endByKey = new Map(
+    tickEndProbes.map((probe) => [`${probe.entryUnitId}:${probe.probeSlot}`, probe]),
+  )
+  return tickStartProbes.some((start) => {
+    if (start.phase !== 'toDepot' || !start.carrying) return false
+    const end = endByKey.get(`${start.entryUnitId}:${start.probeSlot}`)
+    return end?.phase === 'toMineral' && !end.carrying
   })
 }
 
@@ -1021,7 +866,7 @@ export function gatherProbeVisualsSmooth(
 ): GatherProbeVisual[] {
   const step = PATH_SIMULATION_STEP_MS
   const progress = Math.min(step, Math.max(0, tickProgressMs))
-  const alpha = easeSmooth(progress / step)
+  const alpha = progress / step
   const fromVisuals = gatherProbeVisuals(
     tickStartProbes,
     line,
@@ -1043,6 +888,16 @@ export function gatherProbeVisualsSmooth(
     inputIntervalSec,
     0,
   )
+  if (isGatherInjectTransition(tickStartProbes, tickEndProbes)) {
+    const fromByKey = new Map(
+      fromVisuals.map((visual) => [`${visual.entryUnitId}:${visual.probeSlot}`, visual]),
+    )
+    return toVisuals.map((toV) => {
+      const fromV = fromByKey.get(`${toV.entryUnitId}:${toV.probeSlot}`)
+      if (!fromV || fromV.travelT >= 0.999) return toV
+      return fromV
+    })
+  }
   if (alpha >= 1) {
     return toVisuals
   }
@@ -1064,7 +919,7 @@ function spawnAtEntryIfReady(
   tickVacantByEntry: Record<string, number>,
   routingSession?: StkRoutingSessionState,
 ): { loads: PathSimulationLoad[]; spawned: PathSimulationLoad[]; nextSequence: number } {
-  if (!canProbeDepositInjectNow(loads, line, entryUnitId)) {
+  if (!canProbeDepositInjectNow(loads, line, entryUnitId, routingSession)) {
     return { loads, spawned: [], nextSequence: loadSequence }
   }
 
@@ -1145,8 +1000,6 @@ export function advanceGatherProbes(
           depotDx: layout.depotDx,
           depotDy: layout.depotDy,
           carrying: false,
-          awaitingEntryClear: true,
-          bootstrapFromMining: true,
         }
       }
 
@@ -1168,6 +1021,10 @@ export function advanceGatherProbes(
         loads = stepped.loads
         spawned.push(...stepped.spawned)
         nextSequence = stepped.nextSequence
+        // 투입 성공 틱 — 같은 틱에 toMineral을 끝까지 진행시키면 미네랄이 CST보다 먼저 사라짐
+        if (stepped.spawned.length > 0) {
+          break
+        }
       }
 
       probeByKey.set(probeKey, probe)

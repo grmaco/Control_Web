@@ -650,7 +650,7 @@ export function usePathSimulation(
 
     setPlan(nextPlan)
     const base = loads.length > 0 ? loads : initializeParallelLoads(nextPlan.loads, stepTiming, line)
-    const advanced = applySimulationStep(base, unitMap, stepTiming, flowMap)
+    const advanced = applySimulationStep(base, unitMap, stepTiming, flowMap, line)
     if (status === 'paused') {
       if (tackSessionStartRef.current == null) {
         beginTackSession()
@@ -686,6 +686,7 @@ export function usePathSimulation(
           unitMapRef.current,
           stepTimingRef.current,
           flowMapRef.current,
+          line,
         )
 
         if (continuousInputActiveRef.current && mode === 'inbound' && entryIds.length > 0) {

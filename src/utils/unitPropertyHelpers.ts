@@ -11,7 +11,14 @@ import { DEFAULT_STK_CAPACITY } from '../constants/unitRoles'
 import { DEFAULT_GRID_SIZE } from '../constants/grid'
 import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
 import { isFlowCapableUnit, listReachableOutputDestinations } from './flowEntries'
-import { computeJunctionThroughFlow, computeJunctionDivertFlow } from './flowDirection'
+import {
+  computeJunctionThroughFlow,
+  computeJunctionDivertFlow,
+  flowEntryDir,
+  flowExitDir,
+  isPerpendicularFlow,
+  type FlowDir,
+} from './flowDirection'
 import { resolveOutputDestinationId, findUnitByRef } from './unitRefs'
 import {
   areGridAdjacent,
@@ -253,6 +260,238 @@ export function listJunctionLinkedUnitCandidates(
     )
 }
 
+function normalizeRequestUnitIds(
+  value: unknown,
+  legacySingle?: string,
+): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((id): id is string => typeof id === 'string' && Boolean(id))
+  }
+  if (typeof value === 'string' && value) {
+    return [value]
+  }
+  if (legacySingle) return [legacySingle]
+  return []
+}
+
+export function getJunctionRequestUnitIds(props: JunctionRoutingProperties): string[] {
+  const legacy =
+    typeof props.requestUnitId === 'string' ? props.requestUnitId : undefined
+  return [...new Set(normalizeRequestUnitIds(props.requestUnitIds, legacy))].slice(0, 2)
+}
+
+function syncJunctionRoutingIds(
+  props: Partial<JunctionRoutingProperties> & {
+    ldUnitId?: string
+    uldUnitId?: string
+  },
+): JunctionRoutingProperties {
+  const legacy =
+    props.requestUnitId ?? props.uldUnitId ?? props.ldUnitId ?? undefined
+  const ids = [...new Set(normalizeRequestUnitIds(props.requestUnitIds, legacy))].slice(
+    0,
+    2,
+  )
+  return {
+    description: props.description,
+    requestUnitIds: ids,
+    requestUnitId: ids[0] ?? '',
+  }
+}
+
+export function findFeederAdjacentToJunction(
+  junction: ConveyorUnit,
+  unitId: string,
+  unitMap: Map<string, ConveyorUnit>,
+): ConveyorUnit | null {
+  if (junction.connections.includes(unitId)) {
+    return unitMap.get(unitId) ?? null
+  }
+
+  const queue = [unitId]
+  const visited = new Set<string>()
+
+  while (queue.length > 0) {
+    const id = queue.shift()!
+    if (visited.has(id)) continue
+    visited.add(id)
+
+    const unit = unitMap.get(id)
+    if (!unit) continue
+
+    for (const neighborId of unit.connections) {
+      if (neighborId === junction.id) return unit
+      if (!visited.has(neighborId) && unitMap.has(neighborId)) {
+        queue.push(neighborId)
+      }
+    }
+  }
+
+  return null
+}
+
+export function listJunctionBranchUnitIds(
+  line: UnitLineContext,
+  junction: ConveyorUnit,
+  requestUnitId: string,
+): string[] {
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  const feeder = findFeederAdjacentToJunction(junction, requestUnitId, unitMap)
+  if (!feeder) return requestUnitId ? [requestUnitId] : []
+  return walkAxisAlignedBranchUnits(junction, feeder, unitMap).map((unit) => unit.id)
+}
+
+/** 분기 직진에 수직인 측면 — 요청 CV가 분기로 들어오는 방향(N/E/S/W) */
+export function junctionRequestPerpendicularDirKeyForUnit(
+  line: UnitLineContext,
+  junction: ConveyorUnit,
+  unitId: string,
+): string | null {
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  const through = computeJunctionThroughFlow(junction, unitMap, line as ConveyorLine)
+  if (!through.inDir) return null
+
+  const feeder = findFeederAdjacentToJunction(junction, unitId, unitMap)
+  if (!feeder) return null
+
+  const entryDir = flowEntryDir(feeder, junction)
+  if (!entryDir || !isPerpendicularFlow(through.inDir, entryDir)) return null
+  return entryDir
+}
+
+type JunctionBranchAxis = 'horizontal' | 'vertical'
+
+function junctionBranchAxisFromFeeder(
+  feeder: ConveyorUnit,
+  junction: ConveyorUnit,
+): JunctionBranchAxis | null {
+  const dx = feeder.gridX - junction.gridX
+  const dy = feeder.gridY - junction.gridY
+  if (dx !== 0 && dy === 0) return 'horizontal'
+  if (dx === 0 && dy !== 0) return 'vertical'
+  return null
+}
+
+function walkAxisAlignedBranchUnits(
+  junction: ConveyorUnit,
+  feederAdjacent: ConveyorUnit,
+  unitMap: Map<string, ConveyorUnit>,
+): ConveyorUnit[] {
+  const axis = junctionBranchAxisFromFeeder(feederAdjacent, junction)
+  const alongBranch =
+    axis === 'horizontal'
+      ? new Set<FlowDir>(['E', 'W'])
+      : axis === 'vertical'
+        ? new Set<FlowDir>(['N', 'S'])
+        : null
+  if (!alongBranch) return [feederAdjacent]
+
+  const collected: ConveyorUnit[] = []
+  const visited = new Set<string>([junction.id])
+
+  function visit(current: ConveyorUnit, prevId: string) {
+    if (visited.has(current.id)) return
+    visited.add(current.id)
+    collected.push(current)
+
+    for (const neighborId of current.connections) {
+      if (neighborId === prevId || neighborId === junction.id) continue
+      const next = unitMap.get(neighborId)
+      if (!next || isStorageUnit(next) || isPortUnit(next) || next.type === 'junction') {
+        continue
+      }
+
+      const stepDir = flowExitDir(current, next)
+      if (stepDir && alongBranch.has(stepDir)) {
+        visit(next, current.id)
+      }
+    }
+  }
+
+  visit(feederAdjacent, junction.id)
+  return collected
+}
+
+function walkPerpendicularBranchUnits(
+  junction: ConveyorUnit,
+  feederAdjacent: ConveyorUnit,
+  unitMap: Map<string, ConveyorUnit>,
+): ConveyorUnit[] {
+  return walkAxisAlignedBranchUnits(junction, feederAdjacent, unitMap)
+}
+
+function sortUnitsByDisplayCode(units: ConveyorUnit[]): ConveyorUnit[] {
+  return [...units].sort((a, b) =>
+    unitDisplayCode(a).localeCompare(unitDisplayCode(b), undefined, {
+      numeric: true,
+    }),
+  )
+}
+
+export function isJunctionRequestUnitCandidate(
+  line: UnitLineContext,
+  junction: ConveyorUnit,
+  candidateId: string,
+): boolean {
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  return (
+    computeJunctionDivertFlow(
+      junction,
+      unitMap,
+      line as ConveyorLine,
+      candidateId,
+    ) != null
+  )
+}
+
+export function isJunctionStraightLineRequestUnit(
+  line: UnitLineContext,
+  junction: ConveyorUnit,
+  unitId: string,
+): boolean {
+  return listJunctionRequestSecondaryUnitCandidates(line, junction).some(
+    (unit) => unit.id === unitId,
+  )
+}
+
+export function listJunctionRequestUnitCandidates(
+  line: UnitLineContext,
+  junction: ConveyorUnit,
+): ConveyorUnit[] {
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  const linked = listJunctionLinkedUnitCandidates(line, junction)
+  const perpendicularFeeders = linked.filter((unit) =>
+    isJunctionRequestUnitCandidate(line, junction, unit.id),
+  )
+
+  const byId = new Map<string, ConveyorUnit>()
+  for (const feeder of perpendicularFeeders) {
+    for (const unit of walkPerpendicularBranchUnits(junction, feeder, unitMap)) {
+      byId.set(unit.id, unit)
+    }
+  }
+
+  return sortUnitsByDisplayCode([...byId.values()])
+}
+
+/** 분기 요청 CV 2 — 분기와 가로·세로 직선으로 연결된 CV (연장선 포함) */
+export function listJunctionRequestSecondaryUnitCandidates(
+  line: UnitLineContext,
+  junction: ConveyorUnit,
+): ConveyorUnit[] {
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  const linked = listJunctionLinkedUnitCandidates(line, junction)
+  const byId = new Map<string, ConveyorUnit>()
+
+  for (const feeder of linked) {
+    for (const unit of walkAxisAlignedBranchUnits(junction, feeder, unitMap)) {
+      byId.set(unit.id, unit)
+    }
+  }
+
+  return sortUnitsByDisplayCode([...byId.values()])
+}
+
 export function defaultJunctionRoutingProperties(
   line: UnitLineContext,
   junction: ConveyorUnit,
@@ -267,27 +506,16 @@ export function defaultJunctionRoutingProperties(
     return divert != null
   })
 
-  return {
-    requestUnitId: perpendicular?.id ?? '',
-    description: '',
-  }
+  return syncJunctionRoutingIds(
+    perpendicular ? { requestUnitIds: [perpendicular.id] } : {},
+  )
 }
 
 function coerceJunctionRouting(
   raw: JunctionRoutingProperties | null | undefined,
 ): JunctionRoutingProperties | null {
   if (!raw) return null
-  if ('requestUnitId' in raw && typeof raw.requestUnitId === 'string') {
-    return raw
-  }
-  const legacy = raw as JunctionRoutingProperties & {
-    ldUnitId?: string
-    uldUnitId?: string
-  }
-  return {
-    requestUnitId: legacy.uldUnitId ?? legacy.ldUnitId ?? '',
-    description: legacy.description,
-  }
+  return syncJunctionRoutingIds(raw)
 }
 
 export function validateJunctionConfiguration(
@@ -304,39 +532,75 @@ export function validateJunctionConfiguration(
     listJunctionLinkedUnitCandidates(line, junction).map((unit) => unit.id),
   )
 
-  if (!props.requestUnitId) {
+  const requestUnitIds = getJunctionRequestUnitIds(props)
+
+  if (requestUnitIds.length === 0) {
     issues.push({
       severity: 'warning',
-      message: '분기 요청 컨베이어를 지정하세요.',
+      message: '분기 요청 컨베이어를 1개 이상 지정하세요.',
     })
     return issues
   }
 
-  if (!allowed.has(props.requestUnitId)) {
+  if (requestUnitIds.length > 2) {
     issues.push({
       severity: 'error',
-      message: '분기 요청 컨베이어가 분기 모듈과 인접하지 않습니다.',
+      message: '분기 요청 컨베이어는 최대 2개까지 지정할 수 있습니다.',
     })
   }
 
-  if (!areGridAdjacent(line.units, junction.id, props.requestUnitId, cols, rows)) {
-    issues.push({
-      severity: 'warning',
-      message: '분기 요청 컨베이어와 그리드상 인접 배치가 필요합니다.',
-    })
-  }
+  for (let index = 0; index < requestUnitIds.length; index++) {
+    const requestUnitId = requestUnitIds[index]!
+    const feeder = findFeederAdjacentToJunction(junction, requestUnitId, unitMap)
+    const isPrimary = index === 0
 
-  const divert = computeJunctionDivertFlow(
-    junction,
-    unitMap,
-    line as ConveyorLine,
-    props.requestUnitId,
-  )
-  if (!divert) {
-    issues.push({
-      severity: 'error',
-      message: '분기 요청 컨베이어는 주행 방향과 수직인 인접 CV여야 합니다.',
-    })
+    if (isPrimary) {
+      if (!feeder || !isJunctionRequestUnitCandidate(line, junction, feeder.id)) {
+        issues.push({
+          severity: 'error',
+          message:
+            '분기 요청 컨베이어 1은 직진에 수직인 인접 분기 CV 또는 그 연장선이어야 합니다.',
+        })
+        continue
+      }
+
+      const perpKey = junctionRequestPerpendicularDirKeyForUnit(line, junction, requestUnitId)
+      if (!perpKey) {
+        issues.push({
+          severity: 'error',
+          message: '분기 요청 컨베이어 1은 주행 방향과 수직인 인접 CV여야 합니다.',
+        })
+      }
+    } else if (!isJunctionStraightLineRequestUnit(line, junction, requestUnitId)) {
+      issues.push({
+        severity: 'error',
+        message:
+          '분기 요청 컨베이어 2는 분기와 가로·세로 직선으로 연결된 CV만 선택할 수 있습니다.',
+      })
+      continue
+    }
+
+    if (!feeder) {
+      issues.push({
+        severity: 'error',
+        message: '분기 요청 컨베이어가 분기 모듈과 연결되어 있지 않습니다.',
+      })
+      continue
+    }
+
+    if (!allowed.has(feeder.id)) {
+      issues.push({
+        severity: 'error',
+        message: '분기 요청 컨베이어가 분기 모듈과 인접하지 않습니다.',
+      })
+    }
+
+    if (!areGridAdjacent(line.units, junction.id, feeder.id, cols, rows)) {
+      issues.push({
+        severity: 'warning',
+        message: '분기 요청 컨베이어와 그리드상 인접 배치가 필요합니다.',
+      })
+    }
   }
 
   return issues

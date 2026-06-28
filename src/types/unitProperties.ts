@@ -25,8 +25,10 @@ export interface StkRoutingProperties {
 
 /** 분기 유닛 — 분기 요청 컨베이어 지정 (평시 직진, 요청 시 수직 전환) */
 export interface JunctionRoutingProperties {
-  /** 분기 요청 컨베이어 — 이 인접 CV가 요청할 때 수직 전환 */
-  requestUnitId: string
+  /** @deprecated requestUnitIds 사용 — 하위 호환 */
+  requestUnitId?: string
+  /** 분기 요청 컨베이어 — 최대 2개 (1: 직진 수직 측면, 2: 가로·세로 직선 연장 CV) */
+  requestUnitIds: string[]
   description?: string
 }
 
@@ -116,7 +118,7 @@ export interface MultiPathSimulationPlan {
   message: string
 }
 
-export const PATH_SIMULATION_STEP_MS = 500
+export const PATH_SIMULATION_STEP_MS = 250
 /** 기본 투입(시작점) 체류 (초) */
 export const DEFAULT_SIM_INPUT_INTERVAL_SEC = 0.5
 /** 기본 출고(종료점) 체류 (초) */

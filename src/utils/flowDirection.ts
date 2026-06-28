@@ -8,7 +8,7 @@ import {
   computeOutboundLinks,
   type OutboundLink,
 } from './outboundFlow'
-import { getPortProperties, resolvePortAdjacentStk } from './unitPropertyHelpers'
+import { getPortProperties, resolvePortAdjacentStk, getJunctionRequestUnitIds, getJunctionRoutingProperties, listJunctionBranchUnitIds } from './unitPropertyHelpers'
 
 export type FlowDir = 'N' | 'E' | 'S' | 'W'
 
@@ -21,6 +21,14 @@ export interface UnitFlowDirs {
   role: 'start' | 'end' | 'through' | 'single'
   /** 포트 IN/OUT (미니맵 표시용) */
   portDirection?: PortDirection | null
+}
+
+/** CV 물류 직진 축 — in/out 방향 집합 (동일 축 CV끼리만 매칭) */
+export function cvThroughFlowAxisKey(flow: UnitFlowDirs | null | undefined): string | null {
+  if (!flow) return null
+  const dirs = [flow.inDir, flow.outDir].filter((dir): dir is FlowDir => dir != null)
+  if (dirs.length === 0) return null
+  return [...new Set(dirs)].sort().join('|')
 }
 
 /** 시뮬 경로 구간 역할 — flowRole=entry/exit만 시작·종료점 배지 */
@@ -578,6 +586,30 @@ export function computeJunctionDivertFlow(
   return null
 }
 
+/** 분기 요청 CV1 → CV2 교차 물류 (양쪽 요청 시) */
+export function computeJunctionCrossRequestFlow(
+  junction: ConveyorUnit,
+  unitMap: Map<string, ConveyorUnit>,
+  line: ConveyorLine,
+  requestUnitId1: string,
+  requestUnitId2: string,
+): { inDir: FlowDir | null; outDir: FlowDir | null } | null {
+  const req1 = unitMap.get(requestUnitId1)
+  const req2 = unitMap.get(requestUnitId2)
+  if (!req1 || !req2) return null
+
+  const inDir = flowEntryDir(req1, junction)
+  const outDir = flowExitDir(junction, req2)
+  if (!inDir || !outDir) return null
+
+  const through = computeJunctionThroughFlow(junction, unitMap, line)
+  if (through.inDir && inDir === through.inDir && outDir === through.outDir) {
+    return null
+  }
+
+  return { inDir, outDir }
+}
+
 /** 분기 유닛 — 평시 직진, 분기 요청 CV는 시뮬 경로에서 수직 전환 */
 function computeJunctionUnitFlow(
   junction: ConveyorUnit,
@@ -876,8 +908,28 @@ export function overlaySimulationPathOnFlowMap(
     const next =
       i < pathUnitIds.length - 1 ? unitMap.get(pathUnitIds[i + 1]!) : null
 
-    const inDir = prev ? flowEntryDir(prev, unit) : null
-    const outDir = next ? flowExitDir(unit, next) : null
+    let inDir = prev ? flowEntryDir(prev, unit) : null
+    let outDir = next ? flowExitDir(unit, next) : null
+
+    if (unit.type === 'junction' && i > 0 && i < pathUnitIds.length - 1) {
+      const props = getJunctionRoutingProperties(unit, line)
+      const [req1, req2] = getJunctionRequestUnitIds(
+        props ?? { requestUnitIds: [], requestUnitId: '' },
+      )
+      if (req1 && req2) {
+        const before = pathUnitIds[i - 1]!
+        const after = pathUnitIds[i + 1]!
+        const req1Branch = new Set(listJunctionBranchUnitIds(line, unit, req1))
+        const req2Branch = new Set(listJunctionBranchUnitIds(line, unit, req2))
+        if (req1Branch.has(before) && req2Branch.has(after)) {
+          const cross = computeJunctionCrossRequestFlow(unit, unitMap, line, req1, req2)
+          if (cross?.inDir && cross.outDir) {
+            inDir = cross.inDir
+            outDir = cross.outDir
+          }
+        }
+      }
+    }
 
     if (!inDir && !outDir) continue
 

@@ -26,10 +26,12 @@ import {
   readPortProperties,
   getStkProperties,
   getJunctionRoutingProperties,
+  getJunctionRequestUnitIds,
   getStkRoutingProperties,
   isJunctionUnit,
   isTurnRoutingUnit,
-  listJunctionLinkedUnitCandidates,
+  listJunctionRequestUnitCandidates,
+  listJunctionRequestSecondaryUnitCandidates,
   unitDisplayCode,
   validateJunctionConfiguration,
   validatePortConfiguration,
@@ -235,37 +237,95 @@ export function JunctionRequestSection({ line, unit, onChange }: RoleSectionsPro
   const props = getJunctionRoutingProperties(unit, line)
   if (!props) return null
 
-  const candidates = useMemo(
-    () => listJunctionLinkedUnitCandidates(line, unit),
+  const requestUnitIds = getJunctionRequestUnitIds(props)
+  const primaryId = requestUnitIds[0] ?? ''
+  const secondaryId = requestUnitIds[1] ?? ''
+
+  const primaryCandidates = useMemo(
+    () => listJunctionRequestUnitCandidates(line, unit),
+    [line, unit],
+  )
+  const secondaryCandidates = useMemo(
+    () => listJunctionRequestSecondaryUnitCandidates(line, unit),
     [line, unit],
   )
   const issues = useMemo(() => validateJunctionConfiguration(line, unit), [line, unit])
 
   const update = (patch: Partial<JunctionRoutingProperties>) => {
-    patchJunctionRouting(line, unit, { ...props, ...patch }, onChange)
+    const merged = { ...props, ...patch }
+    const ids = getJunctionRequestUnitIds(merged)
+    patchJunctionRouting(
+      line,
+      unit,
+      {
+        ...merged,
+        requestUnitIds: ids,
+        requestUnitId: ids[0] ?? '',
+      },
+      onChange,
+    )
+  }
+
+  const setPrimary = (nextId: string) => {
+    const nextIds = nextId ? [nextId] : []
+    if (nextId && secondaryId && secondaryCandidates.some((c) => c.id === secondaryId)) {
+      nextIds.push(secondaryId)
+    }
+    update({ requestUnitIds: nextIds })
+  }
+
+  const setSecondary = (nextId: string) => {
+    const nextIds = primaryId ? (nextId ? [primaryId, nextId] : [primaryId]) : []
+    update({ requestUnitIds: nextIds })
   }
 
   return (
     <div className="space-y-2 rounded-md border border-amber-900/50 bg-amber-950/20 p-3">
       <p className="text-xs font-medium text-amber-200">분기 물류</p>
       <p className="text-[11px] leading-relaxed text-slate-400">
-        평시에는 경유 컨베이어처럼 직진으로 물류가 흐릅니다. 지정한 분기 요청 컨베이어가
-        요청하면 수직으로 전환됩니다.
+        평시에는 경유 컨베이어처럼 직진으로 물류가 흐릅니다. 요청 CV 1·2가 양쪽에서
+        요청하면 1→2로 교차 흐름이 가능하며, 직진 물류가 항상 우선합니다.
       </p>
       <div>
-        <label className="mb-1 block text-xs text-slate-400">분기 요청 컨베이어</label>
+        <label className="mb-1 block text-xs text-slate-400">분기 요청 컨베이어 1</label>
         <select
-          value={props.requestUnitId}
-          onChange={(e) => update({ requestUnitId: e.target.value })}
+          value={primaryId}
+          onChange={(e) => setPrimary(e.target.value)}
           className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
         >
           <option value="">선택</option>
-          {candidates.map((candidate) => (
+          {primaryCandidates.map((candidate) => (
             <option key={candidate.id} value={candidate.id}>
               {unitDisplayCode(candidate)}
             </option>
           ))}
         </select>
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-slate-400">
+          분기 요청 컨베이어 2 (선택)
+        </label>
+        <select
+          value={secondaryId}
+          onChange={(e) => setSecondary(e.target.value)}
+          disabled={!primaryId}
+          className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm disabled:opacity-50"
+        >
+          <option value="">없음</option>
+          {secondaryCandidates
+            .filter((candidate) => candidate.id !== primaryId)
+            .map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {unitDisplayCode(candidate)}
+              </option>
+            ))}
+        </select>
+        {primaryId ? (
+          <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+            분기와 가로·세로 직선으로 연결된 CV가 표시됩니다. 1번과 다른 축·측면도 선택할 수
+            있습니다.
+          </p>
+        ) : null}
       </div>
       {issues.map((issue) => (
         <p

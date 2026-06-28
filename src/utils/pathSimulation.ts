@@ -25,6 +25,11 @@ import {
   buildOutboundSimulationPath,
   listOutboundPorts,
 } from './outboundFlow'
+import {
+  canApproveJunctionCrossMove,
+  isJunctionCrossPath,
+  isJunctionThroughPathStep,
+} from './junctionSimulation'
 
 /** 회전/분기 유닛별 마지막 배정 STK — ROUND_ROBIN 순환용 */
 export type StkRoutingSessionState = Record<string, string>
@@ -849,17 +854,28 @@ interface MergeProposal {
   pathUnitIds: string[]
 }
 
-/** 합류점 — 물류 inDir(이전 CV) 쪽 진입 우선, 동률이면 경로상 선행·stepIndex */
+/** 합류점 — 직진(through) 우선, 그다음 inDir 일치, 동률이면 경로상 선행·stepIndex */
 function pickMergeProposalWinner(
   contenders: MergeProposal[],
   unitMap: Map<string, ConveyorUnit> | undefined,
   flowMap: Map<string, UnitFlowDirs> | undefined,
+  line?: ConveyorLine,
 ): number {
   if (contenders.length === 0) return 0
   if (contenders.length === 1) return contenders[0]!.index
 
   const target = unitMap?.get(contenders[0]!.to)
   const flow = flowMap?.get(contenders[0]!.to)
+
+  if (line && unitMap && target?.type === 'junction') {
+    const throughContenders = contenders.filter((candidate) => {
+      const after = candidate.pathUnitIds[candidate.stepIndex + 1]
+      return isJunctionThroughPathStep(target, unitMap, line, candidate.from, after)
+    })
+    if (throughContenders.length > 0) {
+      return pickMergeProposalWinner(throughContenders, unitMap, flowMap)
+    }
+  }
 
   if (unitMap && target && flow?.inDir) {
     const upstream = contenders.filter((candidate) => {
@@ -896,6 +912,7 @@ function resolveMergeWinnersByTarget(
   posAt: (index: number, step: number) => string,
   unitMap: Map<string, ConveyorUnit> | undefined,
   flowMap: Map<string, UnitFlowDirs> | undefined,
+  line?: ConveyorLine,
 ): Map<string, number> {
   const byTarget = new Map<string, number[]>()
 
@@ -923,6 +940,7 @@ function resolveMergeWinnersByTarget(
       })),
       unitMap,
       flowMap,
+      line,
     )
     winners.set(to, winner)
   }
@@ -1027,8 +1045,9 @@ export function applySimulationStep(
   unitMap?: Map<string, ConveyorUnit>,
   timing?: SimulationStepTiming,
   flowMap?: Map<string, UnitFlowDirs>,
+  line?: ConveyorLine,
 ): PathSimulationLoad[] {
-  return advanceSimulationLoads(loads, unitMap, timing, flowMap)
+  return advanceSimulationLoads(loads, unitMap, timing, flowMap, line)
 }
 
 export function countIncompleteSimulationLoads(loads: PathSimulationLoad[]): number {
@@ -1057,6 +1076,7 @@ export function advanceSimulationLoads(
     transitIntervalSec: 0.5,
   },
   flowMap?: Map<string, UnitFlowDirs>,
+  line?: ConveyorLine,
 ): PathSimulationLoad[] {
   const entryTicksRequired = requiredDwellTicks(timing.inputIntervalSec)
   const exitTicksRequired = requiredDwellTicks(timing.dischargeIntervalSec)
@@ -1136,6 +1156,7 @@ export function advanceSimulationLoads(
     posAt,
     unitMap,
     flowMap,
+    line,
   )
 
   const proposalEntries = [...proposals.entries()].sort(
@@ -1183,6 +1204,30 @@ export function advanceSimulationLoads(
       const destinationId = next[index]!.pathUnitIds[next[index]!.pathUnitIds.length - 1]
       const isDestination = to === destinationId
       const onPlannedPath = next[index]!.pathUnitIds.includes(to)
+
+      if (line && fromUnit && targetUnit) {
+        const junction =
+          targetUnit.type === 'junction'
+            ? targetUnit
+            : fromUnit.type === 'junction'
+              ? fromUnit
+              : null
+        if (
+          junction &&
+          isJunctionCrossPath(line, junction, next[index]!.pathUnitIds) &&
+          !canApproveJunctionCrossMove(line, junction, next, unitMap)
+        ) {
+          const step = next[index]!.stepIndex
+          const enteringJunction = to === junction.id
+          const leavingJunction = from === junction.id
+          const onCrossApproach =
+            enteringJunction || leavingJunction || step + 1 < next[index]!.pathUnitIds.length
+          if (onCrossApproach) {
+            next[index]!.waiting = true
+            continue
+          }
+        }
+      }
 
       if (fromUnit && isPortUnit(fromUnit) && !isSimulationPortOperable(fromUnit)) {
         next[index]!.waiting = true
