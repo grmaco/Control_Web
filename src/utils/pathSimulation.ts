@@ -688,10 +688,11 @@ function buildFlowChain(
   return [entryId]
 }
 
-/** 투입점 → 연결 라인상 가장 먼 분기·회전(연동 유닛 보유) 목적지 */
+/** 투입점 → 선택 목적지(분기) 또는 최원 분기 목적지 */
 export function planInboundLoadPath(
   line: ConveyorLine,
   entryUnitId: string,
+  destinationUnitId?: string | null,
 ): PathSimulationPlan {
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
   const entry = unitMap.get(entryUnitId)
@@ -705,11 +706,16 @@ export function planInboundLoadPath(
     }
   }
 
-  const traversal = planInboundPathFromFlowTraversal(line, entryUnitId)
+  const traversal = planInboundPathFromFlowTraversal(
+    line,
+    entryUnitId,
+    destinationUnitId,
+  )
 
   if (traversal) {
     const pathUnitIds = finalizeInboundDestinationPath(line, traversal.pathUnitIds)
     const destLabel = inboundDestinationDisplayName(traversal.destinationUnit)
+    const autoDest = !destinationUnitId || destinationUnitId !== traversal.destinationUnitId
     return {
       entryUnitId,
       routingUnitId: traversal.destinationUnitId,
@@ -717,7 +723,22 @@ export function planInboundLoadPath(
       targetExitId: null,
       pathUnitIds,
       previewPathUnitIds: traversal.previewTransitUnitIds,
-      message: `${unitDisplayCode(entry)} → ${destLabel} (목적지 · 최원 분기)`,
+      message: autoDest
+        ? `${unitDisplayCode(entry)} → ${destLabel} (목적지 · 최원 분기)`
+        : `${unitDisplayCode(entry)} → ${destLabel} (목적지)`,
+    }
+  }
+
+  if (destinationUnitId) {
+    const dest = unitMap.get(destinationUnitId)
+    const destLabel = dest ? unitDisplayCode(dest) : destinationUnitId
+    return {
+      entryUnitId,
+      routingUnitId: null,
+      targetStkId: null,
+      targetExitId: null,
+      pathUnitIds: [],
+      message: `${unitDisplayCode(entry)} → ${destLabel} 경로 없음`,
     }
   }
 
@@ -949,9 +970,10 @@ function createSimulationLoadInbound(
   line: ConveyorLine,
   entryUnitId: string,
   unitMap: Map<string, ConveyorUnit>,
+  destinationUnitId?: string | null,
 ): PathSimulationLoad {
   const unit = unitMap.get(entryUnitId)
-  const plan = planInboundLoadPath(line, entryUnitId)
+  const plan = planInboundLoadPath(line, entryUnitId, destinationUnitId)
   return createSimulationLoad(plan, unit, 'inbound')
 }
 
@@ -959,14 +981,21 @@ function createSimulationLoadInbound(
 export function planMultiInboundLoadPaths(
   line: ConveyorLine,
   entryUnitIds: string[],
+  options?: { destinationUnitIdByEntry?: Record<string, string> },
 ): MultiPathSimulationPlan {
   if (entryUnitIds.length === 0) {
     return { loads: [], message: '투입점을 선택하세요.' }
   }
 
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  const destByEntry = options?.destinationUnitIdByEntry ?? {}
   const loads = entryUnitIds.map((entryUnitId) =>
-    createSimulationLoadInbound(line, entryUnitId, unitMap),
+    createSimulationLoadInbound(
+      line,
+      entryUnitId,
+      unitMap,
+      destByEntry[entryUnitId],
+    ),
   )
 
   return finalizeMultiPathLoads(loads, '투입점을 선택하세요.')
@@ -995,6 +1024,19 @@ export function planMultiOutboundLoadPaths(
 
 function isAtDestination(load: PathSimulationLoad): boolean {
   return load.pathUnitIds.length > 0 && load.stepIndex >= load.pathUnitIds.length - 1
+}
+
+/** 시뮬 load가 아직 투입점을 지나지 않았는지 — 출발 후 투입점 콜아웃 목적지 숨김용 */
+export function isSimulationLoadOccupyingEntry(load: PathSimulationLoad): boolean {
+  if (load.complete || load.pathUnitIds.length === 0) return false
+  const entryUnitId = load.entryUnitId
+  const step = Math.min(
+    Math.max(0, load.stepIndex),
+    load.pathUnitIds.length - 1,
+  )
+  const entryIndex = load.pathUnitIds.indexOf(entryUnitId)
+  if (entryIndex < 0) return step === 0
+  return step <= entryIndex
 }
 
 /** 출고 대기( dischargeInterval ) — OUT 포트·출고점(flowRole exit)에서만 적용 */
@@ -1750,6 +1792,46 @@ export function simulationCstUnitIds(
   return ordered
 }
 
+function unitShowsInboundSimDestination(unit: ConveyorUnit): boolean {
+  return (
+    unit.type === 'junction' ||
+    unit.type === 'turn' ||
+    unit.flowRole === 'entry' ||
+    unit.role === 'INPUT'
+  )
+}
+
+/** 투입 자재가 위치한 분기·회전·투입점 — load 목적지 라벨 (CST 없으면 비움) */
+export function buildInboundSimDestinationByUnitId(
+  loads: PathSimulationLoad[],
+  materialUnitIds: string[],
+  units: ConveyorUnit[],
+): Record<string, string> {
+  const unitMap = new Map(units.map((unit) => [unit.id, unit]))
+  const materialAt = new Set(materialUnitIds)
+  const map: Record<string, string> = {}
+
+  for (const load of dedupeSimulationLoadsById(loads)) {
+    if (load.direction !== 'inbound' || load.complete || !load.routingUnitId) continue
+    if (!load.released || load.pathUnitIds.length === 0) continue
+
+    const step = Math.min(
+      Math.max(0, load.stepIndex),
+      load.pathUnitIds.length - 1,
+    )
+    const currentUnitId = load.pathUnitIds[step]
+    if (!currentUnitId || !materialAt.has(currentUnitId)) continue
+
+    const unit = unitMap.get(currentUnitId)
+    if (!unit || !unitShowsInboundSimDestination(unit)) continue
+
+    const dest = unitMap.get(load.routingUnitId)
+    if (dest) map[currentUnitId] = unitDisplayCode(dest)
+  }
+
+  return map
+}
+
 /** 시뮬 — 모듈 체류 타이머 진행 중(컨베이어 이송 연출) */
 function isSimulationLoadInTransit(
   load: PathSimulationLoad,
@@ -1938,8 +2020,9 @@ export function spawnContinuousInjectLoad(
   line: ConveyorLine,
   entryUnitId: string,
   seq: number,
+  destinationUnitId?: string | null,
 ): PathSimulationLoad | null {
-  const plan = planInboundLoadPath(line, entryUnitId)
+  const plan = planInboundLoadPath(line, entryUnitId, destinationUnitId)
   if (plan.pathUnitIds.length === 0) return null
 
   const unit = line.units.find((item) => item.id === entryUnitId)
@@ -1963,9 +2046,17 @@ export function spawnInboundSimulationLoads(
   line: ConveyorLine,
   entryUnitIds: string[],
   seq: number,
+  destinationUnitIdByEntry?: Record<string, string>,
 ): PathSimulationLoad[] {
   return entryUnitIds
-    .map((entryUnitId) => spawnContinuousInjectLoad(line, entryUnitId, seq))
+    .map((entryUnitId) =>
+      spawnContinuousInjectLoad(
+        line,
+        entryUnitId,
+        seq,
+        destinationUnitIdByEntry?.[entryUnitId],
+      ),
+    )
     .filter((load): load is PathSimulationLoad => load != null)
 }
 

@@ -74,7 +74,7 @@ interface LineStatusGridProps {
   /** 증가 시 콜아웃 선택 해제 */
   calloutDeselectToken?: number
   /** 투입점별 시뮬 목적지 이름 (콜아웃 표시) */
-  entrySimDestinationByUnitId?: Record<string, string>
+  simDestinationByUnitId?: Record<string, string>
   /** 모니터링 2.5D 시점 표현 */
   is25DView?: boolean
   className?: string
@@ -171,7 +171,7 @@ export function LineStatusGrid({
   simulationPathUnitIds = [],
   onCalloutPanLockChange,
   calloutDeselectToken = 0,
-  entrySimDestinationByUnitId = {},
+  simDestinationByUnitId = {},
   is25DView = false,
   continuousGatherProbes = [],
   continuousInputActive = false,
@@ -629,7 +629,7 @@ export function LineStatusGrid({
           activeUnitIds={simulationActiveSet}
           staticTestMaterialUnitIds={staticTestMaterialSet}
           simulating={simulationInProgress}
-          entrySimDestinationByUnitId={entrySimDestinationByUnitId}
+          simDestinationByUnitId={simDestinationByUnitId}
           simulationLoads={simulationCalloutLoads}
           inputIntervalSec={simulationInputIntervalSec}
           transitIntervalSec={simulationTransitIntervalSec}

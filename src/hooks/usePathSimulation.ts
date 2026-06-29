@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ConveyorLine } from '../types/conveyor'
+import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
 import type {
   MultiPathSimulationPlan,
   PathSimulationLoad,
@@ -31,6 +31,7 @@ import {
   planMultiInboundLoadPaths,
   planMultiOutboundLoadPaths,
   planMultiTestMaterialLoadPaths,
+  buildInboundSimDestinationByUnitId,
   buildLoadTackTimeSummaries,
   buildSequentialRevealLoadOrder,
   clampSimIntervalSec,
@@ -53,7 +54,7 @@ import {
   type GatherProbeState,
 } from '../utils/continuousInputGather'
 import { computeMinimapFlowMap } from '../utils/flowDirection'
-import { unitDisplayCode } from '../utils/unitPropertyHelpers'
+import { listReachableInboundDestinations } from '../utils/simulationDestination'
 import {
   anyInboundStkHasCapacity,
   createFullStkFillCounts,
@@ -128,12 +129,14 @@ function buildMultiPathPlan(
   activeLine: ConveyorLine,
   mode: PathSimulationMode,
   selectedSourceUnitIds: string[],
+  inboundDestinationByEntryId: Record<string, string> = {},
 ): MultiPathSimulationPlan | null {
   if (mode === 'inbound') {
     if (selectedSourceUnitIds.length === 0) return null
     const primary = planMultiInboundLoadPaths(
       activeLine,
       selectedSourceUnitIds,
+      { destinationUnitIdByEntry: inboundDestinationByEntryId },
     )
     if (primary.loads.length === 0) return null
     return primary
@@ -207,6 +210,9 @@ export function usePathSimulation(
   const [warehouseFullNotice, setWarehouseFullNotice] = useState(false)
   const [inboundLineFullBlocked, setInboundLineFullBlocked] = useState(false)
   const [inboundLineFullNotice, setInboundLineFullNotice] = useState(false)
+  const [inboundDestinationByEntryId, setInboundDestinationByEntryId] = useState<
+    Record<string, string>
+  >({})
 
   const continuousInputActiveRef = useRef(continuousInputActive)
   continuousInputActiveRef.current = continuousInputActive
@@ -221,6 +227,8 @@ export function usePathSimulation(
   warehouseFillCountsRef.current = warehouseFillCounts
   const selectedSourceUnitIdsRef = useRef(selectedSourceUnitIds)
   selectedSourceUnitIdsRef.current = selectedSourceUnitIds
+  const inboundDestinationByEntryIdRef = useRef(inboundDestinationByEntryId)
+  inboundDestinationByEntryIdRef.current = inboundDestinationByEntryId
   const onClearTestMaterialRef = useRef(options.onClearTestMaterial)
   onClearTestMaterialRef.current = options.onClearTestMaterial
   const revealOrderRef = useRef(revealOrder)
@@ -251,6 +259,51 @@ export function usePathSimulation(
       ),
     [],
   )
+
+  const setInboundDestinationForEntry = useCallback(
+    (entryUnitId: string, destinationUnitId: string) => {
+      setInboundDestinationByEntryId((prev) => ({
+        ...prev,
+        [entryUnitId]: destinationUnitId,
+      }))
+    },
+    [],
+  )
+
+  const inboundDestinationsByEntryId = useMemo((): Record<string, ConveyorUnit[]> => {
+    if (mode !== 'inbound') return {}
+    const map: Record<string, ConveyorUnit[]> = {}
+    for (const entryId of selectedSourceUnitIds) {
+      map[entryId] = listReachableInboundDestinations(line, entryId)
+    }
+    return map
+  }, [line, mode, selectedSourceUnitIds])
+
+  useEffect(() => {
+    if (mode !== 'inbound') return
+    setInboundDestinationByEntryId((prev) => {
+      const next = { ...prev }
+      let changed = false
+      for (const entryId of selectedSourceUnitIds) {
+        const destinations = listReachableInboundDestinations(line, entryId)
+        const current = next[entryId]
+        if (!current || !destinations.some((dest) => dest.id === current)) {
+          const farthest = destinations[destinations.length - 1]
+          if (farthest) {
+            next[entryId] = farthest.id
+            changed = true
+          }
+        }
+      }
+      for (const key of Object.keys(next)) {
+        if (!selectedSourceUnitIds.includes(key)) {
+          delete next[key]
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [line, mode, selectedSourceUnitIds])
 
   const stepTiming = useMemo(
     () => ({
@@ -415,8 +468,13 @@ export function usePathSimulation(
 
   const previewPlan = useMemo(
     (): MultiPathSimulationPlan | null =>
-      buildMultiPathPlan(line, mode, selectedSourceUnitIds),
-    [line, mode, selectedSourceUnitIds],
+      buildMultiPathPlan(
+        line,
+        mode,
+        selectedSourceUnitIds,
+        inboundDestinationByEntryId,
+      ),
+    [inboundDestinationByEntryId, line, mode, selectedSourceUnitIds],
   )
 
   const rebuildPlan = useCallback((): MultiPathSimulationPlan | null => {
@@ -495,6 +553,12 @@ export function usePathSimulation(
 
   const isRevealComplete = useCallback(
     (steps: Record<string, number>, nextLoads: PathSimulationLoad[]) => {
+      if (
+        nextLoads.length > 0 &&
+        nextLoads.every((load) => load.released)
+      ) {
+        return true
+      }
       return nextLoads.every((load) => {
         const revealPath = revealPathUnitIdsForLoad(load)
         if (revealPath.length === 0) return true
@@ -564,6 +628,7 @@ export function usePathSimulation(
         activeLine,
         mode,
         selectedSourceUnitIds,
+        inboundDestinationByEntryId,
       )
       const planLoads = nextPlan?.loads ?? []
 
@@ -622,6 +687,7 @@ export function usePathSimulation(
       beginContinuousInputSession,
       beginPathReveal,
       clearContinuousInputSession,
+      inboundDestinationByEntryId,
       line,
       mode,
       selectedSourceUnitIds,
@@ -867,6 +933,7 @@ export function usePathSimulation(
               CONTINUOUS_INPUT_INTERVAL_SEC,
               injectSeqRef.current,
               entryVacancyRef.current,
+              inboundDestinationByEntryIdRef.current,
             )
             gatherProbesRef.current = gatherResult.probes
             setGatherProbes(gatherResult.probes)
@@ -1180,7 +1247,13 @@ export function usePathSimulation(
     [simulationLine],
   )
   const revealHighlightUnitIds = useMemo(() => {
-    if (!(finalHoldActive || status === 'revealing')) return []
+    const revealVisualActive =
+      finalHoldActive ||
+      status === 'revealing' ||
+      (status === 'paused' &&
+        loads.length > 0 &&
+        loads.some((load) => !load.released))
+    if (!revealVisualActive) return []
     if (revealGapActive) return []
     if (sequentialRevealActive && finalHoldActive) return []
     const selected = new Set(selectedSourceUnitIds)
@@ -1214,11 +1287,11 @@ export function usePathSimulation(
       if (
         !continuousInputActive &&
         loads.length > 0 &&
-        (sequentialRevealActive
-          ? !isSequentialRevealDone()
-          : !isRevealComplete(revealSteps, loads))
+        !isRevealComplete(revealSteps, loads)
       ) {
-        return revealHighlightUnitIds
+        return revealHighlightUnitIds.length > 0
+          ? revealHighlightUnitIds
+          : cstUnitIds
       }
       return cstUnitIds
     }
@@ -1231,11 +1304,9 @@ export function usePathSimulation(
     cstUnitIds,
     finalHoldActive,
     isRevealComplete,
-    isSequentialRevealDone,
-    loads.length,
+    loads,
     revealHighlightUnitIds,
     revealSteps,
-    sequentialRevealActive,
     status,
   ])
   const pathUnitIds = useMemo(() => {
@@ -1243,7 +1314,12 @@ export function usePathSimulation(
     const selected = new Set(selectedSourceUnitIds)
     const activeLoads = loads.filter((load) => selected.has(load.entryUnitId))
     if (activeLoads.length === 0) return []
-    if (status === 'revealing' || finalHoldActive) {
+    const revealVisualActive =
+      finalHoldActive ||
+      status === 'revealing' ||
+      (status === 'paused' &&
+        activeLoads.some((load) => !load.released))
+    if (revealVisualActive) {
       return revealHighlightUnitIds
     }
     return unionSimulationConveyorPathUnitIds(activeLoads, simulationUnitMap)
@@ -1307,32 +1383,24 @@ export function usePathSimulation(
           .join(', ')
       : null
 
-  const entrySimDestinationByUnitId = useMemo(() => {
-    const sourceLoads = loads.length > 0 ? loads : (previewPlan?.loads ?? [])
-    const selected = new Set(selectedSourceUnitIds)
-    const map: Record<string, string> = {}
-    const unitMap = new Map(simulationLine.units.map((unit) => [unit.id, unit]))
-    for (const load of sourceLoads) {
-      if (load.direction !== 'inbound') continue
-      if (!selected.has(load.entryUnitId)) continue
-      const destId = load.routingUnitId
-      if (!destId) continue
-      const dest = unitMap.get(destId)
-      if (dest) map[load.entryUnitId] = unitDisplayCode(dest)
-    }
-    return map
-  }, [loads, previewPlan, selectedSourceUnitIds, simulationLine.units])
+  const simDestinationByUnitId = useMemo(
+    () =>
+      buildInboundSimDestinationByUnitId(
+        loads,
+        cstUnitIds,
+        simulationLine.units,
+      ),
+    [cstUnitIds, loads, simulationLine.units],
+  )
 
   const simulationFlowOverlayLoads = useMemo(() => {
     const useRevealStep =
-      status === 'revealing' ||
-      finalHoldActive ||
-      (status === 'paused' &&
-        !continuousInputActive &&
-        loads.length > 0 &&
-        (sequentialRevealActive
-          ? !isSequentialRevealDone()
-          : !isRevealComplete(revealSteps, loads)))
+      !continuousInputActive &&
+      loads.length > 0 &&
+      !isRevealComplete(revealSteps, loads) &&
+      (status === 'revealing' ||
+        finalHoldActive ||
+        (status === 'paused' && loads.some((load) => !load.released)))
 
     const overlayLoads =
       loads.length > 0
@@ -1386,6 +1454,9 @@ export function usePathSimulation(
     selectedSourceUnitIds,
     toggleSourceUnitId,
     setSelectedSourceUnitIds,
+    inboundDestinationByEntryId,
+    inboundDestinationsByEntryId,
+    setInboundDestinationForEntry,
     plan,
     loads,
     status,
@@ -1395,7 +1466,7 @@ export function usePathSimulation(
     activeUnitLabel,
     pathUnitIds,
     simulationFlowOverlayLoads,
-    entrySimDestinationByUnitId,
+    simDestinationByUnitId,
     staticTestMaterialUnitIds,
     waitingLabels,
     testMaterialUnits,

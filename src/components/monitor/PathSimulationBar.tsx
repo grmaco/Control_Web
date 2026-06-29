@@ -19,6 +19,9 @@ interface PathSimulationBarProps {
   sources: ConveyorUnit[]
   selectedSourceUnitIds: string[]
   onToggleSource: (sourceUnitId: string) => void
+  inboundDestinationsByEntryId?: Record<string, ConveyorUnit[]>
+  inboundDestinationByEntryId?: Record<string, string>
+  onSetInboundDestination?: (entryUnitId: string, destinationUnitId: string) => void
   plan: MultiPathSimulationPlan | null
   status: PathSimulationStatus
   progressLabel: string | null
@@ -110,6 +113,9 @@ export function PathSimulationBar({
   sources,
   selectedSourceUnitIds,
   onToggleSource,
+  inboundDestinationsByEntryId = {},
+  inboundDestinationByEntryId = {},
+  onSetInboundDestination,
   plan,
   status,
   progressLabel,
@@ -364,6 +370,56 @@ export function PathSimulationBar({
                 </div>
               )}
             </div>
+            {mode === 'inbound' &&
+            selectedSourceUnitIds.length > 0 &&
+            onSetInboundDestination ? (
+              <div>
+                <p className="mb-1.5 text-[10px] text-slate-500">목적지 (분기)</p>
+                <div className="space-y-2">
+                  {selectedSourceUnitIds.map((entryId) => {
+                    const entry = sources.find((source) => source.id === entryId)
+                    const destinations = inboundDestinationsByEntryId[entryId] ?? []
+                    const selectedDestId = inboundDestinationByEntryId[entryId]
+                    if (destinations.length === 0) {
+                      return (
+                        <p key={entryId} className="text-xs text-amber-300">
+                          {entry ? unitDisplayCode(entry) : entryId}: 도달 가능한 분기 없음
+                        </p>
+                      )
+                    }
+                    return (
+                      <div key={entryId}>
+                        {selectedSourceUnitIds.length > 1 && entry ? (
+                          <p className="mb-1 text-[10px] text-slate-500">
+                            {unitDisplayCode(entry)}
+                          </p>
+                        ) : null}
+                        <div className="flex flex-wrap justify-start gap-1.5">
+                          {destinations.map((dest) => {
+                            const active = selectedDestId === dest.id
+                            return (
+                              <button
+                                key={dest.id}
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => onSetInboundDestination(entryId, dest.id)}
+                                className={`rounded border px-2.5 py-1 text-xs ${
+                                  active
+                                    ? 'border-cyan-600/70 bg-cyan-950/40 text-cyan-100'
+                                    : 'border-slate-700 bg-slate-800 text-slate-300'
+                                } ${isBusy ? 'pointer-events-none opacity-50' : 'hover:border-cyan-700/50'}`}
+                              >
+                                {unitDisplayCode(dest)}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : null}
           </div>
         </SimPanel>
 

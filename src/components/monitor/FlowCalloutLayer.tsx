@@ -33,8 +33,8 @@ interface FlowCalloutOverlayProps {
   activeUnitIds?: Set<string>
   staticTestMaterialUnitIds?: Set<string>
   simulating?: boolean
-  /** 투입점별 시뮬 목적지 이름 */
-  entrySimDestinationByUnitId?: Record<string, string>
+  /** 자재 위치별 시뮬 목적지 (분기·회전·투입점) */
+  simDestinationByUnitId?: Record<string, string>
   /** 증가 시 선택 해제 (시뮬레이션 초기화 등) */
   deselectToken?: number
   /** 맵 호버·터치로 열린 유닛 — 강조 표시 */
@@ -61,7 +61,7 @@ export function FlowCalloutOverlay({
   activeUnitIds,
   staticTestMaterialUnitIds,
   simulating = false,
-  entrySimDestinationByUnitId = {},
+  simDestinationByUnitId = {},
   deselectToken = 0,
   peekUnitId = null,
   simulationLoads = [],
@@ -248,7 +248,7 @@ export function FlowCalloutOverlay({
                   simulating,
                   staticTestAtOrigin:
                     staticTestMaterialUnitIds?.has(callout.unitId) ?? false,
-                  simDestination: entrySimDestinationByUnitId[callout.unitId] ?? null,
+                  simDestination: simDestinationByUnitId[callout.unitId] ?? null,
                   simulationLoads: simulating ? simulationLoads : undefined,
                   unitMap: unitById,
                   inputIntervalSec,
@@ -673,7 +673,7 @@ function SelectableFlowCalloutTable({
             </td>
           </tr>
 
-          {/* 목적지 (투입점 시뮬) */}
+          {/* 목적지 (투입 시뮬 — 분기·회전·투입점) */}
           {display?.simDestination != null && (
             <tr style={{ borderBottom: `1px solid ${rowDivider}` }}>
               <th style={{ padding: '2px 4px', fontWeight: 600, color: labelColor, textAlign: 'left', letterSpacing: '0.04em' }}>

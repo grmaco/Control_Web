@@ -123,28 +123,44 @@ function pickFarthestJunctionDestination(
   line: ConveyorLine,
   dist: Map<string, number>,
 ): ConveyorUnit | null {
-  let best: ConveyorUnit | null = null
-  let bestDist = -1
+  const candidates = listReachableInboundDestinations(line, dist)
+  return candidates.length > 0 ? candidates[candidates.length - 1]! : null
+}
 
+/** 투입점에서 도달 가능한 분기 목적지 — 거리순(가까운→먼) */
+export function listReachableInboundDestinations(
+  line: ConveyorLine,
+  entryUnitIdOrDist: string | Map<string, number>,
+  unitMap?: Map<string, ConveyorUnit>,
+): ConveyorUnit[] {
+  const map =
+    unitMap ?? new Map(line.units.map((unit) => [unit.id, unit]))
+
+  let dist: Map<string, number>
+  if (typeof entryUnitIdOrDist === 'string') {
+    const graph = buildInboundTransportGraph(line, entryUnitIdOrDist, map)
+    if (!graph) return []
+    dist = dijkstraOnTransportGraph(graph, entryUnitIdOrDist).dist
+  } else {
+    dist = entryUnitIdOrDist
+  }
+
+  const items: ConveyorUnit[] = []
   for (const unit of line.units) {
     if (!isInboundJunctionDestination(line, unit)) continue
     const hops = dist.get(unit.id)
     if (hops == null || !Number.isFinite(hops)) continue
-    if (hops > bestDist) {
-      bestDist = hops
-      best = unit
-      continue
-    }
-    if (hops === bestDist && best) {
-      const labelA = unitDisplayCode(unit)
-      const labelB = unitDisplayCode(best)
-      if (labelA.localeCompare(labelB, undefined, { numeric: true }) > 0) {
-        best = unit
-      }
-    }
+    items.push(unit)
   }
 
-  return best
+  items.sort(
+    (a, b) =>
+      (dist.get(a.id) ?? 0) - (dist.get(b.id) ?? 0) ||
+      unitDisplayCode(a).localeCompare(unitDisplayCode(b), undefined, {
+        numeric: true,
+      }),
+  )
+  return items
 }
 
 /** 그래프 거리순 — 목적지까지 도달 가능한 직선·분기·회전(미리보기) */
@@ -182,6 +198,7 @@ function listExploredConveyorUnitIds(
 export function planInboundPathFromFlowTraversal(
   line: ConveyorLine,
   entryUnitId: string,
+  destinationUnitId?: string | null,
 ): InboundTraversalPlan | null {
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
   const entry = unitMap.get(entryUnitId)
@@ -191,7 +208,23 @@ export function planInboundPathFromFlowTraversal(
   if (!graph) return null
 
   const { dist } = dijkstraOnTransportGraph(graph, entryUnitId)
-  const destinationUnit = pickFarthestJunctionDestination(line, dist)
+
+  let destinationUnit: ConveyorUnit | null = null
+  if (destinationUnitId) {
+    const candidate = unitMap.get(destinationUnitId)
+    const hops = dist.get(destinationUnitId)
+    if (
+      candidate &&
+      isInboundJunctionDestination(line, candidate) &&
+      hops != null &&
+      Number.isFinite(hops)
+    ) {
+      destinationUnit = candidate
+    }
+  }
+  if (!destinationUnit) {
+    destinationUnit = pickFarthestJunctionDestination(line, dist)
+  }
   if (!destinationUnit) return null
 
   const astar = astarTransportPath(

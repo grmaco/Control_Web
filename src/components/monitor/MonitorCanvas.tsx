@@ -422,7 +422,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
                 warehouseFillCounts={simulation.warehouseFillCounts}
                 onCalloutPanLockChange={setCalloutPanLock}
                 calloutDeselectToken={calloutDeselectToken}
-                entrySimDestinationByUnitId={simulation.entrySimDestinationByUnitId}
+                simDestinationByUnitId={simulation.simDestinationByUnitId}
                 is25DView={is25DView}
                 className="select-none"
               />
@@ -437,6 +437,9 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             sources={simulation.sources}
             selectedSourceUnitIds={simulation.selectedSourceUnitIds}
             onToggleSource={simulation.toggleSourceUnitId}
+            inboundDestinationsByEntryId={simulation.inboundDestinationsByEntryId}
+            inboundDestinationByEntryId={simulation.inboundDestinationByEntryId}
+            onSetInboundDestination={simulation.setInboundDestinationForEntry}
             plan={simulation.plan}
             status={simulation.status}
             progressLabel={simulation.progressLabel}
@@ -534,6 +537,9 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
         sources={simulation.sources}
         selectedSourceUnitIds={simulation.selectedSourceUnitIds}
         onToggleSource={simulation.toggleSourceUnitId}
+        inboundDestinationsByEntryId={simulation.inboundDestinationsByEntryId}
+        inboundDestinationByEntryId={simulation.inboundDestinationByEntryId}
+        onSetInboundDestination={simulation.setInboundDestinationForEntry}
         plan={simulation.plan}
         status={simulation.status}
         progressLabel={simulation.progressLabel}
@@ -675,7 +681,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             warehouseFillCounts={simulation.warehouseFillCounts}
             onCalloutPanLockChange={setCalloutPanLock}
             calloutDeselectToken={calloutDeselectToken}
-            entrySimDestinationByUnitId={simulation.entrySimDestinationByUnitId}
+            simDestinationByUnitId={simulation.simDestinationByUnitId}
             is25DView={is25DView}
             className="select-none"
           />

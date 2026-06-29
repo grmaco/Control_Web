@@ -57,9 +57,10 @@ function canProbeDepositInjectNow(
   loads: PathSimulationLoad[],
   line: ConveyorLine,
   entryUnitId: string,
+  destinationUnitId?: string | null,
 ): boolean {
   if (!isEntryUnoccupied(loads, line, entryUnitId)) return false
-  const plan = planInboundLoadPath(line, entryUnitId)
+  const plan = planInboundLoadPath(line, entryUnitId, destinationUnitId)
   return plan.pathUnitIds.length > 0
 }
 
@@ -346,6 +347,7 @@ function attemptProbeDepotInject(
   loadSequence: number,
   tickVacantByEntry: Record<string, number>,
   toDepotMs: number,
+  destinationUnitId?: string | null,
 ): {
   probe: GatherProbeState
   loads: PathSimulationLoad[]
@@ -366,7 +368,7 @@ function attemptProbeDepotInject(
     }
   }
 
-  if (!canProbeDepositInjectNow(loads, line, entryUnitId)) {
+  if (!canProbeDepositInjectNow(loads, line, entryUnitId, destinationUnitId)) {
     return {
       probe: holdProbeAtDepot(probe, toDepotMs),
       loads,
@@ -383,6 +385,7 @@ function attemptProbeDepotInject(
     loadSequence,
     tickVacantByEntry,
     0,
+    destinationUnitId,
   )
 
   if (inject.spawned.length > 0) {
@@ -415,6 +418,7 @@ function applyDepositInject(
   loadSequence: number,
   tickVacantByEntry: Record<string, number>,
   _inputIntervalSec: number,
+  destinationUnitId?: string | null,
 ): {
   probe: GatherProbeState
   loads: PathSimulationLoad[]
@@ -431,6 +435,7 @@ function applyDepositInject(
     entryUnitId,
     loadSequence,
     tickVacantByEntry,
+    destinationUnitId,
   )
   if (inject.spawned.length === 0) {
     return { probe, loads, spawned: [], nextSequence: loadSequence }
@@ -535,6 +540,7 @@ function advanceProbeByDelta(
   loadSequence: number,
   tickVacantByEntry: Record<string, number>,
   _inputIntervalSec: number,
+  destinationUnitId?: string | null,
 ): {
   probe: GatherProbeState
   loads: PathSimulationLoad[]
@@ -568,6 +574,7 @@ function advanceProbeByDelta(
       nextSequence,
       tickVacantByEntry,
       durations.toDepot,
+      destinationUnitId,
     )
     spawned.push(...injected.spawned)
     return {
@@ -917,13 +924,19 @@ function spawnAtEntryIfReady(
   entryUnitId: string,
   loadSequence: number,
   tickVacantByEntry: Record<string, number>,
+  destinationUnitId?: string | null,
 ): { loads: PathSimulationLoad[]; spawned: PathSimulationLoad[]; nextSequence: number } {
-  if (!canProbeDepositInjectNow(loads, line, entryUnitId)) {
+  if (!canProbeDepositInjectNow(loads, line, entryUnitId, destinationUnitId)) {
     return { loads, spawned: [], nextSequence: loadSequence }
   }
 
   const nextSeq = loadSequence + 1
-  const batchLoad = spawnContinuousInjectLoad(line, entryUnitId, nextSeq)
+  const batchLoad = spawnContinuousInjectLoad(
+    line,
+    entryUnitId,
+    nextSeq,
+    destinationUnitId,
+  )
   if (!batchLoad) {
     return { loads, spawned: [], nextSequence: loadSequence }
   }
@@ -963,6 +976,7 @@ export function advanceGatherProbes(
   inputIntervalSec: number,
   loadSequence: number,
   entryVacantTicks: Record<string, number>,
+  destinationUnitIdByEntry: Record<string, string> = {},
 ): AdvanceGatherProbesResult {
   if (entryUnitIds.length === 0) {
     return { probes: [], spawned: [], nextSequence: loadSequence, entryVacantTicks: {} }
@@ -980,6 +994,7 @@ export function advanceGatherProbes(
 
   for (let index = 0; index < entryUnitIds.length; index += 1) {
     const entryUnitId = entryUnitIds[index]!
+    const destinationUnitId = destinationUnitIdByEntry[entryUnitId] ?? null
 
     for (let slot = 0; slot < CONTINUOUS_PROBE_COUNT; slot += 1) {
       const probeKey = `${entryUnitId}:${slot}`
@@ -1013,6 +1028,7 @@ export function advanceGatherProbes(
           nextSequence,
           vacantTicksByEntry,
           inputIntervalSec,
+          destinationUnitId,
         )
         probe = stepped.probe
         loads = stepped.loads
