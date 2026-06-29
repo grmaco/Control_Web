@@ -143,23 +143,19 @@ function finalizeConveyorSimulationPath(
   return finalizeSimulationPath(line, withWaypoints)
 }
 
-/** 투입 목적지 경로 — 물류순서 전 구간 + 분기·턴 경유 (중간 CV 누락 방지) */
+/** 투입 목적지 경로 — A* 물리 경로 사용 + 분기·턴 경유지 보강 */
 function finalizeInboundDestinationPath(
   line: ConveyorLine,
   pathUnitIds: string[],
 ): string[] {
   if (pathUnitIds.length === 0) return []
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
-  const entryId = pathUnitIds[0]!
-  const destId = pathUnitIds[pathUnitIds.length - 1]!
-
-  const transit = buildInboundTransitPath(line, entryId, destId, unitMap)
-  const base =
-    transit && transit.length > 0
-      ? transit
-      : expandPathViaFlowOrder(line, pathUnitIds, unitMap)
-
-  return ensureTransitWaypointsOnPath(base, unitMap)
+  // pathUnitIds는 반송 그래프 A* 결과 — 물리적으로 인접(또는 STK 한 칸 브릿지)한
+  // 칸만 이어진 실제 경로다. 이를 buildInboundTransitPath의 물류순서(DFS) 슬라이스로
+  // 재구성하면, DFS가 한 가지를 끝까지 내려갔다가 다른 가지로 backtrack하는 순서를
+  // 직선 경로로 오인해 비인접 점프(예: CV05→CV09)가 생긴다. A* 경로를 그대로 쓰고
+  // 분기·턴 경유지만 보강한다.
+  return ensureTransitWaypointsOnPath(pathUnitIds, unitMap)
 }
 
 export function bfsPath(

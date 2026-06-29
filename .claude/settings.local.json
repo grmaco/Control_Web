@@ -21,7 +21,9 @@
       "Bash(git checkout *)",
       "Bash(git rm *)",
       "Bash(rm src/components/monitor/V3AlarmReferencePanel.tsx)",
-      "Read(//c/Users/PC/AppData/Local/Temp/claude/C--Users-PC-source-260625-Web-Control/056eaca5-32f2-44e5-b261-13f0e0024429/scratchpad/**)"
+      "Read(//c/Users/PC/AppData/Local/Temp/claude/C--Users-PC-source-260625-Web-Control/056eaca5-32f2-44e5-b261-13f0e0024429/scratchpad/**)",
+      "PowerShell(npx tsc -b --noEmit 2>&1 | Select-String -Pattern \"transportGraph|turnArc|unitFootprint|flowDirection\" ; \"exit=$LASTEXITCODE\")",
+      "PowerShell(npx tsc -b --noEmit 2>&1 | Select-String -Pattern \"transportGraph\" ; \"exit=$LASTEXITCODE\")"
     ]
   }
 }
