@@ -1119,6 +1119,36 @@ function isAtDestination(load: PathSimulationLoad): boolean {
   return load.pathUnitIds.length > 0 && load.stepIndex >= load.pathUnitIds.length - 1
 }
 
+/** 출고 대기( dischargeInterval ) — OUT 포트·출고점(flowRole exit)에서만 적용 */
+function requiresDischargeDwellAtCurrentStep(
+  load: PathSimulationLoad,
+  unitMap?: Map<string, ConveyorUnit>,
+): boolean {
+  const currentId = load.pathUnitIds[load.stepIndex]
+  if (!currentId || !unitMap) return false
+  const unit = unitMap.get(currentId)
+  if (!unit) return false
+
+  if (isPortUnit(unit)) {
+    return (unit.portDirection ?? 'IN') === 'OUT'
+  }
+  if (unit.flowRole === 'exit') return true
+  if (load.targetExitId === currentId) return true
+  return false
+}
+
+/** 투입 목적지(분기·STK) — 자재를 complete 없이 목적지에 유지 */
+function shouldRetainMaterialAtDestination(
+  load: PathSimulationLoad,
+  unitMap?: Map<string, ConveyorUnit>,
+): boolean {
+  const isInbound = load.direction === 'inbound' || load.continuousInject === true
+  if (!isInbound) return false
+  if (!isAtDestination(load)) return false
+  if (requiresDischargeDwellAtCurrentStep(load, unitMap)) return false
+  return canDischargeLoadAtCurrentStep(load, unitMap)
+}
+
 /** 시뮬 complete(출고) — STK I/O 비활성 시 적재·OUT 반출 없음, 라인 만재까지 자재 유지 */
 function canDischargeLoadAtCurrentStep(
   load: PathSimulationLoad,
@@ -1353,7 +1383,7 @@ export function revealPathUnitIdsForLoad(load: PathSimulationLoad): string[] {
   return load.pathUnitIds
 }
 
-/** 순차 미리보기 — 완료된 경로 + 현재 진행 중 경로만 점등 */
+/** 순차 미리보기 — 현재 투입점 경로만 점등 (이전 경로는 표시하지 않음) */
 export function simulationSequentialRevealUnitIds(
   loads: PathSimulationLoad[],
   revealSteps: Record<string, number>,
@@ -1361,28 +1391,24 @@ export function simulationSequentialRevealUnitIds(
   activeRevealIndex: number,
   unitMap?: Map<string, ConveyorUnit>,
 ): string[] {
-  const seen = new Set<string>()
-  const ordered: string[] = []
+  if (activeRevealIndex < 0 || activeRevealIndex >= revealOrder.length) {
+    return []
+  }
+
   const loadById = new Map(loads.map((load) => [load.id, load]))
+  const load = loadById.get(revealOrder[activeRevealIndex]!)
+  const revealPath = load ? revealPathUnitIdsForLoad(load) : []
+  if (!load || revealPath.length === 0) return []
 
-  for (let i = 0; i <= activeRevealIndex && i < revealOrder.length; i += 1) {
-    const load = loadById.get(revealOrder[i]!)
-    const revealPath = load ? revealPathUnitIdsForLoad(load) : []
-    if (!load || revealPath.length === 0) continue
-
-    const max = revealPath.length - 1
-    const step = i < activeRevealIndex ? max : (revealSteps[load.id] ?? 0)
-    for (let j = 0; j <= step && j < revealPath.length; j += 1) {
-      const unitId = revealPath[j]!
-      if (unitMap) {
-        const unit = unitMap.get(unitId)
-        if (unit && !isConveyorLineTransitUnit(unit)) continue
-      }
-      if (!seen.has(unitId)) {
-        seen.add(unitId)
-        ordered.push(unitId)
-      }
+  const step = revealSteps[load.id] ?? 0
+  const ordered: string[] = []
+  for (let j = 0; j <= step && j < revealPath.length; j += 1) {
+    const unitId = revealPath[j]!
+    if (unitMap) {
+      const unit = unitMap.get(unitId)
+      if (unit && !isConveyorLineTransitUnit(unit)) continue
     }
+    ordered.push(unitId)
   }
 
   return ordered
@@ -1456,10 +1482,13 @@ export function countIncompleteSimulationLoads(loads: PathSimulationLoad[]): num
   return loads.filter((load) => load.pathUnitIds.length > 0 && !isLoadFullyDischarged(load)).length
 }
 
-/** 자재가 경로 끝(출고)까지 도달·출고 완료 */
+/** 자재가 목적지 도착(투입 유지) 또는 출고 완료 */
 export function isLoadFullyDischarged(load: PathSimulationLoad): boolean {
-  if (!load.complete || load.pathUnitIds.length === 0) return false
-  return load.stepIndex >= load.pathUnitIds.length - 1
+  if (load.pathUnitIds.length === 0) return false
+  if (load.complete) {
+    return load.stepIndex >= load.pathUnitIds.length - 1
+  }
+  return shouldRetainMaterialAtDestination(load)
 }
 
 type InboundRerouteResult = {
@@ -1582,6 +1611,14 @@ export function advanceSimulationLoads(
         isStkAtCapacity(currentUnitId, timing.warehouseFillCounts ?? {})
       ) {
         load.waiting = true
+        continue
+      }
+      if (shouldRetainMaterialAtDestination(load, unitMap)) {
+        load.waiting = false
+        continue
+      }
+      if (!requiresDischargeDwellAtCurrentStep(load, unitMap)) {
+        load.complete = true
         continue
       }
       load.exitTicks += 1

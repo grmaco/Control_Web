@@ -136,6 +136,8 @@ export const DEFAULT_SIM_DISCHARGE_INTERVAL_SEC = 0.5
 export const DEFAULT_SIM_TRANSIT_INTERVAL_SEC = 0.5
 /** 시작 시 출발→목적지 순차 점등 간격 */
 export const PATH_REVEAL_STEP_MS = 120
+/** 다중 투입점 — 경로 미리보기 전환 시 꺼짐 간격 */
+export const PATH_REVEAL_GAP_MS = 400
 /** 목적지 도달 후 네온 유지 시간 (시작 점등) */
 export const PATH_REVEAL_FINAL_HOLD_MS = 500
 /** 종료점 도착 후 CST On 유지 시간 */

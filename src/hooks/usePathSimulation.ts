@@ -10,6 +10,7 @@ import {
   DEFAULT_SIM_INPUT_INTERVAL_SEC,
   DEFAULT_SIM_TRANSIT_INTERVAL_SEC,
   PATH_REVEAL_FINAL_HOLD_MS,
+  PATH_REVEAL_GAP_MS,
   PATH_REVEAL_STEP_MS,
   PATH_SIMULATION_END_HOLD_MS,
   PATH_SIMULATION_STEP_MS,
@@ -181,10 +182,12 @@ export function usePathSimulation(
   const [revealOrder, setRevealOrder] = useState<string[]>([])
   const [activeRevealIndex, setActiveRevealIndex] = useState(0)
   const [sequentialRevealActive, setSequentialRevealActive] = useState(false)
+  const [revealGapActive, setRevealGapActive] = useState(false)
   const [finalHoldActive, setFinalHoldActive] = useState(false)
   const [endHoldActive, setEndHoldActive] = useState(false)
   const timerRef = useRef<number | null>(null)
   const revealTimerRef = useRef<number | null>(null)
+  const revealGapTimerRef = useRef<number | null>(null)
   const finalHoldTimerRef = useRef<number | null>(null)
   const endHoldTimerRef = useRef<number | null>(null)
   const clearedTestMaterialLoadIdsRef = useRef<Set<string>>(new Set())
@@ -298,6 +301,13 @@ export function usePathSimulation(
     }
   }, [])
 
+  const clearRevealGapTimer = useCallback(() => {
+    if (revealGapTimerRef.current != null) {
+      window.clearTimeout(revealGapTimerRef.current)
+      revealGapTimerRef.current = null
+    }
+  }, [])
+
   const clearFinalHoldTimer = useCallback(() => {
     if (finalHoldTimerRef.current != null) {
       window.clearTimeout(finalHoldTimerRef.current)
@@ -403,9 +413,10 @@ export function usePathSimulation(
   useEffect(() => () => {
     clearTimer()
     clearRevealTimer()
+    clearRevealGapTimer()
     clearFinalHoldTimer()
     clearEndHoldTimer()
-  }, [clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTimer])
+  }, [clearEndHoldTimer, clearFinalHoldTimer, clearRevealGapTimer, clearRevealTimer, clearTimer])
 
   const testMaterialUnits = useMemo(() => listTestMaterialUnits(line), [line])
 
@@ -506,6 +517,8 @@ export function usePathSimulation(
       nextLoads: PathSimulationLoad[],
       options?: { sequential?: boolean },
     ) => {
+      setRevealGapActive(false)
+      clearRevealGapTimer()
       setFinalHoldActive(false)
       if (options?.sequential) {
         const orderIds = buildSequentialRevealLoadOrder(simulationLine, nextLoads).map(
@@ -529,7 +542,7 @@ export function usePathSimulation(
       }
       setStatus('revealing')
     },
-    [isRevealComplete, simulationLine],
+    [clearRevealGapTimer, isRevealComplete, simulationLine],
   )
 
   const beginEndHold = useCallback(() => {
@@ -610,7 +623,7 @@ export function usePathSimulation(
       const initialized = initializeLoadsForSequentialReveal(planLoads)
       sessionLoadIdsRef.current = initialized.map((load) => load.id)
       setLoads(initialized)
-      beginPathReveal(initialized, { sequential: true })
+      beginPathReveal(initialized, { sequential: planLoads.length > 1 })
       clearedTestMaterialLoadIdsRef.current = new Set()
       pendingTestMaterialClearRef.current = new Set()
     },
@@ -648,6 +661,7 @@ export function usePathSimulation(
   const pause = useCallback(() => {
     clearTimer()
     clearRevealTimer()
+    clearRevealGapTimer()
     clearFinalHoldTimer()
     clearEndHoldTimer()
     pauseTackSession()
@@ -656,7 +670,14 @@ export function usePathSimulation(
         ? 'paused'
         : current,
     )
-  }, [clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTimer, pauseTackSession])
+  }, [
+    clearEndHoldTimer,
+    clearFinalHoldTimer,
+    clearRevealGapTimer,
+    clearRevealTimer,
+    clearTimer,
+    pauseTackSession,
+  ])
 
   const isSequentialRevealDone = useCallback(() => {
     if (!sequentialRevealActive || revealOrder.length === 0) return true
@@ -710,6 +731,7 @@ export function usePathSimulation(
   const reset = useCallback(() => {
     clearTimer()
     clearRevealTimer()
+    clearRevealGapTimer()
     clearFinalHoldTimer()
     clearEndHoldTimer()
     clearTackSession()
@@ -719,6 +741,7 @@ export function usePathSimulation(
     setRevealOrder([])
     setActiveRevealIndex(0)
     setSequentialRevealActive(false)
+    setRevealGapActive(false)
     setFinalHoldActive(false)
     setEndHoldActive(false)
     clearedTestMaterialLoadIdsRef.current = new Set()
@@ -737,7 +760,14 @@ export function usePathSimulation(
     entryVacancyRef.current = {}
     depositedLoadIdsRef.current = new Set()
     setStatus('idle')
-  }, [clearEndHoldTimer, clearFinalHoldTimer, clearRevealTimer, clearTackSession, clearTimer])
+  }, [
+    clearEndHoldTimer,
+    clearFinalHoldTimer,
+    clearRevealGapTimer,
+    clearRevealTimer,
+    clearTackSession,
+    clearTimer,
+  ])
 
   const unitMap = useMemo(
     () => new Map(simulationLine.units.map((unit) => [unit.id, unit])),
@@ -932,7 +962,7 @@ export function usePathSimulation(
   }, [allLoadsComplete, beginEndHold, clearTimer, mode, simulationLine, status])
 
   useEffect(() => {
-    if (status !== 'revealing' || finalHoldActive) return
+    if (status !== 'revealing' || finalHoldActive || revealGapActive) return
     if (loadsRef.current.length === 0) return
 
     clearRevealTimer()
@@ -968,7 +998,7 @@ export function usePathSimulation(
     }, PATH_REVEAL_STEP_MS)
 
     return clearRevealTimer
-  }, [clearRevealTimer, finalHoldActive, status])
+  }, [clearRevealTimer, finalHoldActive, revealGapActive, status])
 
   useEffect(() => {
     if (status !== 'revealing' || finalHoldActive || loads.length === 0) return
@@ -988,7 +1018,7 @@ export function usePathSimulation(
   ])
 
   useEffect(() => {
-    if (status !== 'revealing' || finalHoldActive) return
+    if (status !== 'revealing' || finalHoldActive || revealGapActive) return
     if (!sequentialRevealActive || revealOrder.length === 0) return
 
     const loadId = revealOrder[activeRevealIndex]
@@ -998,7 +1028,12 @@ export function usePathSimulation(
     const revealPath = load ? revealPathUnitIdsForLoad(load) : []
     if (!load || revealPath.length === 0) {
       if (activeRevealIndex + 1 < revealOrder.length) {
-        setActiveRevealIndex((index) => index + 1)
+        setRevealGapActive(true)
+        clearRevealGapTimer()
+        revealGapTimerRef.current = window.setTimeout(() => {
+          setRevealGapActive(false)
+          setActiveRevealIndex((index) => index + 1)
+        }, PATH_REVEAL_GAP_MS)
       } else {
         clearRevealTimer()
         setFinalHoldActive(true)
@@ -1012,15 +1047,22 @@ export function usePathSimulation(
 
     clearRevealTimer()
     if (activeRevealIndex + 1 < revealOrder.length) {
-      setActiveRevealIndex((index) => index + 1)
+      setRevealGapActive(true)
+      clearRevealGapTimer()
+      revealGapTimerRef.current = window.setTimeout(() => {
+        setRevealGapActive(false)
+        setActiveRevealIndex((index) => index + 1)
+      }, PATH_REVEAL_GAP_MS)
     } else {
       setFinalHoldActive(true)
     }
   }, [
     activeRevealIndex,
+    clearRevealGapTimer,
     clearRevealTimer,
     finalHoldActive,
     loads,
+    revealGapActive,
     revealOrder,
     revealSteps,
     sequentialRevealActive,
@@ -1037,6 +1079,7 @@ export function usePathSimulation(
       setRevealOrder([])
       setActiveRevealIndex(0)
       setSequentialRevealActive(false)
+      setRevealGapActive(false)
       setLoads((current) => releaseAllSimulationLoads(current))
       setStatus('playing')
     }, PATH_REVEAL_FINAL_HOLD_MS)
@@ -1069,13 +1112,15 @@ export function usePathSimulation(
     setRevealOrder([])
     setActiveRevealIndex(0)
     setSequentialRevealActive(false)
+    setRevealGapActive(false)
     setFinalHoldActive(false)
     setEndHoldActive(false)
     clearTackSession()
+    clearRevealGapTimer()
     setContinuousInputActive(false)
     setGatherProbes([])
     setStatus('idle')
-  }, [clearTackSession])
+  }, [clearRevealGapTimer, clearTackSession])
 
   const changeMode = useCallback((nextMode: PathSimulationMode) => {
     if (nextMode === 'outbound' && !SIM_STK_IO_ENABLED) return
@@ -1148,16 +1193,17 @@ export function usePathSimulation(
   )
   const revealHighlightUnitIds = useMemo(() => {
     if (!(finalHoldActive || status === 'revealing')) return []
+    if (revealGapActive) return []
+    if (sequentialRevealActive && finalHoldActive) return []
     const selected = new Set(selectedSourceUnitIds)
     const scopedLoads = loads.filter((load) => selected.has(load.entryUnitId))
     if (scopedLoads.length === 0) return []
     if (sequentialRevealActive && revealOrder.length > 0) {
-      const idx = finalHoldActive ? revealOrder.length - 1 : activeRevealIndex
       return simulationSequentialRevealUnitIds(
         scopedLoads,
         revealSteps,
         revealOrder,
-        idx,
+        activeRevealIndex,
         simulationUnitMap,
       )
     }
@@ -1166,6 +1212,7 @@ export function usePathSimulation(
     activeRevealIndex,
     finalHoldActive,
     loads,
+    revealGapActive,
     revealOrder,
     revealSteps,
     selectedSourceUnitIds,
@@ -1253,12 +1300,14 @@ export function usePathSimulation(
       : status === 'revealing' && sequentialRevealActive && revealOrder.length > 0
         ? finalHoldActive
           ? '경로 미리보기 완료 · 자재 투입 시작'
-          : (() => {
-              const loadId = revealOrder[activeRevealIndex]
-              const load = loads.find((item) => item.id === loadId)
-              const phase = load?.clearsTestMaterial ? '출고' : '투입'
-              return `경로 미리보기 ${activeRevealIndex + 1}/${revealOrder.length} · ${phase} ${load?.label ?? ''}`
-            })()
+          : revealGapActive
+            ? `경로 미리보기 ${activeRevealIndex + 1}/${revealOrder.length} · 전환 중`
+            : (() => {
+                const loadId = revealOrder[activeRevealIndex]
+                const load = loads.find((item) => item.id === loadId)
+                const phase = load?.clearsTestMaterial ? '출고' : '투입'
+                return `경로 미리보기 ${activeRevealIndex + 1}/${revealOrder.length} · ${phase} ${load?.label ?? ''}`
+              })()
         : progressSummary.headline
   const progressDetail = inboundLineFullBlocked
     ? '포트·컨베이어 경로에 자재가 모두 올라갔습니다. STK 만재 상태에서 라인이 가득 차면 연속 투입이 중지됩니다.'
@@ -1309,22 +1358,19 @@ export function usePathSimulation(
     if (
       sequentialRevealActive &&
       (status === 'revealing' || finalHoldActive) &&
-      revealOrder.length > 0
+      revealOrder.length > 0 &&
+      !revealGapActive &&
+      !finalHoldActive
     ) {
-      const maxIdx = finalHoldActive ? revealOrder.length - 1 : activeRevealIndex
-      const allowed = new Set(revealOrder.slice(0, maxIdx + 1))
-      visibleLoads = overlayLoads.filter((load) => allowed.has(load.id))
+      const loadId = revealOrder[activeRevealIndex]
+      visibleLoads = loadId
+        ? overlayLoads.filter((load) => load.id === loadId)
+        : []
     }
 
     return visibleLoads.map((load) => {
-      const orderIndex = revealOrder.indexOf(load.id)
       const revealPath = revealPathUnitIdsForLoad(load)
-      const revealStep =
-        sequentialRevealActive &&
-        orderIndex >= 0 &&
-        (finalHoldActive || orderIndex < activeRevealIndex)
-          ? Math.max(0, revealPath.length - 1)
-          : (revealSteps[load.id] ?? 0)
+      const revealStep = revealSteps[load.id] ?? 0
 
       return {
         pathUnitIds: useRevealStep ? revealPath : load.pathUnitIds,
@@ -1338,6 +1384,7 @@ export function usePathSimulation(
     isRevealComplete,
     isSequentialRevealDone,
     loads,
+    revealGapActive,
     revealOrder,
     revealSteps,
     sequentialRevealActive,
