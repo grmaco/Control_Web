@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ConveyorLine } from '../types/conveyor'
-import type { MultiPathSimulationPlan, PathSimulationLoad } from '../types/unitProperties'
+import type {
+  MultiPathSimulationPlan,
+  PathSimulationLoad,
+} from '../types/unitProperties'
 import type { LoadTackTimeSummary } from '../utils/pathSimulation'
 import {
   DEFAULT_SIM_DISCHARGE_INTERVAL_SEC,
@@ -118,6 +121,34 @@ export type PathSimulationStatus =
   | 'complete'
 export type PathSimulationMode = 'inbound' | 'outbound'
 
+/** 시뮬 시작 옵션 — preserveUnitStatus: 실제 CV·포트 상태 유지(오류 우회 관찰) */
+export type PathSimulationStartOptions = {
+  preserveUnitStatus?: boolean
+}
+
+function buildMultiPathPlan(
+  activeLine: ConveyorLine,
+  mode: PathSimulationMode,
+  selectedSourceUnitIds: string[],
+): MultiPathSimulationPlan | null {
+  const routingSession = createStkRoutingSessionState()
+  if (mode === 'inbound') {
+    if (selectedSourceUnitIds.length === 0) return null
+    const primary = planMultiInboundLoadPaths(
+      activeLine,
+      selectedSourceUnitIds,
+      routingSession,
+    )
+    if (primary.loads.length === 0) return null
+    return primary
+  }
+
+  if (selectedSourceUnitIds.length === 0) return null
+  const outbound = planMultiOutboundLoadPaths(activeLine, selectedSourceUnitIds)
+  if (outbound.loads.length === 0) return null
+  return outbound
+}
+
 interface UsePathSimulationOptions {
   /** 테스트 자재 출고 완료 시 testMaterial 플래그 제거 */
   onClearTestMaterial?: (unitIds: string[]) => void
@@ -128,9 +159,11 @@ export function usePathSimulation(
   options: UsePathSimulationOptions = {},
 ) {
   const [mode, setMode] = useState<PathSimulationMode>('inbound')
+  const [preserveUnitStatus, setPreserveUnitStatus] = useState(false)
   const simulationLine = useMemo(
-    () => lineWithAllSimulationUnitsRunning(line),
-    [line],
+    () =>
+      preserveUnitStatus ? line : lineWithAllSimulationUnitsRunning(line),
+    [line, preserveUnitStatus],
   )
   const inboundEntries = useMemo(() => listSimulatableEntries(line), [line])
   const conveyorOnlyLine = useMemo(() => !lineHasEnabledStk(line), [line])
@@ -376,27 +409,11 @@ export function usePathSimulation(
 
   const testMaterialUnits = useMemo(() => listTestMaterialUnits(line), [line])
 
-  const previewPlan = useMemo((): MultiPathSimulationPlan | null => {
-    const routingSession = createStkRoutingSessionState()
-    if (mode === 'inbound') {
-      if (selectedSourceUnitIds.length === 0) return null
-      const primary = planMultiInboundLoadPaths(
-        simulationLine,
-        selectedSourceUnitIds,
-        routingSession,
-      )
-      if (primary.loads.length === 0) return null
-      return primary
-    }
-
-    if (selectedSourceUnitIds.length === 0) return null
-    const outbound = planMultiOutboundLoadPaths(
-      simulationLine,
-      selectedSourceUnitIds,
-    )
-    if (outbound.loads.length === 0) return null
-    return outbound
-  }, [mode, selectedSourceUnitIds, simulationLine])
+  const previewPlan = useMemo(
+    (): MultiPathSimulationPlan | null =>
+      buildMultiPathPlan(line, mode, selectedSourceUnitIds),
+    [line, mode, selectedSourceUnitIds],
+  )
 
   const rebuildPlan = useCallback((): MultiPathSimulationPlan | null => {
     return previewPlan
@@ -442,20 +459,27 @@ export function usePathSimulation(
     [],
   )
 
-  const beginContinuousInputSession = useCallback(() => {
-    continuousInputActiveRef.current = true
-    setContinuousInputActive(true)
-    setGatherProbes(
-      initGatherProbes(simulationLine, selectedSourceUnitIds, CONTINUOUS_INPUT_INTERVAL_SEC),
-    )
-    entryVacancyRef.current = {}
-    simTickRef.current = 0
-    lastInjectTickRef.current = 0
-    injectSeqRef.current = 0
-    setWarehouseFullNotice(false)
-    setInboundLineFullBlocked(false)
-    setInboundLineFullNotice(false)
-  }, [selectedSourceUnitIds, simulationLine])
+  const beginContinuousInputSession = useCallback(
+    (activeLine: ConveyorLine = simulationLine) => {
+      continuousInputActiveRef.current = true
+      setContinuousInputActive(true)
+      setGatherProbes(
+        initGatherProbes(
+          activeLine,
+          selectedSourceUnitIds,
+          CONTINUOUS_INPUT_INTERVAL_SEC,
+        ),
+      )
+      entryVacancyRef.current = {}
+      simTickRef.current = 0
+      lastInjectTickRef.current = 0
+      injectSeqRef.current = 0
+      setWarehouseFullNotice(false)
+      setInboundLineFullBlocked(false)
+      setInboundLineFullNotice(false)
+    },
+    [selectedSourceUnitIds, simulationLine],
+  )
 
   const clearContinuousInputSession = useCallback(() => {
     continuousInputActiveRef.current = false
@@ -514,7 +538,16 @@ export function usePathSimulation(
   }, [])
 
   const startWithMode = useCallback(
-    (startMode: 'normal' | 'continuous') => {
+    (
+      startMode: 'normal' | 'continuous',
+      options?: PathSimulationStartOptions,
+    ) => {
+      const useLiveStatus = options?.preserveUnitStatus === true
+      setPreserveUnitStatus(useLiveStatus)
+      const activeLine = useLiveStatus
+        ? line
+        : lineWithAllSimulationUnitsRunning(line)
+
       depositedLoadIdsRef.current = new Set()
       stkRoutingSessionRef.current = createStkRoutingSessionState()
       setWarehouseFillCounts({})
@@ -522,7 +555,11 @@ export function usePathSimulation(
       setInboundLineFullBlocked(false)
       setInboundLineFullNotice(false)
 
-      const nextPlan = rebuildPlan()
+      const nextPlan = buildMultiPathPlan(
+        activeLine,
+        mode,
+        selectedSourceUnitIds,
+      )
       const planLoads = nextPlan?.loads ?? []
       seedStkRoutingSessionFromLoads(stkRoutingSessionRef.current, planLoads)
 
@@ -531,15 +568,15 @@ export function usePathSimulation(
         mode === 'inbound' &&
         selectedSourceUnitIds.length > 0
       ) {
-        const fullStkCounts = createFullStkFillCounts(simulationLine)
+        const fullStkCounts = createFullStkFillCounts(activeLine)
         warehouseFillCountsRef.current = fullStkCounts
         setWarehouseFillCounts(fullStkCounts)
         setWarehouseFullNotice(true)
-        beginContinuousInputSession()
+        beginContinuousInputSession(activeLine)
         const testOnlyLoads = planLoads.filter((load) => load.clearsTestMaterial)
         const initialized =
           testOnlyLoads.length > 0
-            ? initializeParallelLoads(testOnlyLoads, stepTiming, simulationLine)
+            ? initializeParallelLoads(testOnlyLoads, stepTiming, activeLine)
             : []
         setEndHoldActive(false)
         setPlan(nextPlan)
@@ -581,20 +618,26 @@ export function usePathSimulation(
       beginContinuousInputSession,
       beginPathReveal,
       clearContinuousInputSession,
+      line,
       mode,
-      rebuildPlan,
-      simulationLine,
-      selectedSourceUnitIds.length,
+      selectedSourceUnitIds,
+      stepTiming,
     ],
   )
 
-  const start = useCallback(() => startWithMode('normal'), [startWithMode])
+  const start = useCallback(
+    (options?: PathSimulationStartOptions) => startWithMode('normal', options),
+    [startWithMode],
+  )
 
-  const startContinuous = useCallback(() => {
-    if (mode !== 'inbound') return
-    if (selectedSourceUnitIds.length === 0) return
-    startWithMode('continuous')
-  }, [mode, selectedSourceUnitIds.length, startWithMode])
+  const startContinuous = useCallback(
+    (options?: PathSimulationStartOptions) => {
+      if (mode !== 'inbound') return
+      if (selectedSourceUnitIds.length === 0) return
+      startWithMode('continuous', options)
+    },
+    [mode, selectedSourceUnitIds.length, startWithMode],
+  )
 
   useEffect(() => {
     if (status !== 'playing') return
@@ -687,6 +730,7 @@ export function usePathSimulation(
     setWarehouseFullNotice(false)
     setInboundLineFullBlocked(false)
     setInboundLineFullNotice(false)
+    setPreserveUnitStatus(false)
     simTickRef.current = 0
     lastInjectTickRef.current = 0
     injectSeqRef.current = 0
@@ -1324,6 +1368,7 @@ export function usePathSimulation(
     canSimulate,
     progressLabel,
     progressDetail,
+    preserveUnitStatus,
     start,
     startContinuous,
     pause,

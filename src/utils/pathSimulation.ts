@@ -40,6 +40,13 @@ import {
   inboundDestinationDisplayName,
   planInboundPathFromFlowTraversal,
 } from './simulationDestination'
+import {
+  astarTransportPath,
+  buildInboundTransportGraph,
+  getTransportEdge,
+  isPathfindingTraversableEdge,
+  refreshTransportEdgeStates,
+} from './transportGraph'
 
 /** 회전/분기 유닛별 마지막 배정 STK — ROUND_ROBIN 순환용 */
 export type StkRoutingSessionState = Record<string, string>
@@ -1455,6 +1462,62 @@ export function isLoadFullyDischarged(load: PathSimulationLoad): boolean {
   return load.stepIndex >= load.pathUnitIds.length - 1
 }
 
+type InboundRerouteResult = {
+  pathUnitIds: string[]
+  blocked: boolean
+}
+
+/**
+ * 계획 경로에 오류 엣지가 있거나 다음 hop이 오류면 A*로 우회 재탐색.
+ * 우회 불가 시 blocked=true → 호출부에서 대기 처리.
+ */
+function tryRerouteInboundLoadPath(
+  load: PathSimulationLoad,
+  line: ConveyorLine,
+  unitMap: Map<string, ConveyorUnit>,
+): InboundRerouteResult {
+  const pathUnitIds = load.pathUnitIds
+  if (pathUnitIds.length === 0) return { pathUnitIds, blocked: false }
+
+  const destinationId = pathUnitIds[pathUnitIds.length - 1]!
+  const currentId = pathUnitIds[load.stepIndex]!
+  if (currentId === destinationId) return { pathUnitIds, blocked: false }
+
+  const graph = buildInboundTransportGraph(line, load.entryUnitId, unitMap)
+  if (!graph) return { pathUnitIds, blocked: true }
+
+  refreshTransportEdgeStates(graph, unitMap)
+
+  const isHopBlocked = (fromId: string, toId: string): boolean => {
+    const edge = getTransportEdge(graph, fromId, toId)
+    if (edge) return !isPathfindingTraversableEdge(edge.state)
+    const bridge = astarTransportPath(graph, fromId, toId, unitMap)
+    return bridge == null
+  }
+
+  let needsReroute = false
+  for (let i = load.stepIndex; i < pathUnitIds.length - 1; i += 1) {
+    if (isHopBlocked(pathUnitIds[i]!, pathUnitIds[i + 1]!)) {
+      needsReroute = true
+      break
+    }
+  }
+
+  const nextId = pathUnitIds[load.stepIndex + 1]
+  if (nextId && isHopBlocked(currentId, nextId)) {
+    needsReroute = true
+  }
+
+  if (!needsReroute) return { pathUnitIds, blocked: false }
+
+  const astar = astarTransportPath(graph, currentId, destinationId, unitMap)
+  if (!astar) return { pathUnitIds, blocked: true }
+
+  const prefix = pathUnitIds.slice(0, load.stepIndex + 1)
+  const tail = astar.pathUnitIds.slice(1)
+  return { pathUnitIds: [...prefix, ...tail], blocked: false }
+}
+
 /** 라인에 계획된 모든 자재가 출고 완료됐는지 */
 export function areAllSimulationLoadsFinished(loads: PathSimulationLoad[]): boolean {
   const active = loads.filter((load) => load.pathUnitIds.length > 0)
@@ -1540,6 +1603,23 @@ export function advanceSimulationLoads(
     if (load.stepIndex > 0 && load.transitTicks < transitTicksRequired) {
       load.transitTicks += 1
       load.waiting = true
+    }
+  }
+
+  if (line && unitMap) {
+    for (let i = 0; i < next.length; i += 1) {
+      const load = next[i]!
+      if (!load.released || load.complete || isAtDestination(load)) continue
+      if (load.direction !== 'inbound' && load.continuousInject !== true) continue
+
+      const reroute = tryRerouteInboundLoadPath(load, line, unitMap)
+      if (reroute.blocked) {
+        next[i]!.waiting = true
+        continue
+      }
+      if (reroute.pathUnitIds !== load.pathUnitIds) {
+        next[i]!.pathUnitIds = reroute.pathUnitIds
+      }
     }
   }
 

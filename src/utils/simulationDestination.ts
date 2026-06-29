@@ -1,6 +1,5 @@
 import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
-import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
-import { isFlowCapableUnit } from './flowEntries'
+import { isPortUnit } from '../constants/conveyorTypes'
 import { getOrthogonalNeighborUnits } from './units'
 import {
   getPortProperties,
@@ -12,6 +11,12 @@ import {
   listTransitLinkedUnitCandidates,
   unitDisplayCode,
 } from './unitPropertyHelpers'
+import {
+  astarTransportPath,
+  buildInboundTransportGraph,
+  dijkstraOnTransportGraph,
+  type TransportGraph,
+} from './transportGraph'
 
 function lineGridSize(line: { gridSize?: ConveyorLine['gridSize'] }) {
   return {
@@ -106,136 +111,12 @@ export function isJunctionPortConnected(
 }
 
 export type InboundTraversalPlan = {
-  /** 시뮬 이동 경로(포트·STK 포함) — 최원 분기 목적지까지 */
+  /** 시뮬 이동 경로(컨베이어만) — 최원 분기 목적지까지 */
   pathUnitIds: string[]
   /** 미리보기 — 도달 가능한 모든 직선·분기·회전(거리순 탐색) */
   previewTransitUnitIds: string[]
   destinationUnitId: string
   destinationUnit: ConveyorUnit
-}
-
-function isInboundOutPort(unit: ConveyorUnit): boolean {
-  return isPortUnit(unit) && (unit.portDirection ?? 'IN') === 'OUT'
-}
-
-function isInboundTraversalNeighbor(
-  unit: ConveyorUnit,
-  unitId: string,
-  entryUnitId: string,
-): boolean {
-  if (unitId === entryUnitId) return true
-  if (unit.flowRole === 'exit') return false
-  // 투입 경로 — STK OUT 포트 및 출고측 라인 탐색 제외
-  if (isInboundOutPort(unit)) return false
-  if (isPortUnit(unit) || isStorageUnit(unit) || isFlowCapableUnit(unit)) {
-    return true
-  }
-  return unit.type === 'lift'
-}
-
-/**
- * 분기·회전 유닛 — 연결 그래프 + 격자 직교(직선·수직) 이웃 모두 탐색.
- * 그 외 유닛 — connections 그대로 (측선 차단 없음).
- */
-function listInboundExpansionNeighbors(
-  line: ConveyorLine,
-  unit: ConveyorUnit,
-  unitMap: Map<string, ConveyorUnit>,
-  entryUnitId: string,
-): string[] {
-  const candidateIds = new Set<string>(unit.connections)
-
-  if (isJunctionUnit(unit) || unit.type === 'turn') {
-    const { cols, rows } = lineGridSize(line)
-    for (const neighbor of getOrthogonalNeighborUnits(
-      line.units,
-      unit,
-      cols,
-      rows,
-    )) {
-      candidateIds.add(neighbor.id)
-    }
-  }
-
-  return [...candidateIds].filter((neighborId) => {
-    const neighbor = unitMap.get(neighborId)
-    if (!neighbor) return false
-    return isInboundTraversalNeighbor(neighbor, neighborId, entryUnitId)
-  })
-}
-
-type DijkstraResult = {
-  dist: Map<string, number>
-  prev: Map<string, string | null>
-}
-
-/** 투입점 기준 연결 그래프 최단 거리(다익스트라, 간선 비용 1) */
-function dijkstraFromEntry(
-  line: ConveyorLine,
-  entryUnitId: string,
-  unitMap: Map<string, ConveyorUnit>,
-): DijkstraResult {
-  const dist = new Map<string, number>()
-  const prev = new Map<string, string | null>()
-  const settled = new Set<string>()
-
-  for (const unit of line.units) {
-    dist.set(unit.id, Number.POSITIVE_INFINITY)
-    prev.set(unit.id, null)
-  }
-  dist.set(entryUnitId, 0)
-
-  const queue = new Set<string>([entryUnitId])
-
-  while (queue.size > 0) {
-    let currentId: string | null = null
-    let currentDist = Number.POSITIVE_INFINITY
-    for (const candidateId of queue) {
-      const candidateDist = dist.get(candidateId) ?? Number.POSITIVE_INFINITY
-      if (candidateDist < currentDist) {
-        currentDist = candidateDist
-        currentId = candidateId
-      }
-    }
-    if (currentId == null || currentDist === Number.POSITIVE_INFINITY) break
-
-    queue.delete(currentId)
-    if (settled.has(currentId)) continue
-    settled.add(currentId)
-
-    const current = unitMap.get(currentId)
-    if (!current) continue
-
-    for (const neighborId of listInboundExpansionNeighbors(
-      line,
-      current,
-      unitMap,
-      entryUnitId,
-    )) {
-      if (settled.has(neighborId)) continue
-      const alt = currentDist + 1
-      if (alt < (dist.get(neighborId) ?? Number.POSITIVE_INFINITY)) {
-        dist.set(neighborId, alt)
-        prev.set(neighborId, currentId)
-        queue.add(neighborId)
-      }
-    }
-  }
-
-  return { dist, prev }
-}
-
-function reconstructPath(
-  prev: Map<string, string | null>,
-  targetId: string,
-): string[] {
-  const path: string[] = []
-  let current: string | null = targetId
-  while (current) {
-    path.unshift(current)
-    current = prev.get(current) ?? null
-  }
-  return path
 }
 
 function pickFarthestJunctionDestination(
@@ -266,7 +147,7 @@ function pickFarthestJunctionDestination(
   return best
 }
 
-/** 다익스트라 거리순 — 목적지까지 도달 가능한 직선·분기·회전(미리보기) */
+/** 그래프 거리순 — 목적지까지 도달 가능한 직선·분기·회전(미리보기) */
 function listExploredConveyorUnitIds(
   dist: Map<string, number>,
   unitMap: Map<string, ConveyorUnit>,
@@ -294,9 +175,9 @@ function listExploredConveyorUnitIds(
 }
 
 /**
- * 1) 다익스트라 — 분기 직선·수직 탐색, IN 포트·STK 포함, OUT 포트 이후 제외
- * 2) 미리보기: 목적지까지 도달 가능한 직선·분기·회전을 거리순 점등
- * 3) 목적지: 도달 가능한 분기(junction) 유닛 중 가장 먼 곳
+ * 1) Node/Edge 반송 그래프 — 오류 엣지 제외 다익스트라로 도달 범위 산출
+ * 2) A* — 최원 분기 목적지까지 경로
+ * 3) 미리보기: 목적지까지 도달 가능한 직선·분기·회전을 거리순 점등
  */
 export function planInboundPathFromFlowTraversal(
   line: ConveyorLine,
@@ -306,9 +187,21 @@ export function planInboundPathFromFlowTraversal(
   const entry = unitMap.get(entryUnitId)
   if (!entry) return null
 
-  const { dist, prev } = dijkstraFromEntry(line, entryUnitId, unitMap)
+  const graph = buildInboundTransportGraph(line, entryUnitId, unitMap)
+  if (!graph) return null
+
+  const { dist } = dijkstraOnTransportGraph(graph, entryUnitId)
   const destinationUnit = pickFarthestJunctionDestination(line, dist)
   if (!destinationUnit) return null
+
+  const astar = astarTransportPath(
+    graph,
+    entryUnitId,
+    destinationUnit.id,
+    unitMap,
+  )
+  if (!astar || astar.pathUnitIds.length === 0) return null
+  if (astar.pathUnitIds[0] !== entryUnitId) return null
 
   const previewTransitUnitIds = listExploredConveyorUnitIds(
     dist,
@@ -317,15 +210,21 @@ export function planInboundPathFromFlowTraversal(
   )
   if (previewTransitUnitIds.length === 0) return null
 
-  const pathUnitIds = reconstructPath(prev, destinationUnit.id)
-  if (pathUnitIds.length === 0 || pathUnitIds[0] !== entryUnitId) return null
-
   return {
-    pathUnitIds,
+    pathUnitIds: astar.pathUnitIds,
     previewTransitUnitIds,
     destinationUnitId: destinationUnit.id,
     destinationUnit,
   }
+}
+
+/** 투입 반송 그래프 빌드 — 런타임 재탐색용 export */
+export function buildInboundTraversalGraph(
+  line: ConveyorLine,
+  entryUnitId: string,
+  unitMap?: Map<string, ConveyorUnit>,
+): TransportGraph | null {
+  return buildInboundTransportGraph(line, entryUnitId, unitMap)
 }
 
 export function inboundDestinationDisplayName(unit: ConveyorUnit): string {

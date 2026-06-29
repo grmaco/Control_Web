@@ -22,6 +22,8 @@ import {
   listNonRunningPorts,
 } from '../../utils/pathSimulation'
 import { unitTitle } from '../../constants/conveyorTypes'
+import { isCvUnit } from '../../utils/unitMaterial'
+import type { PathSimulationStartOptions } from '../../hooks/usePathSimulation'
 import { LineStatusGrid } from './LineStatusGrid'
 import { MonitorMapControls } from './MonitorMapControls'
 import { PathSimulationBar, PathSimulationPlaybackControls } from './PathSimulationBar'
@@ -116,6 +118,13 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
     () => listNonRunningPorts(line).map((unit) => unitTitle(unit)),
     [line],
   )
+  const nonRunningCvLabels = useMemo(
+    () =>
+      line.units
+        .filter((unit) => isCvUnit(unit) && unit.status !== 'running')
+        .map((unit) => unitTitle(unit)),
+    [line],
+  )
   const [scale, setScale] = useState(initialTransform.scale)
   const [is25DView, setIs25DView] = useState(false)
   const [calloutPanLock, setCalloutPanLock] = useState(false)
@@ -124,6 +133,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   const [runConfirmPopupOpen, setRunConfirmPopupOpen] = useState(false)
   const [portConfirmPopupOpen, setPortConfirmPopupOpen] = useState(false)
   const pendingStartModeRef = useRef<'normal' | 'continuous' | null>(null)
+  const preserveStatusOnStartRef = useRef(false)
   const portConfirmRequestedRef = useRef(false)
   const viewStateRef = useRef(initialTransform)
 
@@ -136,13 +146,24 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   }
 
   const startPendingSimulation = useCallback(
-    (startMode: 'normal' | 'continuous') => {
+    (
+      startMode: 'normal' | 'continuous',
+      options?: PathSimulationStartOptions,
+    ) => {
       if (startMode === 'continuous') {
-        simulation.startContinuous()
-        logButton('Path Simulation Continuous Input Start')
+        simulation.startContinuous(options)
+        logButton(
+          options?.preserveUnitStatus
+            ? 'Path Simulation Continuous Input Start (As-Is Status)'
+            : 'Path Simulation Continuous Input Start',
+        )
       } else {
-        simulation.start()
-        logButton('Path Simulation Start')
+        simulation.start(options)
+        logButton(
+          options?.preserveUnitStatus
+            ? 'Path Simulation Start (As-Is Status)'
+            : 'Path Simulation Start',
+        )
       }
     },
     [logButton, simulation],
@@ -160,9 +181,11 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
       return
     }
 
+    const preserveStatus = preserveStatusOnStartRef.current
     portConfirmRequestedRef.current = false
     pendingStartModeRef.current = null
-    startPendingSimulation(pendingMode)
+    preserveStatusOnStartRef.current = false
+    startPendingSimulation(pendingMode, { preserveUnitStatus: preserveStatus })
   }, [allCvRunning, allPortsRunning, startPendingSimulation])
 
   const requestSimulationStart = useCallback(
@@ -208,29 +231,59 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
     setRunConfirmPopupOpen(false)
     pendingStartModeRef.current = null
     portConfirmRequestedRef.current = false
+    preserveStatusOnStartRef.current = false
   }, [])
 
   const handleConfirmRunAllAndStart = useCallback(async () => {
     setRunConfirmPopupOpen(false)
+    preserveStatusOnStartRef.current = false
     if (!pendingStartModeRef.current) {
       pendingStartModeRef.current = 'normal'
     }
     await saveLine(lineWithAllCvUnitsRunning(line))
   }, [line, saveLine])
 
+  const handleProceedAsIsAndStart = useCallback(() => {
+    setRunConfirmPopupOpen(false)
+    preserveStatusOnStartRef.current = true
+    const startMode = pendingStartModeRef.current ?? 'normal'
+
+    if (!allPortsRunning) {
+      pendingStartModeRef.current = startMode
+      portConfirmRequestedRef.current = true
+      setPortConfirmPopupOpen(true)
+      return
+    }
+
+    pendingStartModeRef.current = null
+    preserveStatusOnStartRef.current = false
+    startPendingSimulation(startMode, { preserveUnitStatus: true })
+  }, [allPortsRunning, startPendingSimulation])
+
   const dismissPortConfirmPopup = useCallback(() => {
     setPortConfirmPopupOpen(false)
     pendingStartModeRef.current = null
     portConfirmRequestedRef.current = false
+    preserveStatusOnStartRef.current = false
   }, [])
 
   const handleConfirmPortRunAllAndStart = useCallback(async () => {
     setPortConfirmPopupOpen(false)
+    preserveStatusOnStartRef.current = false
     if (!pendingStartModeRef.current) {
       pendingStartModeRef.current = 'normal'
     }
     await saveLine(lineWithAllPortsRunning(line))
   }, [line, saveLine])
+
+  const handleProceedPortAsIsAndStart = useCallback(() => {
+    setPortConfirmPopupOpen(false)
+    const startMode = pendingStartModeRef.current ?? 'normal'
+    pendingStartModeRef.current = null
+    portConfirmRequestedRef.current = false
+    preserveStatusOnStartRef.current = false
+    startPendingSimulation(startMode, { preserveUnitStatus: true })
+  }, [startPendingSimulation])
 
   const persistView = useCallback(
     (nextScale: number, positionX: number, positionY: number) => {
@@ -629,18 +682,33 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             onClick={(e) => e.stopPropagation()}
           >
             <p className="mb-1 text-base font-bold text-cyan-300">가동 상태 전환</p>
-            <p className="mb-5 text-sm leading-relaxed text-slate-300">
-              경로 시뮬레이션은 모든 컨베이어 모듈이 가동 상태일 때 시작할 수 있습니다.
+            <p className="mb-3 text-sm leading-relaxed text-slate-300">
+              경로 시뮬레이션은 모든 컨베이어 모듈이 가동 상태일 때 바로 시작할 수 있습니다.
               <br />
-              전체 모듈을 가동 상태로 전환한 뒤 시작하시겠습니까?
+              전체 모듈을 가동으로 전환하거나, 현재 상태 그대로 오류·비가동 우회 경로를
+              관찰할 수 있습니다.
             </p>
-            <div className="flex justify-end gap-2">
+            {nonRunningCvLabels.length > 0 ? (
+              <p className="mb-5 text-xs leading-relaxed text-slate-400">
+                비가동·오류·점검: {nonRunningCvLabels.join(', ')}
+              </p>
+            ) : (
+              <p className="mb-5 text-sm text-slate-400">비가동 컨베이어가 있습니다.</p>
+            )}
+            <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
                 onClick={dismissRunConfirmPopup}
                 className="app-btn app-btn-secondary app-btn-sm"
               >
                 취소
+              </button>
+              <button
+                type="button"
+                onClick={handleProceedAsIsAndStart}
+                className="app-btn app-btn-secondary app-btn-sm border-amber-500/50 text-amber-200 hover:bg-amber-500/10"
+              >
+                그대로 진행하기
               </button>
               <button
                 type="button"
@@ -676,13 +744,20 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             ) : (
               <p className="mb-5 text-sm text-slate-400">비가동 포트가 있습니다.</p>
             )}
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
                 onClick={dismissPortConfirmPopup}
                 className="app-btn app-btn-secondary app-btn-sm"
               >
                 취소
+              </button>
+              <button
+                type="button"
+                onClick={handleProceedPortAsIsAndStart}
+                className="app-btn app-btn-secondary app-btn-sm border-amber-500/50 text-amber-200 hover:bg-amber-500/10"
+              >
+                그대로 진행하기
               </button>
               <button
                 type="button"
