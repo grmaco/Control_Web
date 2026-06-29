@@ -37,14 +37,13 @@ export type HistoryEventType =
 export type FlowRole = 'entry' | 'exit'
 
 import type {
-  StkRoutingProperties,
   JunctionRoutingProperties,
   TransitLinkedUnitsProperties,
   UnitRole,
   UnitRoleProperties,
 } from './unitProperties'
 
-export type { UnitRole, StkPolicy, StkRoutingProperties, JunctionRoutingProperties, TransitLinkedUnitsProperties, StkProperties, PortProperties, OutputPortProperties, UnitRoleProperties, RoutingSimulationResult } from './unitProperties'
+export type { UnitRole, JunctionRoutingProperties, TransitLinkedUnitsProperties, StkProperties, PortProperties, OutputPortProperties, UnitRoleProperties } from './unitProperties'
 
 export interface ConveyorUnit {
   id: string
@@ -64,8 +63,6 @@ export interface ConveyorUnit {
   role?: UnitRole | null
   /** 역할별 상세 속성 — STORAGE, PORT_OUT */
   properties?: UnitRoleProperties | null
-  /** type === 'turn' | 'junction' — STK 분기 라우팅 */
-  stkRouting?: StkRoutingProperties | null
   /** type === 'turn' | 'junction' — 인접 연동 컨베이어 */
   transitLinkedUnits?: TransitLinkedUnitsProperties | null
   /** @deprecated transitLinkedUnits 사용 — 하위 호환 */

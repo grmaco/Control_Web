@@ -484,6 +484,68 @@ export function computeFlowCallouts(
   return callouts
 }
 
+/** 맵 호버·터치 — 단일 유닛 콜아웃 배치 */
+export function computeCalloutForUnit(
+  unit: ConveyorUnit,
+  flow: UnitFlowDirs | undefined,
+  line: ConveyorLine,
+  viewport: LineViewport,
+  cellSize: number,
+  alarmTexts?: Record<string, string>,
+  reservedCallouts: FlowCallout[] = [],
+): FlowCallout | null {
+  const panelMinWidth = Math.max(80, Math.round((cellSize * 7) / 3))
+  const panelHeight = 50
+  const unitRects = buildUnitRects(line, cellSize, viewport.minX, viewport.minY)
+  const bounds = unitBoundsPx(unit, cellSize, viewport.minX, viewport.minY)
+  const panelWidth = estimateAlarmCalloutPanelWidth(
+    alarmTexts?.[unit.id],
+    panelMinWidth,
+  )
+  const spreadSeed = unit.gridX * 11 + unit.gridY * 17 + unit.name.length
+  const reservedPanels: PxRect[] = reservedCallouts.map((callout) => ({
+    left: callout.panelX,
+    top: callout.panelY,
+    right: callout.panelX + callout.panelWidth,
+    bottom: callout.panelY + callout.panelHeight,
+  }))
+  const placement =
+    placeCalloutPanel(
+      bounds,
+      cellSize,
+      panelWidth,
+      panelHeight,
+      unitRects,
+      reservedPanels,
+      spreadSeed,
+    ) ??
+    forceCalloutPlacement(
+      bounds,
+      cellSize,
+      panelWidth,
+      panelHeight,
+      unitRects,
+      spreadSeed,
+    )
+  if (!placement) return null
+
+  const tags = collectCalloutTags(unit, flow)
+  return {
+    unitId: unit.id,
+    unitName: unit.name,
+    unitCode: unitDisplayCode(unit),
+    status: unit.status,
+    statusLabel: STATUS_COLORS[unit.status].label,
+    tags,
+    lineStart: placement.lineStart,
+    lineEnd: placement.lineEnd,
+    panelX: placement.panel.left,
+    panelY: placement.panel.top,
+    panelWidth,
+    panelHeight,
+  }
+}
+
 export type FlowCalloutPosition = { panelX: number; panelY: number }
 
 export function buildCalloutPositions(

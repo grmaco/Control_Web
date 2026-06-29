@@ -43,13 +43,7 @@ import {
 import type { LineViewport } from '../../utils/lineViewport'
 import { assignSequentialNamesFromEntries } from '../../utils/sequentialNaming'
 import { hasFlowEntries, isFlowCapableUnit, isOutputDestinationCandidate, getEntryUnits, getExitUnits } from '../../utils/flowEntries'
-import { isStkRoutingSourceUnit, syncFlowRoleUnitRole, updatePortPropertiesInLine } from '../../utils/unitPropertyHelpers'
-import {
-  isCellInRoutingPath,
-  routingTooltipForUnit,
-  simulateStkRouting,
-} from '../../utils/routingSimulation'
-import type { RoutingSimulationResult } from '../../types/unitProperties'
+import { syncFlowRoleUnitRole, updatePortPropertiesInLine } from '../../utils/unitPropertyHelpers'
 import { getBuilderViewport } from '../../utils/lineViewport'
 import { computeMinimapFlowMap } from '../../utils/flowDirection'
 import { useConveyorStore } from '../../store/useConveyorStore'
@@ -74,11 +68,6 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   const [draft, setDraft] = useState(line)
   const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([])
   const [completionMessage, setCompletionMessage] = useState<string | null>(null)
-  const [routingSimulation, setRoutingSimulation] =
-    useState<RoutingSimulationResult | null>(null)
-  const [routingSimulationMessage, setRoutingSimulationMessage] = useState<
-    string | null
-  >(null)
   const [activeDrag, setActiveDrag] = useState<BuilderDragData | null>(null)
   const [overCellId, setOverCellId] = useState<string | null>(null)
   const [frozenViewport, setFrozenViewport] = useState<LineViewport | null>(null)
@@ -93,16 +82,12 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   draftRef.current = draft
   const selectedUnitIdsRef = useRef(selectedUnitIds)
   selectedUnitIdsRef.current = selectedUnitIds
-  const routingSimPressRef = useRef<Record<string, number>>({})
 
   useEffect(() => {
     setDraft(line)
     setSelectedUnitIds([])
     setCompletionMessage(null)
-    setRoutingSimulation(null)
-    setRoutingSimulationMessage(null)
     setOutputDestinationPickPortId(null)
-    routingSimPressRef.current = {}
   }, [line.id])
 
   useEffect(() => {
@@ -396,27 +381,6 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     [draft, persist, logApplication],
   )
 
-  const canRoutingSimulation =
-    selectedCount === 1 &&
-    selectedUnit != null &&
-    isStkRoutingSourceUnit(selectedUnit)
-
-  const handleRoutingSimulation = useCallback(() => {
-    if (!selectedUnit) return
-    const unitId = selectedUnit.id
-    const pressIndex = routingSimPressRef.current[unitId] ?? 0
-    const result = simulateStkRouting(draft, unitId, { pressIndex })
-    routingSimPressRef.current[unitId] = pressIndex + 1
-    setRoutingSimulation(result)
-    setRoutingSimulationMessage(result.message)
-  }, [draft, selectedUnit])
-
-  const handleClearRoutingSimulation = useCallback(() => {
-    setRoutingSimulation(null)
-    setRoutingSimulationMessage(null)
-    routingSimPressRef.current = {}
-  }, [])
-
   const handleCompletePlacement = useCallback(async () => {
     if (!hasFlowEntries(draft)) return
 
@@ -585,8 +549,6 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                     <PlacedUnit
                       unit={unit}
                       selected={selectedUnitIdsSet.has(unit.id)}
-                      routingHighlighted={isCellInRoutingPath(unit.id, routingSimulation)}
-                      routingTooltip={routingTooltipForUnit(unit.id, routingSimulation)}
                       showLabels
                       cellSize={BUILDER_CELL_SIZE}
                       footprint={footprint ?? undefined}
@@ -680,12 +642,8 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                   selectedCount={selectedCount}
                   allSelected={allSelected}
                   completionMessage={completionMessage}
-                  canRoutingSimulation={canRoutingSimulation}
-                  routingSimulationMessage={routingSimulationMessage}
                   onSetFlowRole={handleSetFlowRole}
                   onComplete={handleCompletePlacement}
-                  onRoutingSimulation={handleRoutingSimulation}
-                  onClearRoutingSimulation={handleClearRoutingSimulation}
                   onSelectAll={handleSelectAll}
                   onClearSelection={handleClearSelection}
                 />

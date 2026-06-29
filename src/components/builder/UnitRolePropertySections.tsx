@@ -1,16 +1,12 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import type { ConveyorLine, ConveyorUnit, InterfaceUnitType } from '../../types/conveyor'
 import type {
   PortProperties,
   StkProperties,
-  StkPolicy,
-  StkRoutingProperties,
   TransitLinkedUnitsProperties,
   UnitRole,
 } from '../../types/unitProperties'
 import {
-  STK_POLICIES,
-  STK_POLICY_LABELS,
   UNIT_ROLES,
   UNIT_ROLE_LABELS,
 } from '../../constants/unitRoles'
@@ -18,15 +14,12 @@ import { isPortUnit, isStorageUnit } from '../../constants/conveyorTypes'
 import { INTERFACE_UNIT_TYPES } from '../../constants/interfaceUnits'
 import {
   computeStkLoadRate,
-  defaultStkRoutingProperties,
   getPortProperties,
   listPortLinkedUnitCandidates,
   mergePortProperties,
   readPortProperties,
   getStkProperties,
   getTransitLinkedUnitsProperties,
-  getStkRoutingProperties,
-  isJunctionUnit,
   isTurnRoutingUnit,
   listTransitLinkedUnitCandidates,
   unitDisplayCode,
@@ -56,15 +49,6 @@ function patchProperties(
   onChange: (line: ConveyorLine) => void,
 ) {
   onChange(updateUnitInLine(line, unit.id, { properties }))
-}
-
-function patchStkRouting(
-  line: ConveyorLine,
-  unit: ConveyorUnit,
-  stkRouting: StkRoutingProperties,
-  onChange: (line: ConveyorLine) => void,
-) {
-  onChange(updateUnitInLine(line, unit.id, { stkRouting }))
 }
 
 function patchTransitLinkedUnits(
@@ -150,87 +134,6 @@ export function StraightInterfaceUnitSection({
           ? '투입구 직선 CV와 연결되는 외부 설비(OHT·AGV 등)를 선택하세요.'
           : '출고구 직선 CV와 연결되는 외부 설비(OHT·AGV 등)를 선택하세요.'}
       </p>
-    </div>
-  )
-}
-
-export function TurnStkRoutingSection({ line, unit, onChange }: RoleSectionsProps) {
-  const props = getStkRoutingProperties(unit, line)
-  if (!props) return null
-
-  const stks = line.units.filter(isStorageUnit)
-
-  const update = (patch: Partial<StkRoutingProperties>) => {
-    patchStkRouting(line, unit, { ...props, ...patch }, onChange)
-  }
-
-  const toggleAllowedStk = (stkId: string, checked: boolean) => {
-    const next = checked
-      ? [...new Set([...props.allowedStkIds, stkId])]
-      : props.allowedStkIds.filter((id) => id !== stkId)
-    update({ allowedStkIds: next })
-  }
-
-  return (
-    <div className="space-y-2 rounded-md border border-violet-900/50 bg-violet-950/20 p-3">
-      <p className="text-xs font-medium text-violet-200">
-        STK 분기 ({isJunctionUnit(unit) ? '분기' : '회전'} 유닛)
-      </p>
-      <label className="flex items-center gap-2 text-xs text-slate-300">
-        <input
-          type="checkbox"
-          checked={props.enabled}
-          onChange={(e) => update({ enabled: e.target.checked })}
-        />
-        분기 라우팅 활성
-      </label>
-      <div>
-        <label className="mb-1 block text-xs text-slate-400">우선순위</label>
-        <input
-          type="number"
-          min={1}
-          step={1}
-          value={props.priority}
-          onChange={(e) => update({ priority: Number(e.target.value) || 1 })}
-          className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
-        />
-        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-          투입 경로에 STK 분기가 여러 개일 때 적용 순서입니다. 숫자가 작을수록 먼저
-          사용됩니다.
-        </p>
-      </div>
-      <div>
-        <label className="mb-1 block text-xs text-slate-400">STK 정책</label>
-        <select
-          value={props.targetStkPolicy}
-          onChange={(e) => update({ targetStkPolicy: e.target.value as StkPolicy })}
-          className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
-        >
-          {STK_POLICIES.map((policy) => (
-            <option key={policy} value={policy}>
-              {STK_POLICY_LABELS[policy]}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className="mb-1 block text-xs text-slate-400">허용 STK</label>
-        <p className="mb-1 text-[11px] leading-relaxed text-slate-500">
-          체크한 STK만 라우팅·시뮬 대상입니다. 라운드 로빈은 2개 이상 체크하세요.
-        </p>
-        <div className="max-h-28 space-y-1 overflow-auto text-xs">
-          {stks.map((stk) => (
-            <label key={stk.id} className="flex items-center gap-2 text-slate-300">
-              <input
-                type="checkbox"
-                checked={props.allowedStkIds.includes(stk.id)}
-                onChange={(e) => toggleAllowedStk(stk.id, e.target.checked)}
-              />
-              {unitDisplayCode(stk)}
-            </label>
-          ))}
-        </div>
-      </div>
     </div>
   )
 }
@@ -527,25 +430,12 @@ export function RolePropertySections({
   onStartPickOutputDestination,
   onCancelPickOutputDestination,
 }: RoleSectionsProps) {
-  useEffect(() => {
-    if (!isTurnRoutingUnit(unit)) return
-    if (unit.stkRouting) return
-    onChange(
-      updateUnitInLine(line, unit.id, {
-        stkRouting: defaultStkRoutingProperties(line),
-      }),
-    )
-  }, [unit.id, unit.stkRouting, line.id, line.units.length])
-
   return (
     <div className="space-y-3">
       <UnitRoleSelector line={line} unit={unit} onChange={onChange} />
       <StraightInterfaceUnitSection line={line} unit={unit} onChange={onChange} />
       {isTurnRoutingUnit(unit) ? (
-        <>
-          <TransitLinkedUnitsSection line={line} unit={unit} onChange={onChange} />
-          <TurnStkRoutingSection line={line} unit={unit} onChange={onChange} />
-        </>
+        <TransitLinkedUnitsSection line={line} unit={unit} onChange={onChange} />
       ) : null}
       {isStorageUnit(unit) ? (
         <StkRoleSection line={line} unit={unit} onChange={onChange} />

@@ -7,7 +7,6 @@ import {
   planInboundLoadPath,
   spawnContinuousInjectLoad,
   tickEntryVacancy,
-  type StkRoutingSessionState,
 } from './pathSimulation'
 
 function tickAllEntryVacancy(
@@ -58,10 +57,9 @@ function canProbeDepositInjectNow(
   loads: PathSimulationLoad[],
   line: ConveyorLine,
   entryUnitId: string,
-  routingSession?: StkRoutingSessionState,
 ): boolean {
   if (!isEntryUnoccupied(loads, line, entryUnitId)) return false
-  const plan = planInboundLoadPath(line, entryUnitId, routingSession)
+  const plan = planInboundLoadPath(line, entryUnitId)
   return plan.pathUnitIds.length > 0
 }
 
@@ -348,7 +346,6 @@ function attemptProbeDepotInject(
   loadSequence: number,
   tickVacantByEntry: Record<string, number>,
   toDepotMs: number,
-  routingSession?: StkRoutingSessionState,
 ): {
   probe: GatherProbeState
   loads: PathSimulationLoad[]
@@ -369,7 +366,7 @@ function attemptProbeDepotInject(
     }
   }
 
-  if (!canProbeDepositInjectNow(loads, line, entryUnitId, routingSession)) {
+  if (!canProbeDepositInjectNow(loads, line, entryUnitId)) {
     return {
       probe: holdProbeAtDepot(probe, toDepotMs),
       loads,
@@ -386,7 +383,6 @@ function attemptProbeDepotInject(
     loadSequence,
     tickVacantByEntry,
     0,
-    routingSession,
   )
 
   if (inject.spawned.length > 0) {
@@ -419,7 +415,6 @@ function applyDepositInject(
   loadSequence: number,
   tickVacantByEntry: Record<string, number>,
   _inputIntervalSec: number,
-  routingSession?: StkRoutingSessionState,
 ): {
   probe: GatherProbeState
   loads: PathSimulationLoad[]
@@ -436,7 +431,6 @@ function applyDepositInject(
     entryUnitId,
     loadSequence,
     tickVacantByEntry,
-    routingSession,
   )
   if (inject.spawned.length === 0) {
     return { probe, loads, spawned: [], nextSequence: loadSequence }
@@ -541,7 +535,6 @@ function advanceProbeByDelta(
   loadSequence: number,
   tickVacantByEntry: Record<string, number>,
   _inputIntervalSec: number,
-  routingSession?: StkRoutingSessionState,
 ): {
   probe: GatherProbeState
   loads: PathSimulationLoad[]
@@ -575,7 +568,6 @@ function advanceProbeByDelta(
       nextSequence,
       tickVacantByEntry,
       durations.toDepot,
-      routingSession,
     )
     spawned.push(...injected.spawned)
     return {
@@ -925,14 +917,13 @@ function spawnAtEntryIfReady(
   entryUnitId: string,
   loadSequence: number,
   tickVacantByEntry: Record<string, number>,
-  routingSession?: StkRoutingSessionState,
 ): { loads: PathSimulationLoad[]; spawned: PathSimulationLoad[]; nextSequence: number } {
-  if (!canProbeDepositInjectNow(loads, line, entryUnitId, routingSession)) {
+  if (!canProbeDepositInjectNow(loads, line, entryUnitId)) {
     return { loads, spawned: [], nextSequence: loadSequence }
   }
 
   const nextSeq = loadSequence + 1
-  const batchLoad = spawnContinuousInjectLoad(line, entryUnitId, nextSeq, routingSession)
+  const batchLoad = spawnContinuousInjectLoad(line, entryUnitId, nextSeq)
   if (!batchLoad) {
     return { loads, spawned: [], nextSequence: loadSequence }
   }
@@ -972,7 +963,6 @@ export function advanceGatherProbes(
   inputIntervalSec: number,
   loadSequence: number,
   entryVacantTicks: Record<string, number>,
-  routingSession?: StkRoutingSessionState,
 ): AdvanceGatherProbesResult {
   if (entryUnitIds.length === 0) {
     return { probes: [], spawned: [], nextSequence: loadSequence, entryVacantTicks: {} }
@@ -1023,7 +1013,6 @@ export function advanceGatherProbes(
           nextSequence,
           vacantTicksByEntry,
           inputIntervalSec,
-          routingSession,
         )
         probe = stepped.probe
         loads = stepped.loads

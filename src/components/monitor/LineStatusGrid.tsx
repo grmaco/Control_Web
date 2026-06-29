@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { isPortUnit, isStorageUnit, unitTitle } from '../../constants/conveyorTypes'
 import type { ConveyorLine, ConveyorUnit } from '../../types/conveyor'
 import { STATUS_COLORS } from '../../constants/statusColors'
@@ -19,13 +19,15 @@ import { lineLayoutSignature } from '../../utils/lineLayoutSignature'
 import { buildUnitLabelLines, LABEL_LINE_HEIGHT } from '../../utils/monitorLabel'
 import { unitShowsMinimapMaterial } from '../../utils/unitMaterial'
 import { MinimapFlowArrow, MinimapPortFallback, MinimapStorageLabel } from './MinimapFlowArrow'
-import { FlowCalloutOverlay } from './FlowCalloutLayer'
-import { computeFlowCallouts } from '../../utils/flowCallouts'
+import { FlowCalloutOverlay, FLOW_CALLOUT_PANEL_CLASS, FLOW_UNIT_PEEK_HIT_CLASS } from './FlowCalloutLayer'
+import { computeFlowCallouts, computeCalloutForUnit } from '../../utils/flowCallouts'
 import { RollerConveyorCell } from './RollerConveyorCell'
 import { TurnConveyorCell } from './TurnConveyorCell'
 import { StorageConveyorCell } from './StorageConveyorCell'
 import { ContinuousInputGatherOverlay } from './ContinuousInputGatherOverlay'
 import type { GatherProbeState } from '../../utils/continuousInputGather'
+import type { PathSimulationLoad } from '../../types/unitProperties'
+import { useTouchLayout } from '../../hooks/useTouchLayout'
 
 interface LineStatusGridProps {
   line: ConveyorLine
@@ -51,6 +53,11 @@ interface LineStatusGridProps {
   simulationInProgress?: boolean
   /** 경로 시뮬레이션 — 자재별 진행 (flow 오버레이) */
   simulationLoads?: Array<{ pathUnitIds: string[]; stepIndex: number }>
+  /** 콜아웃 LD/ULD/BUSY — 전체 시뮬 load 상태 */
+  simulationCalloutLoads?: PathSimulationLoad[]
+  simulationInputIntervalSec?: number
+  simulationTransitIntervalSec?: number
+  simulationDischargeIntervalSec?: number
   /** 경로 시뮬레이션 — 계획 경로 하이라이트 */
   simulationPathUnitIds?: string[]
   /** 콜아웃 드래그 중 맵 패닝 잠금 */
@@ -157,6 +164,10 @@ export function LineStatusGrid({
   simulationStaticTestMaterialUnitIds = [],
   simulationInProgress = false,
   simulationLoads = [],
+  simulationCalloutLoads = [],
+  simulationInputIntervalSec,
+  simulationTransitIntervalSec,
+  simulationDischargeIntervalSec,
   simulationPathUnitIds = [],
   onCalloutPanLockChange,
   calloutDeselectToken = 0,
@@ -233,6 +244,93 @@ export function LineStatusGrid({
     const alarmUnitIds = Object.keys(unitAlarms).length > 0 ? new Set(Object.keys(unitAlarms)) : undefined
     return computeFlowCallouts(line, flowByUnitId, viewportBounds, cellSize, alarmUnitIds, unitAlarms)
   }, [cellSize, flowByUnitId, layoutSignature, line, showFlowCallouts, viewportBounds, unitAlarms])
+  const calloutByUnitId = useMemo(
+    () => new Map(flowCallouts.map((callout) => [callout.unitId, callout])),
+    [flowCallouts],
+  )
+  const [pinnedUnitId, setPinnedUnitId] = useState<string | null>(null)
+  const [hoveredUnitId, setHoveredUnitId] = useState<string | null>(null)
+  const touchLayout = useTouchLayout()
+
+  useEffect(() => {
+    if (calloutDeselectToken > 0) {
+      setPinnedUnitId(null)
+      setHoveredUnitId(null)
+    }
+  }, [calloutDeselectToken])
+
+  const handleMapPointerLeave = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (touchLayout) return
+    const next = event.relatedTarget
+    if (next instanceof Node && event.currentTarget.contains(next)) return
+    if (next instanceof Element && next.closest(`.${FLOW_CALLOUT_PANEL_CLASS}`)) return
+    setHoveredUnitId(null)
+  }, [touchLayout])
+
+  const handleUnitPointerEnter = useCallback(
+    (unitId: string) => {
+      if (touchLayout) return
+      setHoveredUnitId(unitId)
+    },
+    [touchLayout],
+  )
+
+  const handleUnitPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>, unitId: string) => {
+      event.stopPropagation()
+      setPinnedUnitId((current) => (current === unitId ? null : unitId))
+    },
+    [],
+  )
+
+  const peekUnitIds = useMemo(() => {
+    const ids: string[] = []
+    if (pinnedUnitId) ids.push(pinnedUnitId)
+    if (hoveredUnitId && hoveredUnitId !== pinnedUnitId) ids.push(hoveredUnitId)
+    return ids
+  }, [hoveredUnitId, pinnedUnitId])
+
+  const visibleCallouts = useMemo(() => {
+    if (!showFlowCallouts) return []
+
+    const merged = new Map(flowCallouts.map((callout) => [callout.unitId, callout]))
+
+    for (const unitId of peekUnitIds) {
+      if (merged.has(unitId)) continue
+      const cached = calloutByUnitId.get(unitId)
+      if (cached) {
+        merged.set(unitId, cached)
+        continue
+      }
+      const unit = unitById.get(unitId)
+      if (!unit) continue
+      const flow = flowByUnitId.get(unitId)
+      const created = computeCalloutForUnit(
+        unit,
+        flow,
+        line,
+        viewportBounds,
+        cellSize,
+        unitAlarms,
+        flowCallouts,
+      )
+      if (created) merged.set(unitId, created)
+    }
+
+    return [...merged.values()]
+  }, [
+    calloutByUnitId,
+    cellSize,
+    flowByUnitId,
+    flowCallouts,
+    line,
+    peekUnitIds,
+    showFlowCallouts,
+    unitAlarms,
+    unitById,
+    viewportBounds,
+  ])
+
   const lineView = useMonitorStore((s) => s.lineViews[line.id] ?? null)
   const saveCalloutPositions = useMonitorStore((s) => s.saveCalloutPositions)
   const savedCalloutPositions = useMemo(() => {
@@ -249,6 +347,7 @@ export function LineStatusGrid({
   return (
     <div
       className={`relative overflow-visible transition-transform duration-300 ${className ?? ''}`}
+      onPointerLeave={showFlowCallouts ? handleMapPointerLeave : undefined}
       style={
         is25DView
           ? {
@@ -370,6 +469,14 @@ export function LineStatusGrid({
             }`}
             title={isAnchor && unit ? unitTitle(unit) : undefined}
           >
+            {showFlowCallouts && unit ? (
+              <div
+                className={`${FLOW_UNIT_PEEK_HIT_CLASS} absolute inset-0 z-[30] touch-none`}
+                aria-hidden
+                onPointerEnter={() => handleUnitPointerEnter(unit.id)}
+                onPointerDown={(event) => handleUnitPointerDown(event, unit.id)}
+              />
+            ) : null}
             {useRollerSvg && unit && (
               <RollerConveyorCell
                 width={spanWidth}
@@ -505,9 +612,10 @@ export function LineStatusGrid({
         gridHeight={rows * cellSize}
         inputIntervalSec={continuousInputIntervalSec}
       />
-      {showFlowCallouts && flowCallouts.length > 0 ? (
+      {showFlowCallouts && visibleCallouts.length > 0 ? (
         <FlowCalloutOverlay
-          callouts={flowCallouts}
+          callouts={visibleCallouts}
+          peekUnitId={pinnedUnitId ?? hoveredUnitId}
           unitById={unitById}
           flowByUnitId={flowByUnitId}
           unitRuntime={unitRuntime}
@@ -522,6 +630,11 @@ export function LineStatusGrid({
           staticTestMaterialUnitIds={staticTestMaterialSet}
           simulating={simulationInProgress}
           entrySimDestinationByUnitId={entrySimDestinationByUnitId}
+          simulationLoads={simulationCalloutLoads}
+          inputIntervalSec={simulationInputIntervalSec}
+          transitIntervalSec={simulationTransitIntervalSec}
+          dischargeIntervalSec={simulationDischargeIntervalSec}
+          continuousInputActive={continuousInputActive}
         />
       ) : null}
     </div>

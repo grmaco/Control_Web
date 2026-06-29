@@ -27,7 +27,7 @@ import type { PathSimulationStartOptions } from '../../hooks/usePathSimulation'
 import { LineStatusGrid } from './LineStatusGrid'
 import { MonitorMapControls } from './MonitorMapControls'
 import { PathSimulationBar, PathSimulationPlaybackControls } from './PathSimulationBar'
-import { FLOW_CALLOUT_PANEL_CLASS } from './FlowCalloutLayer'
+import { FLOW_CALLOUT_PANEL_CLASS, FLOW_UNIT_PEEK_HIT_CLASS } from './FlowCalloutLayer'
 
 const CELL_SIZE = MONITOR_CELL_SIZE
 const LABELS_MIN_EFFECTIVE_CELL = 32
@@ -348,7 +348,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
       panning: {
         ...ZOOM_CONFIG.panning,
         disabled: calloutPanLock,
-        excluded: [FLOW_CALLOUT_PANEL_CLASS],
+        excluded: [FLOW_CALLOUT_PANEL_CLASS, FLOW_UNIT_PEEK_HIT_CLASS],
       },
     }),
     [calloutPanLock],
@@ -405,6 +405,14 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
                   simulation.status !== 'idle' && simulation.status !== 'complete'
                 }
                 simulationLoads={simulation.simulationFlowOverlayLoads}
+                simulationCalloutLoads={
+                  simulation.status !== 'idle' && simulation.status !== 'complete'
+                    ? simulation.loads
+                    : undefined
+                }
+                simulationInputIntervalSec={simulation.inputIntervalSec}
+                simulationTransitIntervalSec={simulation.transitIntervalSec}
+                simulationDischargeIntervalSec={simulation.dischargeIntervalSec}
                 simulationPathUnitIds={simulation.pathUnitIds}
                 continuousInputActive={simulation.continuousInputActive}
                 continuousGatherProbes={simulation.continuousGatherProbes}
@@ -416,7 +424,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
                 calloutDeselectToken={calloutDeselectToken}
                 entrySimDestinationByUnitId={simulation.entrySimDestinationByUnitId}
                 is25DView={is25DView}
-                className="pointer-events-none select-none"
+                className="select-none"
               />
             </TransformComponent>
           </TransformWrapper>
@@ -650,6 +658,14 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
               simulation.status !== 'idle' && simulation.status !== 'complete'
             }
             simulationLoads={simulation.simulationFlowOverlayLoads}
+            simulationCalloutLoads={
+              simulation.status !== 'idle' && simulation.status !== 'complete'
+                ? simulation.loads
+                : undefined
+            }
+            simulationInputIntervalSec={simulation.inputIntervalSec}
+            simulationTransitIntervalSec={simulation.transitIntervalSec}
+            simulationDischargeIntervalSec={simulation.dischargeIntervalSec}
             simulationPathUnitIds={simulation.pathUnitIds}
             continuousInputActive={simulation.continuousInputActive}
             continuousGatherProbes={simulation.continuousGatherProbes}
@@ -661,7 +677,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             calloutDeselectToken={calloutDeselectToken}
             entrySimDestinationByUnitId={simulation.entrySimDestinationByUnitId}
             is25DView={is25DView}
-            className="pointer-events-none select-none"
+            className="select-none"
           />
         </TransformComponent>
       </TransformWrapper>

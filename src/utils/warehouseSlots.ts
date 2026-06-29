@@ -2,7 +2,7 @@ import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
 import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
 import type { PathSimulationLoad } from '../types/unitProperties'
 import { SIM_STK_IO_ENABLED } from '../constants/simStkIo'
-import { planInboundLoadPath, type StkRoutingSessionState } from './pathSimulation'
+import { planInboundLoadPath } from './pathSimulation'
 import { getPortProperties, getStkProperties } from './unitPropertyHelpers'
 import { isCvUnit } from './unitMaterial'
 
@@ -38,9 +38,8 @@ export function warehouseSlotIndex(row: number, col: number): number {
 export function resolveInboundStorageTarget(
   line: ConveyorLine,
   entryUnitId: string,
-  routingSession?: StkRoutingSessionState,
 ): string | null {
-  const plan = planInboundLoadPath(line, entryUnitId, routingSession)
+  const plan = planInboundLoadPath(line, entryUnitId)
   if (plan.targetStkId) return plan.targetStkId
 
   const lastId = plan.pathUnitIds[plan.pathUnitIds.length - 1]
@@ -115,7 +114,6 @@ export function collectInboundLineMaterialUnitIds(
   line: ConveyorLine,
   entryUnitIds: string[],
   activeLoads?: PathSimulationLoad[],
-  routingSession?: StkRoutingSessionState,
 ): Set<string> {
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
   const ids = new Set<string>()
@@ -132,7 +130,7 @@ export function collectInboundLineMaterialUnitIds(
   }
 
   for (const entryUnitId of entryUnitIds) {
-    const plan = planInboundLoadPath(line, entryUnitId, routingSession)
+    const plan = planInboundLoadPath(line, entryUnitId)
     addMaterialUnitsFromPath(ids, plan.pathUnitIds, unitMap)
   }
   addLinkedInputPorts(line, entryUnitIds, ids)
@@ -177,13 +175,11 @@ export function isInboundConveyorLineFull(
   loads: PathSimulationLoad[],
   entryUnitIds: string[],
   fillCounts: Record<string, number> = {},
-  routingSession?: StkRoutingSessionState,
 ): boolean {
   const materialUnits = collectInboundLineMaterialUnitIds(
     line,
     entryUnitIds,
     loads,
-    routingSession,
   )
   if (materialUnits.size === 0) return false
 

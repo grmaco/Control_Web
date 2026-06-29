@@ -14,6 +14,8 @@ import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 
 /** react-zoom-pan-pinch 패닝 제외용 */
 export const FLOW_CALLOUT_PANEL_CLASS = 'flow-callout-panel'
+/** 맵 유닛 호버·터치 콜아웃 — 패닝 제외 */
+export const FLOW_UNIT_PEEK_HIT_CLASS = 'flow-unit-peek-hit'
 
 const DRAG_THRESHOLD_PX = 4
 
@@ -35,6 +37,14 @@ interface FlowCalloutOverlayProps {
   entrySimDestinationByUnitId?: Record<string, string>
   /** 증가 시 선택 해제 (시뮬레이션 초기화 등) */
   deselectToken?: number
+  /** 맵 호버·터치로 열린 유닛 — 강조 표시 */
+  peekUnitId?: string | null
+  /** 경로 시뮬 — LD/ULD/BUSY 판별용 */
+  simulationLoads?: PathSimulationLoad[]
+  inputIntervalSec?: number
+  transitIntervalSec?: number
+  dischargeIntervalSec?: number
+  continuousInputActive?: boolean
 }
 
 export function FlowCalloutOverlay({
@@ -53,6 +63,12 @@ export function FlowCalloutOverlay({
   simulating = false,
   entrySimDestinationByUnitId = {},
   deselectToken = 0,
+  peekUnitId = null,
+  simulationLoads = [],
+  inputIntervalSec,
+  transitIntervalSec,
+  dischargeIntervalSec,
+  continuousInputActive = false,
 }: FlowCalloutOverlayProps) {
   const unitAlarms = useSemiCnvStore((s) => s.unitAlarms)
   const [positions, setPositions] = useState<Record<string, FlowCalloutPosition>>(() =>
@@ -155,6 +171,7 @@ export function FlowCalloutOverlay({
 
         {callouts.map((callout) => {
           const active    = activeUnitIds?.has(callout.unitId)
+          const peeking   = peekUnitId === callout.unitId
           const selected  = selectedId === callout.unitId
           const hasAlarm  = Boolean(unitAlarms[callout.unitId])
           const pos = positions[callout.unitId] ?? {
@@ -176,12 +193,12 @@ export function FlowCalloutOverlay({
           )
           const lineColor = hasAlarm
             ? '#ef4444'
-            : active || selected
+            : active || selected || peeking
               ? '#22d3ee'
               : 'rgba(6,182,212,0.7)'
           const glowColor = hasAlarm
             ? 'rgba(239,68,68,0.35)'
-            : active || selected
+            : active || selected || peeking
               ? 'rgba(34,211,238,0.35)'
               : 'rgba(6,182,212,0.15)'
 
@@ -192,7 +209,7 @@ export function FlowCalloutOverlay({
                 x1={callout.lineStart.x} y1={callout.lineStart.y}
                 x2={lineEnd.x} y2={lineEnd.y}
                 stroke={glowColor}
-                strokeWidth={active || selected ? 5 : 3.5}
+                strokeWidth={active || selected || peeking ? 5 : 3.5}
                 strokeLinecap="round"
               />
               {/* 메인 라인 */}
@@ -200,9 +217,9 @@ export function FlowCalloutOverlay({
                 x1={callout.lineStart.x} y1={callout.lineStart.y}
                 x2={lineEnd.x} y2={lineEnd.y}
                 stroke={lineColor}
-                strokeWidth={active || selected ? 1.5 : 1}
+                strokeWidth={active || selected || peeking ? 1.5 : 1}
                 strokeLinecap="round"
-                strokeDasharray={active || selected ? undefined : '5 3'}
+                strokeDasharray={active || selected || peeking ? undefined : '5 3'}
               />
               {/* 유닛 접점 도트 */}
               <circle
@@ -232,6 +249,12 @@ export function FlowCalloutOverlay({
                   staticTestAtOrigin:
                     staticTestMaterialUnitIds?.has(callout.unitId) ?? false,
                   simDestination: entrySimDestinationByUnitId[callout.unitId] ?? null,
+                  simulationLoads: simulating ? simulationLoads : undefined,
+                  unitMap: unitById,
+                  inputIntervalSec,
+                  transitIntervalSec,
+                  dischargeIntervalSec,
+                  continuousInputActive,
                 },
                 unitAlarms,
               )
@@ -250,7 +273,7 @@ export function FlowCalloutOverlay({
             panelY={pos.panelY}
             scale={scale}
             selected={selectedId === callout.unitId}
-            highlighted={activeUnitIds?.has(callout.unitId) ?? false}
+            highlighted={(activeUnitIds?.has(callout.unitId) ?? false) || peekUnitId === callout.unitId}
             onSelect={() => setSelectedId(callout.unitId)}
             onDrag={(panelX, panelY) => updatePosition(callout.unitId, panelX, panelY)}
             onDragEnd={handleDragEnd}
@@ -272,6 +295,8 @@ export function FlowCalloutOverlay({
 }
 
 import type { CalloutDisplayInfo } from '../../utils/calloutDisplay'
+import type { CalloutTransferStatus } from '../../utils/calloutTransferStatus'
+import type { PathSimulationLoad } from '../../types/unitProperties'
 
 function CornerBracket({
   pos,
@@ -529,6 +554,7 @@ function SelectableFlowCalloutTable({
   const labelColor = 'rgba(6,182,212,0.75)'
 
   // 상태 도트 색
+  const transferStatus = display?.transferStatus
   const statusDotStyle: React.CSSProperties = {
     display: 'inline-block',
     width: 5,
@@ -536,9 +562,19 @@ function SelectableFlowCalloutTable({
     borderRadius: '50%',
     marginRight: 3,
     flexShrink: 0,
-    background: hasAlarm ? '#ef4444' : statusColors.dot ?? '#94a3b8',
-    boxShadow: hasAlarm ? '0 0 4px #ef4444' : undefined,
+    background: hasAlarm
+      ? '#ef4444'
+      : transferStatusDotColor(transferStatus) ?? statusColors.dot ?? '#94a3b8',
+    boxShadow: hasAlarm
+      ? '0 0 4px #ef4444'
+      : transferStatus
+        ? `0 0 4px ${transferStatusDotColor(transferStatus)}`
+        : undefined,
   }
+
+  const statusTextColor = hasAlarm
+    ? '#fca5a5'
+    : transferStatusTextColor(transferStatus) ?? '#e2e8f0'
 
   return (
     <div
@@ -610,7 +646,7 @@ function SelectableFlowCalloutTable({
             <td style={{ padding: '2px 4px' }}>
               <span style={{ display: 'inline-flex', alignItems: 'center' }}>
                 <span style={statusDotStyle} />
-                <span style={{ color: hasAlarm ? '#fca5a5' : '#e2e8f0' }}>
+                <span style={{ color: statusTextColor }}>
                   {display?.status ?? callout.statusLabel}
                 </span>
               </span>
@@ -724,4 +760,30 @@ function SelectableFlowCalloutTable({
       </table>
     </div>
   )
+}
+
+function transferStatusDotColor(status: CalloutTransferStatus | undefined): string | undefined {
+  switch (status) {
+    case 'LD':
+      return '#22d3ee'
+    case 'ULD':
+      return '#fbbf24'
+    case 'BUSY':
+      return '#34d399'
+    default:
+      return undefined
+  }
+}
+
+function transferStatusTextColor(status: CalloutTransferStatus | undefined): string | undefined {
+  switch (status) {
+    case 'LD':
+      return '#67e8f9'
+    case 'ULD':
+      return '#fde68a'
+    case 'BUSY':
+      return '#6ee7b7'
+    default:
+      return undefined
+  }
 }

@@ -15,14 +15,10 @@ interface PlacementToolbarProps {
   selectedCount: number
   allSelected: boolean
   completionMessage: string | null
-  canRoutingSimulation: boolean
-  routingSimulationMessage: string | null
   onSetFlowRole: (unitId: string, role: FlowRole | null) => void
   onComplete: () => void
   onSelectAll: () => void
   onClearSelection: () => void
-  onRoutingSimulation: () => void
-  onClearRoutingSimulation: () => void
 }
 
 export function PlacementToolbar({
@@ -31,14 +27,10 @@ export function PlacementToolbar({
   selectedCount,
   allSelected,
   completionMessage,
-  canRoutingSimulation,
-  routingSimulationMessage,
   onSetFlowRole,
   onComplete,
   onSelectAll,
   onClearSelection,
-  onRoutingSimulation,
-  onClearRoutingSimulation,
 }: PlacementToolbarProps) {
   const entryUnits = getEntryUnits(line)
   const exitUnits = getExitUnits(line)
@@ -107,25 +99,9 @@ export function PlacementToolbar({
         </button>
         <button
           type="button"
-          disabled={!canRoutingSimulation}
-          onClick={onRoutingSimulation}
-          className="col-span-2 min-h-[44px] rounded-md border border-violet-800/60 px-3 py-2.5 text-sm text-violet-200 hover:bg-violet-950/40 disabled:cursor-not-allowed disabled:opacity-40 sm:col-auto"
-        >
-          STK 라우팅 시뮬레이션
-        </button>
-        <button
-          type="button"
-          disabled={!routingSimulationMessage}
-          onClick={onClearRoutingSimulation}
-          className="min-h-[44px] rounded-md border border-slate-600 px-3 py-2.5 text-sm text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          시뮬레이션 해제
-        </button>
-        <button
-          type="button"
           disabled={!canComplete}
           onClick={onComplete}
-          className="min-h-[44px] rounded-md bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40"
+          className="col-span-2 min-h-[44px] rounded-md bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40 sm:col-auto"
         >
           배치 완료
         </button>
@@ -161,10 +137,6 @@ export function PlacementToolbar({
           </>
         ) : null}
       </p>
-
-      {routingSimulationMessage && (
-        <p className="text-xs text-violet-300">{routingSimulationMessage}</p>
-      )}
 
       {completionMessage && (
         <p className="text-xs text-emerald-300">{completionMessage}</p>

@@ -34,13 +34,10 @@ import {
   buildLoadTackTimeSummaries,
   buildSequentialRevealLoadOrder,
   clampSimIntervalSec,
-  createStkRoutingSessionState,
   initializeLoadsForSequentialReveal,
   releaseAllSimulationLoads,
   revealPathUnitIdsForLoad,
-  seedStkRoutingSessionFromLoads,
   simulationSequentialRevealUnitIds,
-  type StkRoutingSessionState,
   MIN_TACK_TIME_SEC,
   roundTackTimeSec,
   simulationCstUnitIds,
@@ -132,13 +129,11 @@ function buildMultiPathPlan(
   mode: PathSimulationMode,
   selectedSourceUnitIds: string[],
 ): MultiPathSimulationPlan | null {
-  const routingSession = createStkRoutingSessionState()
   if (mode === 'inbound') {
     if (selectedSourceUnitIds.length === 0) return null
     const primary = planMultiInboundLoadPaths(
       activeLine,
       selectedSourceUnitIds,
-      routingSession,
     )
     if (primary.loads.length === 0) return null
     return primary
@@ -222,7 +217,6 @@ export function usePathSimulation(
   const injectSeqRef = useRef(0)
   const entryVacancyRef = useRef<Record<string, number>>({})
   const depositedLoadIdsRef = useRef<Set<string>>(new Set())
-  const stkRoutingSessionRef = useRef<StkRoutingSessionState>(createStkRoutingSessionState())
   const warehouseFillCountsRef = useRef(warehouseFillCounts)
   warehouseFillCountsRef.current = warehouseFillCounts
   const selectedSourceUnitIdsRef = useRef(selectedSourceUnitIds)
@@ -406,7 +400,6 @@ export function usePathSimulation(
     injectSeqRef.current = 0
     entryVacancyRef.current = {}
     depositedLoadIdsRef.current = new Set()
-    stkRoutingSessionRef.current = createStkRoutingSessionState()
     setStatus('idle')
   }, [clearTackSession, line.id, mode])
 
@@ -562,7 +555,6 @@ export function usePathSimulation(
         : lineWithAllSimulationUnitsRunning(line)
 
       depositedLoadIdsRef.current = new Set()
-      stkRoutingSessionRef.current = createStkRoutingSessionState()
       setWarehouseFillCounts({})
       setWarehouseFullNotice(false)
       setInboundLineFullBlocked(false)
@@ -574,7 +566,6 @@ export function usePathSimulation(
         selectedSourceUnitIds,
       )
       const planLoads = nextPlan?.loads ?? []
-      seedStkRoutingSessionFromLoads(stkRoutingSessionRef.current, planLoads)
 
       if (
         startMode === 'continuous' &&
@@ -866,7 +857,6 @@ export function usePathSimulation(
             nextLoads,
             entryIds,
             fillCounts,
-            stkRoutingSessionRef.current,
           )
           if (!lineFull) {
             const gatherResult = advanceGatherProbes(
@@ -877,7 +867,6 @@ export function usePathSimulation(
               CONTINUOUS_INPUT_INTERVAL_SEC,
               injectSeqRef.current,
               entryVacancyRef.current,
-              stkRoutingSessionRef.current,
             )
             gatherProbesRef.current = gatherResult.probes
             setGatherProbes(gatherResult.probes)
@@ -914,7 +903,6 @@ export function usePathSimulation(
             advanced,
             entryIds,
             fillCounts,
-            stkRoutingSessionRef.current,
           )
         ) {
           continuousInputActiveRef.current = false
@@ -1285,7 +1273,6 @@ export function usePathSimulation(
       loads,
       selectedSourceUnitIds,
       warehouseFillCounts,
-      stkRoutingSessionRef.current,
     )
   }, [loads, mode, selectedSourceUnitIds, simulationLine, warehouseFillCounts])
 

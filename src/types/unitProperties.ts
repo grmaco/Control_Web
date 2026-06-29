@@ -7,18 +7,11 @@ export type UnitRole =
   | 'PORT_IN'
   | 'PORT_OUT'
 
-/** STK 라우팅 정책 (회전·분기 유닛) */
-export type StkPolicy =
-  | 'MANUAL_ORDER'
-  | 'LOAD_RATE_FIRST'
-  | 'LOAD_RATE_LAST'
-  | 'ROUND_ROBIN'
-
-/** 회전/분기 유닛 — 어느 STK로 보낼지 결정 */
+/** @deprecated STK 분기 라우팅 제거 — 하위 호환 마이그레이션용 */
 export interface StkRoutingProperties {
   enabled: boolean
   priority: number
-  targetStkPolicy: StkPolicy
+  targetStkPolicy: string
   allowedStkIds: string[]
   description?: string
 }
@@ -61,17 +54,10 @@ export interface StkProperties {
   description?: string
 }
 
-/** @deprecated STK 라우팅은 turn/junction stkRouting 사용 */
+/** @deprecated STK 라우팅 제거 — 하위 호환용 */
 export type InputPortProperties = StkRoutingProperties
 
 export type UnitRoleProperties = StkProperties | PortProperties
-
-export interface RoutingSimulationResult {
-  sourceUnitId: string
-  targetStkId: string | null
-  pathUnitIds: string[]
-  message: string
-}
 
 export type PathSimulationDirection = 'inbound' | 'outbound'
 

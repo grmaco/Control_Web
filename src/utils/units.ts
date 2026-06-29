@@ -438,7 +438,6 @@ export function updateUnitInLine(
       | 'code'
       | 'role'
       | 'properties'
-      | 'stkRouting'
       | 'transitLinkedUnits'
       | 'junctionRouting'
     >

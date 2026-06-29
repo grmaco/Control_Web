@@ -58,8 +58,8 @@ export function isTurnRoutingUnit(unit: ConveyorUnit): boolean {
   return unit.type === 'turn' || unit.type === 'junction'
 }
 
-export function isStkRoutingSourceUnit(unit: ConveyorUnit): boolean {
-  return isTurnRoutingUnit(unit) && Boolean(unit.stkRouting?.enabled)
+export function isStkRoutingSourceUnit(_unit: ConveyorUnit): boolean {
+  return false
 }
 
 export function portRoleFromDirection(direction: PortDirection): UnitRole {
@@ -814,17 +814,6 @@ export function defaultOutputPortProperties(
   return defaultPortProperties(line, port)
 }
 
-export function defaultStkRoutingProperties(line: UnitLineContext): StkRoutingProperties {
-  const stkIds = line.units.filter(isStorageUnit).map((unit) => unit.id)
-  return {
-    enabled: true,
-    priority: 1,
-    targetStkPolicy: 'LOAD_RATE_FIRST',
-    allowedStkIds: stkIds,
-    description: '',
-  }
-}
-
 export function defaultStkProperties(line: UnitLineContext): StkProperties {
   const inputSources = line.units
     .filter((unit) => inferUnitRole(unit, line) === 'INPUT' || inferUnitRole(unit, line) === 'PORT_IN')
@@ -851,16 +840,6 @@ export function defaultPropertiesForRole(
 ): UnitRoleProperties | null {
   if (role === 'STORAGE') return defaultStkProperties(line)
   if (role === 'PORT_IN' || role === 'PORT_OUT') return defaultPortProperties(line, unit)
-  return null
-}
-
-export function getStkRoutingProperties(
-  unit: ConveyorUnit,
-  line?: UnitLineContext,
-): StkRoutingProperties | null {
-  if (!isTurnRoutingUnit(unit)) return null
-  if (unit.stkRouting) return unit.stkRouting
-  if (line) return defaultStkRoutingProperties(line)
   return null
 }
 
@@ -933,7 +912,6 @@ export function normalizeUnitRoleFields(
 ): ConveyorUnit {
   let role = inferUnitRole(unit, line)
   let properties = unit.properties ?? null
-  let stkRouting = unit.stkRouting ?? null
   let transitLinkedUnits = unit.transitLinkedUnits ?? null
   let junctionRouting = unit.junctionRouting ?? null
   let portDirection = unit.portDirection
@@ -972,7 +950,6 @@ export function normalizeUnitRoleFields(
       portDirection,
       role: portRole,
       properties,
-      stkRouting: null,
       transitLinkedUnits: null,
       junctionRouting: null,
     }
@@ -987,7 +964,6 @@ export function normalizeUnitRoleFields(
       code: unit.code?.trim() || unit.name,
       role: 'STORAGE',
       properties,
-      stkRouting: null,
       transitLinkedUnits: null,
       junctionRouting: null,
       portDirection: null,
@@ -995,35 +971,25 @@ export function normalizeUnitRoleFields(
   }
 
   if (isTurnRoutingUnit(unit)) {
-    if (
-      !stkRouting &&
-      unit.properties &&
-      'targetStkPolicy' in unit.properties
-    ) {
-      stkRouting = unit.properties as unknown as StkRoutingProperties
-      if (role === 'TRANSFER' || role === 'INPUT' || role === 'PORT_IN') {
-        properties = null
-      }
-    }
-    stkRouting = stkRouting ?? defaultStkRoutingProperties(line)
-    if (stkRouting.allowedStkIds.length === 0) {
-      const allStkIds = line.units.filter(isStorageUnit).map((item) => item.id)
-      if (allStkIds.length > 0) {
-        stkRouting = { ...stkRouting, allowedStkIds: allStkIds }
+    const legacyStkRouting =
+      (unit as ConveyorUnit & { stkRouting?: StkRoutingProperties | null }).stkRouting ??
+      (unit.properties && 'targetStkPolicy' in unit.properties
+        ? (unit.properties as unknown as StkRoutingProperties)
+        : null)
+    if (legacyStkRouting && !transitLinkedUnits && isJunctionUnit(unit) && junctionRouting) {
+      const legacyIds = getJunctionRequestUnitIds(junctionRouting)
+      if (legacyIds.length > 0) {
+        transitLinkedUnits = { linkedUnitIds: legacyIds }
       }
     }
     transitLinkedUnits =
       coerceTransitLinkedUnits(transitLinkedUnits) ??
-      (isJunctionUnit(unit) && junctionRouting
-        ? (() => {
-            const legacyIds = getJunctionRequestUnitIds(junctionRouting)
-            return legacyIds.length > 0 ? { linkedUnitIds: legacyIds } : null
-          })()
-        : null) ??
       defaultTransitLinkedUnitsProperties()
     junctionRouting = null
+    if (legacyStkRouting && role === 'TRANSFER') {
+      properties = null
+    }
   } else {
-    stkRouting = null
     transitLinkedUnits = null
     junctionRouting = null
   }
@@ -1046,7 +1012,6 @@ export function normalizeUnitRoleFields(
     role,
     flowRole: syncedFlowRole,
     properties,
-    stkRouting,
     transitLinkedUnits,
     junctionRouting,
     portDirection,
