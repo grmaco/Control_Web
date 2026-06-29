@@ -356,10 +356,12 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
                 continuousInputActive={simulation.continuousInputActive}
                 continuousGatherProbes={simulation.continuousGatherProbes}
                 continuousGatherAnimating={simulation.continuousGatherAnimating}
+                continuousGatherOverlayActive={simulation.continuousGatherOverlayActive}
                 continuousInputIntervalSec={simulation.continuousInputIntervalSec}
                 warehouseFillCounts={simulation.warehouseFillCounts}
                 onCalloutPanLockChange={setCalloutPanLock}
                 calloutDeselectToken={calloutDeselectToken}
+                entrySimDestinationByUnitId={simulation.entrySimDestinationByUnitId}
                 is25DView={is25DView}
                 className="pointer-events-none select-none"
               />
@@ -599,10 +601,12 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             continuousInputActive={simulation.continuousInputActive}
             continuousGatherProbes={simulation.continuousGatherProbes}
             continuousGatherAnimating={simulation.continuousGatherAnimating}
+            continuousGatherOverlayActive={simulation.continuousGatherOverlayActive}
             continuousInputIntervalSec={simulation.continuousInputIntervalSec}
             warehouseFillCounts={simulation.warehouseFillCounts}
             onCalloutPanLockChange={setCalloutPanLock}
             calloutDeselectToken={calloutDeselectToken}
+            entrySimDestinationByUnitId={simulation.entrySimDestinationByUnitId}
             is25DView={is25DView}
             className="pointer-events-none select-none"
           />
@@ -692,6 +696,35 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
         </div>
       )}
 
+      {simulation.inboundLineFullNotice && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => simulation.dismissInboundLineFullNotice()}
+        >
+          <div
+            className="mx-4 w-full max-w-sm rounded-lg border border-cyan-500/60 bg-slate-800 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mb-1 text-base font-bold text-cyan-300">라인 만재</p>
+            <p className="mb-5 text-sm leading-relaxed text-slate-300">
+              STK 적재가 만료된 상태에서 포트·컨베이어 경로에 자재가 모두 올라갔습니다.
+              <br />
+              추가 연속 투입이 중지되었습니다. 라인에 쌓인 자재는 시뮬레이션에서 계속
+              표시됩니다.
+            </p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => simulation.dismissInboundLineFullNotice()}
+                className="rounded border border-slate-600 bg-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-600"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {simulation.warehouseFullNotice && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
@@ -703,9 +736,10 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
           >
             <p className="mb-1 text-base font-bold text-amber-400">적재창고 만재</p>
             <p className="mb-5 text-sm leading-relaxed text-slate-300">
-              STK 48칸이 모두 찼습니다. 연속 투입이 종료되었습니다.
+              STK가 48칸 만재 상태입니다. 자재는 STK에 입고되지 않고, 포트·컨베이어
+              경로에 쌓입니다.
               <br />
-              컨베이어에 남은 자재는 계속 이동합니다.
+              경로가 가득 차면「라인 만재」로 연속 투입이 중지됩니다.
             </p>
             <div className="flex justify-end">
               <button

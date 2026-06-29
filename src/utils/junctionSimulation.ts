@@ -8,9 +8,7 @@ import {
   type FlowDir,
 } from './flowDirection'
 import {
-  findFeederAdjacentToJunction,
-  getJunctionRequestUnitIds,
-  getJunctionRoutingProperties,
+  getTransitLinkedCrossPair,
   listJunctionBranchUnitIds,
 } from './unitPropertyHelpers'
 
@@ -29,11 +27,9 @@ export function isJunctionCrossPath(
   junction: ConveyorUnit,
   pathUnitIds: string[],
 ): boolean {
-  const props = getJunctionRoutingProperties(junction, line)
-  const [req1, req2] = getJunctionRequestUnitIds(
-    props ?? { requestUnitIds: [], requestUnitId: '' },
-  )
-  if (!req1 || !req2) return false
+  const crossPair = getTransitLinkedCrossPair(line, junction)
+  if (!crossPair) return false
+  const [req1, req2] = crossPair
 
   const junctionIndex = pathUnitIds.indexOf(junction.id)
   if (junctionIndex <= 0 || junctionIndex >= pathUnitIds.length - 1) return false
@@ -43,6 +39,57 @@ export function isJunctionCrossPath(
   const before = pathUnitIds[junctionIndex - 1]!
   const after = pathUnitIds[junctionIndex + 1]!
   return req1Branch.has(before) && req2Branch.has(after)
+}
+
+/** 자재가 계획 경로상 분기 진입·이탈 한 스텝인지 (본선 투입 — 교차 대기 제외) */
+export function isOwnPlannedJunctionTraversal(
+  load: PathSimulationLoad,
+  junction: ConveyorUnit,
+  fromUnitId: string,
+  toUnitId: string,
+): boolean {
+  const junctionIndex = load.pathUnitIds.indexOf(junction.id)
+  if (junctionIndex <= 0 || junctionIndex >= load.pathUnitIds.length - 1) {
+    return false
+  }
+  const before = load.pathUnitIds[junctionIndex - 1]!
+  const after = load.pathUnitIds[junctionIndex + 1]!
+  return (
+    (fromUnitId === before && toUnitId === junction.id) ||
+    (fromUnitId === junction.id && toUnitId === after)
+  )
+}
+
+/** 분기 진입·이탈 한 스텝이 직진(through) 경로인지 */
+export function isJunctionThroughMoveForLoad(
+  junction: ConveyorUnit,
+  unitMap: Map<string, ConveyorUnit>,
+  line: ConveyorLine,
+  load: PathSimulationLoad,
+  fromUnitId: string,
+  toUnitId: string,
+): boolean {
+  const junctionIndex = load.pathUnitIds.indexOf(junction.id)
+  if (junctionIndex <= 0 || junctionIndex >= load.pathUnitIds.length - 1) {
+    return false
+  }
+  const before = load.pathUnitIds[junctionIndex - 1]!
+  const after = load.pathUnitIds[junctionIndex + 1]!
+  if (
+    fromUnitId === before &&
+    toUnitId === junction.id &&
+    isJunctionThroughPathStep(junction, unitMap, line, before, after)
+  ) {
+    return true
+  }
+  if (
+    fromUnitId === junction.id &&
+    toUnitId === after &&
+    isJunctionThroughPathStep(junction, unitMap, line, before, after)
+  ) {
+    return true
+  }
+  return false
 }
 
 /** 분기 직진(through) 경로 구간인지 */
@@ -72,13 +119,10 @@ export function isJunctionCrossRequestActive(
   junction: ConveyorUnit,
   loads: PathSimulationLoad[],
 ): boolean {
-  const props = getJunctionRoutingProperties(junction, line)
-  const [req1, req2] = getJunctionRequestUnitIds(
-    props ?? { requestUnitIds: [], requestUnitId: '' },
-  )
-  if (!req1 || !req2) return false
+  const crossPair = getTransitLinkedCrossPair(line, junction)
+  if (!crossPair) return false
+  const [req1, req2] = crossPair
 
-  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
   const req1Branch = new Set(listJunctionBranchUnitIds(line, junction, req1))
   const req2Branch = new Set(listJunctionBranchUnitIds(line, junction, req2))
   const running = activeLoads(loads)
@@ -89,27 +133,14 @@ export function isJunctionCrossRequestActive(
       req1Branch.has(loadPosition(load) ?? ''),
   )
 
-  const demandOnReq2 =
-    running.some(
-      (load) =>
-        isJunctionCrossPath(line, junction, load.pathUnitIds) &&
-        req2Branch.has(loadPosition(load) ?? ''),
-    ) ||
-    (supplyFromReq1 && isReq2BranchReadyForCross(junction, req2, line, running, unitMap))
+  const demandOnReq2 = running.some(
+    (load) =>
+      isJunctionCrossPath(line, junction, load.pathUnitIds) &&
+      req2Branch.has(loadPosition(load) ?? ''),
+  )
 
+  // 양쪽 분기에 자재가 있을 때만 교차 수요 — req2 공급 대기만으로는 본선 투입을 막지 않음
   return supplyFromReq1 && demandOnReq2
-}
-
-function isReq2BranchReadyForCross(
-  junction: ConveyorUnit,
-  req2: string,
-  line: ConveyorLine,
-  loads: PathSimulationLoad[],
-  unitMap: Map<string, ConveyorUnit>,
-): boolean {
-  const feeder = findFeederAdjacentToJunction(junction, req2, unitMap)
-  if (!feeder) return false
-  return !loads.some((load) => loadPosition(load) === feeder.id)
 }
 
 /** 분기에 직진 물류가 대기·통과 중인지 — 교차보다 우선 */
@@ -156,11 +187,9 @@ export function resolveJunctionCrossFlowForPath(
   pathUnitIds: string[],
   junctionIndex: number,
 ): { inDir: FlowDir; outDir: FlowDir } | null {
-  const props = getJunctionRoutingProperties(junction, line)
-  const [req1, req2] = getJunctionRequestUnitIds(
-    props ?? { requestUnitIds: [], requestUnitId: '' },
-  )
-  if (!req1 || !req2) return null
+  const crossPair = getTransitLinkedCrossPair(line, junction)
+  if (!crossPair) return null
+  const [req1, req2] = crossPair
 
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
   const before = pathUnitIds[junctionIndex - 1]

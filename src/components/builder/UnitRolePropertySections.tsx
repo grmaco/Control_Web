@@ -2,10 +2,10 @@ import { useEffect, useMemo } from 'react'
 import type { ConveyorLine, ConveyorUnit, InterfaceUnitType } from '../../types/conveyor'
 import type {
   PortProperties,
-  JunctionRoutingProperties,
   StkProperties,
   StkPolicy,
   StkRoutingProperties,
+  TransitLinkedUnitsProperties,
   UnitRole,
 } from '../../types/unitProperties'
 import {
@@ -18,22 +18,19 @@ import { isPortUnit, isStorageUnit } from '../../constants/conveyorTypes'
 import { INTERFACE_UNIT_TYPES } from '../../constants/interfaceUnits'
 import {
   computeStkLoadRate,
-  defaultJunctionRoutingProperties,
   defaultStkRoutingProperties,
   getPortProperties,
   listPortLinkedUnitCandidates,
   mergePortProperties,
   readPortProperties,
   getStkProperties,
-  getJunctionRoutingProperties,
-  getJunctionRequestUnitIds,
+  getTransitLinkedUnitsProperties,
   getStkRoutingProperties,
   isJunctionUnit,
   isTurnRoutingUnit,
-  listJunctionRequestUnitCandidates,
-  listJunctionRequestSecondaryUnitCandidates,
+  listTransitLinkedUnitCandidates,
   unitDisplayCode,
-  validateJunctionConfiguration,
+  validateTransitLinkedUnits,
   validatePortConfiguration,
   syncFlowRoleUnitRole,
   canSelectInterfaceUnit,
@@ -70,13 +67,18 @@ function patchStkRouting(
   onChange(updateUnitInLine(line, unit.id, { stkRouting }))
 }
 
-function patchJunctionRouting(
+function patchTransitLinkedUnits(
   line: ConveyorLine,
   unit: ConveyorUnit,
-  junctionRouting: JunctionRoutingProperties,
+  transitLinkedUnits: TransitLinkedUnitsProperties,
   onChange: (line: ConveyorLine) => void,
 ) {
-  onChange(updateUnitInLine(line, unit.id, { junctionRouting }))
+  onChange(
+    updateUnitInLine(line, unit.id, {
+      transitLinkedUnits,
+      junctionRouting: null,
+    }),
+  )
 }
 
 function patchRole(
@@ -233,104 +235,54 @@ export function TurnStkRoutingSection({ line, unit, onChange }: RoleSectionsProp
   )
 }
 
-export function JunctionRequestSection({ line, unit, onChange }: RoleSectionsProps) {
-  const props = getJunctionRoutingProperties(unit, line)
+export function TransitLinkedUnitsSection({ line, unit, onChange }: RoleSectionsProps) {
+  if (!isTurnRoutingUnit(unit)) return null
+
+  const props = getTransitLinkedUnitsProperties(unit, line)
   if (!props) return null
 
-  const requestUnitIds = getJunctionRequestUnitIds(props)
-  const primaryId = requestUnitIds[0] ?? ''
-  const secondaryId = requestUnitIds[1] ?? ''
-
-  const primaryCandidates = useMemo(
-    () => listJunctionRequestUnitCandidates(line, unit),
+  const candidates = useMemo(
+    () => listTransitLinkedUnitCandidates(line, unit),
     [line, unit],
   )
-  const secondaryCandidates = useMemo(
-    () => listJunctionRequestSecondaryUnitCandidates(line, unit),
-    [line, unit],
-  )
-  const issues = useMemo(() => validateJunctionConfiguration(line, unit), [line, unit])
+  const issues = useMemo(() => validateTransitLinkedUnits(line, unit), [line, unit])
 
-  const update = (patch: Partial<JunctionRoutingProperties>) => {
-    const merged = { ...props, ...patch }
-    const ids = getJunctionRequestUnitIds(merged)
-    patchJunctionRouting(
-      line,
-      unit,
-      {
-        ...merged,
-        requestUnitIds: ids,
-        requestUnitId: ids[0] ?? '',
-      },
-      onChange,
-    )
-  }
-
-  const setPrimary = (nextId: string) => {
-    const nextIds = nextId ? [nextId] : []
-    if (nextId && secondaryId && secondaryCandidates.some((c) => c.id === secondaryId)) {
-      nextIds.push(secondaryId)
-    }
-    update({ requestUnitIds: nextIds })
-  }
-
-  const setSecondary = (nextId: string) => {
-    const nextIds = primaryId ? (nextId ? [primaryId, nextId] : [primaryId]) : []
-    update({ requestUnitIds: nextIds })
+  const toggleLinkedUnit = (unitId: string, checked: boolean) => {
+    const nextIds = checked
+      ? [...new Set([...props.linkedUnitIds, unitId])]
+      : props.linkedUnitIds.filter((id) => id !== unitId)
+    patchTransitLinkedUnits(line, unit, { linkedUnitIds: nextIds }, onChange)
   }
 
   return (
-    <div className="space-y-2 rounded-md border border-amber-900/50 bg-amber-950/20 p-3">
-      <p className="text-xs font-medium text-amber-200">분기 물류</p>
-      <p className="text-[11px] leading-relaxed text-slate-400">
-        평시에는 경유 컨베이어처럼 직진으로 물류가 흐릅니다. 요청 CV 1·2가 양쪽에서
-        요청하면 1→2로 교차 흐름이 가능하며, 직진 물류가 항상 우선합니다.
+    <div className="rounded-md border border-cyan-900/40 bg-cyan-950/20 p-3">
+      <label className="mb-1 block text-xs text-slate-400">연동 유닛</label>
+      <p className="mb-2 text-[11px] leading-relaxed text-slate-400">
+        인접한 출고점(flowRole=출고) 또는 포트만 선택할 수 있습니다. 투입 경로 목적지·시뮬
+        연동에 사용됩니다.
       </p>
-      <div>
-        <label className="mb-1 block text-xs text-slate-400">분기 요청 컨베이어 1</label>
-        <select
-          value={primaryId}
-          onChange={(e) => setPrimary(e.target.value)}
-          className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
-        >
-          <option value="">선택</option>
-          {primaryCandidates.map((candidate) => (
-            <option key={candidate.id} value={candidate.id}>
+      {candidates.length === 0 ? (
+        <p className="text-xs text-amber-300">
+          인접 출고점·포트가 없습니다. 출고점 CV 또는 포트를 유닛 옆에 배치하세요.
+        </p>
+      ) : (
+        <div className="max-h-28 space-y-1 overflow-auto text-xs">
+          {candidates.map((candidate) => (
+            <label key={candidate.id} className="flex items-center gap-2 text-slate-300">
+              <input
+                type="checkbox"
+                checked={props.linkedUnitIds.includes(candidate.id)}
+                onChange={(e) => toggleLinkedUnit(candidate.id, e.target.checked)}
+              />
               {unitDisplayCode(candidate)}
-            </option>
+            </label>
           ))}
-        </select>
-      </div>
-      <div>
-        <label className="mb-1 block text-xs text-slate-400">
-          분기 요청 컨베이어 2 (선택)
-        </label>
-        <select
-          value={secondaryId}
-          onChange={(e) => setSecondary(e.target.value)}
-          disabled={!primaryId}
-          className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm disabled:opacity-50"
-        >
-          <option value="">없음</option>
-          {secondaryCandidates
-            .filter((candidate) => candidate.id !== primaryId)
-            .map((candidate) => (
-              <option key={candidate.id} value={candidate.id}>
-                {unitDisplayCode(candidate)}
-              </option>
-            ))}
-        </select>
-        {primaryId ? (
-          <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-            분기와 가로·세로 직선으로 연결된 CV가 표시됩니다. 1번과 다른 축·측면도 선택할 수
-            있습니다.
-          </p>
-        ) : null}
-      </div>
+        </div>
+      )}
       {issues.map((issue) => (
         <p
           key={issue.message}
-          className={`text-xs ${issue.severity === 'error' ? 'text-red-300' : 'text-amber-300'}`}
+          className={`mt-2 text-xs ${issue.severity === 'error' ? 'text-red-300' : 'text-amber-300'}`}
         >
           {issue.message}
         </p>
@@ -577,28 +529,23 @@ export function RolePropertySections({
 }: RoleSectionsProps) {
   useEffect(() => {
     if (!isTurnRoutingUnit(unit)) return
-    const needsStk = !unit.stkRouting
-    const needsJunction = isJunctionUnit(unit) && !unit.junctionRouting
-    if (!needsStk && !needsJunction) return
-
-    const patch: {
-      stkRouting?: StkRoutingProperties
-      junctionRouting?: JunctionRoutingProperties
-    } = {}
-    if (needsStk) patch.stkRouting = defaultStkRoutingProperties(line)
-    if (needsJunction) patch.junctionRouting = defaultJunctionRoutingProperties(line, unit)
-    onChange(updateUnitInLine(line, unit.id, patch))
-  }, [unit.id, unit.stkRouting, unit.junctionRouting, line.id, line.units.length])
+    if (unit.stkRouting) return
+    onChange(
+      updateUnitInLine(line, unit.id, {
+        stkRouting: defaultStkRoutingProperties(line),
+      }),
+    )
+  }, [unit.id, unit.stkRouting, line.id, line.units.length])
 
   return (
     <div className="space-y-3">
       <UnitRoleSelector line={line} unit={unit} onChange={onChange} />
       <StraightInterfaceUnitSection line={line} unit={unit} onChange={onChange} />
       {isTurnRoutingUnit(unit) ? (
-        <TurnStkRoutingSection line={line} unit={unit} onChange={onChange} />
-      ) : null}
-      {isJunctionUnit(unit) ? (
-        <JunctionRequestSection line={line} unit={unit} onChange={onChange} />
+        <>
+          <TransitLinkedUnitsSection line={line} unit={unit} onChange={onChange} />
+          <TurnStkRoutingSection line={line} unit={unit} onChange={onChange} />
+        </>
       ) : null}
       {isStorageUnit(unit) ? (
         <StkRoleSection line={line} unit={unit} onChange={onChange} />

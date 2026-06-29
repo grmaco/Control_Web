@@ -16,6 +16,7 @@ import { computeFlowOrder, parseTrailingNumber } from './sequentialNaming'
 import { isCvUnit } from './unitMaterial'
 import { stkRoutingService } from '../services/StkRoutingService'
 import {
+  getPortProperties,
   getStkProperties,
   getStkRoutingProperties,
   isStkRoutingSourceUnit,
@@ -28,8 +29,17 @@ import {
 import {
   canApproveJunctionCrossMove,
   isJunctionCrossPath,
+  isJunctionCrossRequestActive,
+  isJunctionThroughMoveForLoad,
   isJunctionThroughPathStep,
+  isOwnPlannedJunctionTraversal,
 } from './junctionSimulation'
+import { isStkAtCapacity } from './warehouseSlots'
+import { SIM_STK_IO_ENABLED } from '../constants/simStkIo'
+import {
+  inboundDestinationDisplayName,
+  planInboundPathFromFlowTraversal,
+} from './simulationDestination'
 
 /** 회전/분기 유닛별 마지막 배정 STK — ROUND_ROBIN 순환용 */
 export type StkRoutingSessionState = Record<string, string>
@@ -138,11 +148,59 @@ export function lineWithAllSimulationUnitsRunning(line: ConveyorLine): ConveyorL
   return lineWithAllPortsRunning(lineWithAllCvUnitsRunning(line))
 }
 
+/** 시뮬 경로 — 직선·분기·회전만 (포트·리프트·STK 제외) */
+export function isConveyorLineTransitUnit(unit: ConveyorUnit): boolean {
+  return (
+    unit.type === 'straight' || unit.type === 'turn' || unit.type === 'junction'
+  )
+}
+
+function filterConveyorLineTransitIds(
+  pathUnitIds: string[],
+  unitMap: Map<string, ConveyorUnit>,
+): string[] {
+  return pathUnitIds.filter((unitId) => {
+    const unit = unitMap.get(unitId)
+    return unit != null && isConveyorLineTransitUnit(unit)
+  })
+}
+
+/** 투입 시뮬 — 컨베이어 라인만 남기고 출고점에서 절단 */
+function finalizeConveyorSimulationPath(
+  line: ConveyorLine,
+  pathUnitIds: string[],
+): string[] {
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  const filtered = filterConveyorLineTransitIds(pathUnitIds, unitMap)
+  if (filtered.length === 0) return []
+  const withWaypoints = ensureTransitWaypointsOnPath(filtered, unitMap)
+  return finalizeSimulationPath(line, withWaypoints)
+}
+
+/** 투입 목적지 경로 — 그래프 최단경로(포트·STK 포함), 분기·턴 경유지 보정 */
+function finalizeInboundDestinationPath(
+  line: ConveyorLine,
+  pathUnitIds: string[],
+): string[] {
+  if (pathUnitIds.length === 0) return []
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  return ensureTransitWaypointsOnPath(pathUnitIds, unitMap)
+}
+
 export function bfsPath(
   startId: string,
   targetId: string,
   unitMap: Map<string, ConveyorUnit>,
-  options?: { allowIdleTransit?: boolean; forSimulationPlan?: boolean },
+  options?: {
+    allowIdleTransit?: boolean
+    forSimulationPlan?: boolean
+    /** 투입 경로 — STK OUT 포트 경유 금지 */
+    forbidOutPorts?: boolean
+    /** 직선·분기·회전만 경유 (포트·리프트·STK 제외) */
+    conveyorLineOnly?: boolean
+    /** CV 사이 브릿지 — 적재창고 통과 허용 */
+    allowStorageTransit?: boolean
+  },
 ): string[] | null {
   if (startId === targetId) return [startId]
 
@@ -151,9 +209,25 @@ export function bfsPath(
     if (!unit) return false
     if (unitId === startId || unitId === targetId) return true
 
+    if (options?.conveyorLineOnly && !isConveyorLineTransitUnit(unit)) {
+      return false
+    }
+
+    if (
+      options?.forbidOutPorts &&
+      isPortUnit(unit) &&
+      (unit.portDirection ?? 'IN') === 'OUT'
+    ) {
+      return false
+    }
+
     if (options?.forSimulationPlan) {
-      if (isPortUnit(unit)) return isSimulationTransitPassable(unit)
-      if (isStorageUnit(unit)) return unitId === targetId
+      if (isPortUnit(unit)) {
+        return options.allowIdleTransit ? true : isSimulationTransitPassable(unit)
+      }
+      if (isStorageUnit(unit)) {
+        return unitId === targetId || options.allowStorageTransit === true
+      }
       if (isFlowCapableUnit(unit)) {
         return options.allowIdleTransit ? true : isSimulationTransitPassable(unit)
       }
@@ -187,6 +261,210 @@ export function bfsPath(
   return null
 }
 
+function unitsAreGraphNeighbors(
+  unitMap: Map<string, ConveyorUnit>,
+  fromId: string,
+  toId: string,
+): boolean {
+  const from = unitMap.get(fromId)
+  return from != null && from.connections.includes(toId)
+}
+
+/** 물류순서 기준점 — 경로가 IN 포트로 시작하면 연동 CV 기준으로 순서 계산 */
+function resolveFlowOrderAnchorId(
+  pathUnitIds: string[],
+  unitMap: Map<string, ConveyorUnit>,
+): string {
+  const firstId = pathUnitIds[0]
+  if (!firstId) return firstId ?? ''
+  const first = unitMap.get(firstId)
+  if (first && isPortUnit(first)) {
+    const linkedId = getPortProperties(first)?.linkedUnitId
+    if (linkedId && unitMap.has(linkedId)) {
+      return linkedId
+    }
+  }
+  return firstId
+}
+
+/**
+ * from→to 직접 연결과 별도로 from→분기/턴→to 경로가 있으면 중간 유닛 반환.
+ * IN 포트 연동 CV가 분기 한쪽 팔에 있을 때 BFS가 분기 타일을 건너뛰는 경우 보정.
+ */
+function findMandatoryTurnOrJunctionBetween(
+  unitMap: Map<string, ConveyorUnit>,
+  fromId: string,
+  toId: string,
+): string | null {
+  const from = unitMap.get(fromId)
+  if (!from) return null
+
+  let junctionId: string | null = null
+  let turnId: string | null = null
+
+  for (const viaId of from.connections) {
+    if (viaId === toId) continue
+    const via = unitMap.get(viaId)
+    if (!via || via.type === 'port' || isStorageUnit(via)) continue
+    if (!via.connections.includes(toId)) continue
+    if (via.type === 'junction') {
+      junctionId = via.id
+      break
+    }
+    if (via.type === 'turn') {
+      turnId = via.id
+    }
+  }
+
+  return junctionId ?? turnId
+}
+
+function appendPathSegment(
+  result: string[],
+  unitMap: Map<string, ConveyorUnit>,
+  fromId: string,
+  toId: string,
+): void {
+  const waypoint = findMandatoryTurnOrJunctionBetween(unitMap, fromId, toId)
+  if (waypoint && result[result.length - 1] !== waypoint) {
+    result.push(waypoint)
+  }
+  if (result[result.length - 1] !== toId) {
+    result.push(toId)
+  }
+}
+
+/** 경로 각 구간에 누락된 분기·턴 경유지 삽입 */
+function ensureTransitWaypointsOnPath(
+  pathUnitIds: string[],
+  unitMap: Map<string, ConveyorUnit>,
+): string[] {
+  if (pathUnitIds.length <= 1) return [...pathUnitIds]
+
+  const result: string[] = [pathUnitIds[0]!]
+  for (let i = 0; i < pathUnitIds.length - 1; i += 1) {
+    appendPathSegment(result, unitMap, pathUnitIds[i]!, pathUnitIds[i + 1]!)
+  }
+  return result
+}
+
+/**
+ * 물류순서(computeFlowOrder) 구간을 끼워 넣어 분기·턴 누락을 보정.
+ * BFS 최단경로가 분기 타일을 건너뛰면 시뮬 CST가 분기에서 사라진 것처럼 보임.
+ */
+function expandPathViaFlowOrder(
+  line: ConveyorLine,
+  pathUnitIds: string[],
+  unitMap: Map<string, ConveyorUnit>,
+): string[] {
+  if (pathUnitIds.length <= 1) return [...pathUnitIds]
+
+  const entryId = resolveFlowOrderAnchorId(pathUnitIds, unitMap)
+  const { orderedUnitIds } = computeFlowOrder(line, entryId)
+  const orderPos = new Map(orderedUnitIds.map((id, index) => [id, index]))
+
+  const result: string[] = [pathUnitIds[0]!]
+  for (let i = 0; i < pathUnitIds.length - 1; i += 1) {
+    const fromId = pathUnitIds[i]!
+    const toId = pathUnitIds[i + 1]!
+    const fromPos = orderPos.get(fromId)
+    const toPos = orderPos.get(toId)
+
+    if (fromPos != null && toPos != null && fromPos < toPos) {
+      for (const unitId of orderedUnitIds.slice(fromPos + 1, toPos + 1)) {
+        const unit = unitMap.get(unitId)
+        if (unit && !isConveyorLineTransitUnit(unit)) continue
+        if (result[result.length - 1] !== unitId) {
+          result.push(unitId)
+        }
+      }
+      continue
+    }
+
+    if (!unitsAreGraphNeighbors(unitMap, fromId, toId)) {
+      const bridge = bfsPath(fromId, toId, unitMap, INBOUND_PATH_BFS_OPTIONS)
+      if (bridge && bridge.length > 1) {
+        for (let j = 1; j < bridge.length; j += 1) {
+          const unitId = bridge[j]!
+          if (result[result.length - 1] !== unitId) {
+            result.push(unitId)
+          }
+        }
+        continue
+      }
+    }
+
+    appendPathSegment(result, unitMap, fromId, toId)
+  }
+
+  return ensureTransitWaypointsOnPath(result, unitMap)
+}
+
+const INBOUND_PATH_BFS_OPTIONS = {
+  forSimulationPlan: true as const,
+  allowIdleTransit: true as const,
+  forbidOutPorts: true as const,
+  conveyorLineOnly: true as const,
+}
+
+/** 투입 경로 — 물류순서(연결) 구간, 포트·STK 타일 제외 */
+function buildInboundTransitPath(
+  line: ConveyorLine,
+  fromId: string,
+  toId: string,
+  unitMap: Map<string, ConveyorUnit>,
+): string[] | null {
+  if (fromId === toId) return [fromId]
+
+  const flowPath = sliceConveyorFlowPath(line, fromId, toId, unitMap)
+  if (flowPath && flowPath.length > 1) {
+    return expandPathViaFlowOrder(line, flowPath, unitMap)
+  }
+
+  const bfs = bfsPath(fromId, toId, unitMap, INBOUND_PATH_BFS_OPTIONS)
+  if (!bfs || bfs.length === 0) return null
+
+  const bridged = bfs.filter((unitId) => {
+    const unit = unitMap.get(unitId)
+    return unit != null && isConveyorLineTransitUnit(unit)
+  })
+  if (bridged.length <= 1) return null
+  if (bridged[bridged.length - 1] !== toId && unitMap.get(toId)) {
+    bridged.push(toId)
+  }
+  return expandPathViaFlowOrder(line, bridged, unitMap)
+}
+
+function findLinkedInputPort(
+  line: ConveyorLine,
+  entryUnitId: string,
+): ConveyorUnit | null {
+  for (const unit of line.units) {
+    if (!isPortUnit(unit)) continue
+    if (unit.role !== 'INPUT' && unit.role !== 'PORT_IN') continue
+    const props = getPortProperties(unit)
+    if (props?.linkedUnitId === entryUnitId) {
+      return unit
+    }
+  }
+  return null
+}
+
+/** IN 포트가 연동된 투입 CV 앞에 포트 칸을 붙임 (라인 만재·시각화) */
+function prependLinkedInputPort(
+  line: ConveyorLine,
+  entryUnitId: string,
+  pathUnitIds: string[],
+): string[] {
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  const port = findLinkedInputPort(line, entryUnitId)
+  let nextPath = pathUnitIds
+  if (port && pathUnitIds.length > 0 && pathUnitIds[0] !== port.id) {
+    nextPath = [port.id, ...pathUnitIds]
+  }
+  return ensureTransitWaypointsOnPath(nextPath, unitMap)
+}
+
 export function listEligibleStkCandidates(
   turn: ConveyorUnit,
   allUnits: ConveyorUnit[],
@@ -215,10 +493,11 @@ function eligibleStkCandidates(
 
 function resolveStkWithPath(
   turn: ConveyorUnit,
-  allUnits: ConveyorUnit[],
+  line: ConveyorLine,
   unitMap: Map<string, ConveyorUnit>,
   routingSession?: StkRoutingSessionState,
 ): { stk: ConveyorUnit; tail: string[] } | null {
+  const allUnits = line.units
   const lastStkId = routingSession?.[turn.id]
   const primary = stkRoutingService.resolveTargetStk(
     turn,
@@ -232,10 +511,7 @@ function resolveStkWithPath(
     : candidates
 
   for (const stk of ordered) {
-    const tail = bfsPath(turn.id, stk.id, unitMap, {
-      forSimulationPlan: true,
-      allowIdleTransit: true,
-    })
+    const tail = buildInboundTransitPath(line, turn.id, stk.id, unitMap)
     if (tail && tail.length > 0) {
       return { stk, tail }
     }
@@ -286,6 +562,27 @@ export function truncatePathAtEndRole(
   return pathUnitIds
 }
 
+/** 투입(STK 목적) 경로 — 중간 출고점에서 STK 꼬리가 잘리지 않게 */
+function finalizeInboundStkSimulationPath(
+  line: ConveyorLine,
+  pathUnitIds: string[],
+  targetStkId: string,
+): string[] {
+  const expanded = [...pathUnitIds]
+  const stkIdx = expanded.indexOf(targetStkId)
+  if (stkIdx < 0) {
+    return finalizeSimulationPath(line, expanded)
+  }
+
+  const truncated = truncatePathAtEndRole(line, expanded)
+  if (truncated.includes(targetStkId)) {
+    const cutIdx = truncated.indexOf(targetStkId)
+    return [...truncated.slice(0, cutIdx + 1)]
+  }
+
+  return [...expanded.slice(0, stkIdx + 1)]
+}
+
 function finalizeSimulationPath(
   line: ConveyorLine,
   pathUnitIds: string[],
@@ -320,7 +617,7 @@ function resolveExitTargetIds(
   const connectedFlowIds = orderedUnitIds.filter((id) => {
     if (disconnected.has(id)) return false
     const unit = unitMap.get(id)
-    return unit != null && isFlowCapableUnit(unit)
+    return unit != null && isConveyorLineTransitUnit(unit)
   })
   const last = connectedFlowIds[connectedFlowIds.length - 1]
   return last ? [last] : []
@@ -328,6 +625,34 @@ function resolveExitTargetIds(
 
 function cvNumberFromUnit(unit: ConveyorUnit): number | null {
   return parseTrailingNumber(unit.name)?.number ?? null
+}
+
+function sliceConveyorFlowPath(
+  line: ConveyorLine,
+  fromId: string,
+  toId: string,
+  unitMap: Map<string, ConveyorUnit>,
+): string[] | null {
+  const { orderedUnitIds } = computeFlowOrder(line, fromId)
+  const fromIdx = orderedUnitIds.indexOf(fromId)
+  const toIdx = orderedUnitIds.indexOf(toId)
+  if (fromIdx < 0 || toIdx <= fromIdx) return null
+
+  let conveyorPath = orderedUnitIds
+    .slice(fromIdx, toIdx + 1)
+    .filter((unitId) => {
+      const unit = unitMap.get(unitId)
+      return unit != null && isConveyorLineTransitUnit(unit)
+    })
+
+  if (conveyorPath.length === 0 || conveyorPath[0] !== fromId) {
+    conveyorPath = [fromId, ...conveyorPath.filter((id) => id !== fromId)]
+  }
+  if (conveyorPath[conveyorPath.length - 1] !== toId) {
+    conveyorPath.push(toId)
+  }
+
+  return conveyorPath.length > 1 ? conveyorPath : null
 }
 
 /** CV01→CV10처럼 순번이 이어지면 연결 그래프보다 짧은 직선 경로 */
@@ -345,7 +670,7 @@ function buildCvSequencePath(
   const unitsByCv = new Map<number, ConveyorUnit>()
   for (const unit of line.units) {
     const cv = cvNumberFromUnit(unit)
-    if (cv != null && isFlowCapableUnit(unit)) {
+    if (cv != null && isConveyorLineTransitUnit(unit)) {
       unitsByCv.set(cv, unit)
     }
   }
@@ -416,25 +741,14 @@ function buildEntryToExitPath(
 
   const exitIds = resolveExitTargetIds(line, entryUnitId, unitMap)
 
-  const cvChain = buildCvSequencePath(entryUnitId, exitIds, line, unitMap)
-  if (cvChain && cvChain.length > 1) {
-    const exitId = cvChain[cvChain.length - 1]!
-    const exit = unitMap.get(exitId)!
-    return {
-      pathUnitIds: cvChain,
-      exitId,
-      message: `${unitDisplayCode(entry)} → … → ${unitDisplayCode(exit)} (${cvChain.length}구간 · CV순번)`,
-    }
-  }
-
   for (const exitId of exitIds) {
-    const path = bfsPath(entryUnitId, exitId, unitMap, { allowIdleTransit: true })
+    const path = buildInboundTransitPath(line, entryUnitId, exitId, unitMap)
     if (path && path.length > 1) {
       const exit = unitMap.get(exitId)!
       return {
         pathUnitIds: path,
         exitId,
-        message: `${unitDisplayCode(entry)} → … → ${unitDisplayCode(exit)} (${path.length}구간 · 투입→출고)`,
+        message: `${unitDisplayCode(entry)} → … → ${unitDisplayCode(exit)} (${path.length}구간)`,
       }
     }
   }
@@ -442,11 +756,15 @@ function buildEntryToExitPath(
   const { orderedUnitIds } = computeFlowOrder(line, entryUnitId)
   if (orderedUnitIds.length > 1) {
     const sliced = sliceFlowPathToExit(orderedUnitIds, exitIds)
-    const exit = unitMap.get(sliced.exitId ?? sliced.pathUnitIds[sliced.pathUnitIds.length - 1]!)!
+    const conveyorSlice = sliced.pathUnitIds.filter((unitId) => {
+      const unit = unitMap.get(unitId)
+      return unit != null && isConveyorLineTransitUnit(unit)
+    })
+    const exit = unitMap.get(sliced.exitId ?? conveyorSlice[conveyorSlice.length - 1] ?? entryUnitId)!
     return {
-      pathUnitIds: sliced.pathUnitIds,
+      pathUnitIds: conveyorSlice.length > 1 ? conveyorSlice : sliced.pathUnitIds,
       exitId: sliced.exitId,
-      message: `${unitDisplayCode(entry)} → … → ${unitDisplayCode(exit)} (${sliced.pathUnitIds.length}구간 · 물류순서)`,
+      message: `${unitDisplayCode(entry)} → … → ${unitDisplayCode(exit)} (${conveyorSlice.length > 1 ? conveyorSlice.length : sliced.pathUnitIds.length}구간 · 물류순서)`,
     }
   }
 
@@ -472,21 +790,18 @@ function buildFlowChain(
     })
 
   for (const stk of allStks) {
-    const path = bfsPath(entryId, stk.id, unitMap, {
-      forSimulationPlan: true,
-      allowIdleTransit: true,
-    })
+    const path = buildInboundTransitPath(line, entryId, stk.id, unitMap)
     if (path && path.length > 1) return path
   }
 
   return [entryId]
 }
 
-/** 투입점 → (메인 라인) → STK 분기 회전 → 목적 STK */
+/** 투입점 → 연결 라인상 가장 먼 분기·회전(연동 유닛 보유) 목적지 */
 export function planInboundLoadPath(
   line: ConveyorLine,
   entryUnitId: string,
-  routingSession?: StkRoutingSessionState,
+  _routingSession?: StkRoutingSessionState,
 ): PathSimulationPlan {
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
   const entry = unitMap.get(entryUnitId)
@@ -500,82 +815,30 @@ export function planInboundLoadPath(
     }
   }
 
-  const { orderedUnitIds } = computeFlowOrder(line, entryUnitId)
-  const orderPos = new Map(orderedUnitIds.map((id, index) => [id, index]))
+  const traversal = planInboundPathFromFlowTraversal(line, entryUnitId)
 
-  const routingTurns = line.units
-    .filter(isStkRoutingSourceUnit)
-    .filter((turn) => isSimulationTransitPassable(turn))
-    .sort((a, b) => {
-      const posDiff = (orderPos.get(a.id) ?? 9999) - (orderPos.get(b.id) ?? 9999)
-      if (posDiff !== 0) return posDiff
-      return (a.stkRouting?.priority ?? 999) - (b.stkRouting?.priority ?? 999)
-    })
-
-  for (const turn of routingTurns) {
-    const head = bfsPath(entryUnitId, turn.id, unitMap, {
-      forSimulationPlan: true,
-      allowIdleTransit: true,
-    })
-    if (!head || head.length === 0) continue
-
-    const resolved = resolveStkWithPath(turn, line.units, unitMap, routingSession)
-    if (!resolved) continue
-
-    const { stk, tail } = resolved
-    const pathUnitIds = finalizeSimulationPath(
-      line,
-      tail.length > 0 ? [...head, ...tail.slice(1)] : [...head, stk.id],
-    )
-
-    const policy = getStkRoutingProperties(turn)?.targetStkPolicy ?? 'MANUAL_ORDER'
-    const lastStkId = routingSession?.[turn.id]
-    const primary = stkRoutingService.resolveTargetStk(
-      turn,
-      line.units,
-      undefined,
-      lastStkId,
-    )
-    const altStkNote =
-      primary && primary.id !== stk.id ? ' · 대체 STK' : ''
-
+  if (traversal) {
+    const pathUnitIds = finalizeInboundDestinationPath(line, traversal.pathUnitIds)
+    const destLabel = inboundDestinationDisplayName(traversal.destinationUnit)
     return {
       entryUnitId,
-      routingUnitId: turn.id,
-      targetStkId: stk.id,
-      targetExitId: resolvePathExitId(line, pathUnitIds),
-      pathUnitIds,
-      message: `${unitDisplayCode(entry)} → ${unitDisplayCode(turn)} → ${unitDisplayCode(stk)} (${policy})${altStkNote}`,
-    }
-  }
-
-  if (!lineHasEnabledStk(line)) {
-    const exitPlan = buildEntryToExitPath(entryUnitId, line, unitMap)
-    const pathUnitIds = finalizeSimulationPath(line, exitPlan.pathUnitIds)
-    return {
-      entryUnitId,
-      routingUnitId: null,
+      routingUnitId: traversal.destinationUnitId,
       targetStkId: null,
-      targetExitId: exitPlan.exitId ?? resolvePathExitId(line, pathUnitIds),
+      targetExitId: null,
       pathUnitIds,
-      message: exitPlan.message,
+      previewPathUnitIds: traversal.previewTransitUnitIds,
+      message: `${unitDisplayCode(entry)} → ${destLabel} (목적지 · 최원 분기)`,
     }
   }
-
-  const pathUnitIds = finalizeSimulationPath(line, buildFlowChain(entryUnitId, line, unitMap))
-  const last = pathUnitIds[pathUnitIds.length - 1]
-  const lastUnit = last ? unitMap.get(last) : null
 
   return {
     entryUnitId,
     routingUnitId: null,
-    targetStkId: lastUnit && isStorageUnit(lastUnit) ? lastUnit.id : null,
+    targetStkId: null,
     targetExitId: null,
-    pathUnitIds,
+    pathUnitIds: [],
     message:
-      pathUnitIds.length > 1
-        ? `${unitDisplayCode(entry)} → … (${pathUnitIds.length}구간, STK 분기 미도달 · 비가동 구간 우회)`
-        : '가동 중인 모듈만으로 STK까지 연결된 경로가 없습니다.',
+      '투입 경로상 인접 컨베이어가 있는 분기·회전 목적지를 찾을 수 없습니다.',
   }
 }
 
@@ -655,6 +918,9 @@ function createSimulationLoad(
     targetStkId: plan.targetStkId,
     targetExitId: plan.targetExitId ?? null,
     pathUnitIds: [...plan.pathUnitIds],
+    previewPathUnitIds: plan.previewPathUnitIds
+      ? [...plan.previewPathUnitIds]
+      : undefined,
     stepIndex: 0,
     complete: plan.pathUnitIds.length === 0,
     waiting: false,
@@ -739,7 +1005,7 @@ export function planTestMaterialLoadPath(
   }
 
   const exitPlan = buildEntryToExitPath(unitId, line, unitMap)
-  const pathUnitIds = finalizeSimulationPath(line, exitPlan.pathUnitIds)
+  const pathUnitIds = finalizeConveyorSimulationPath(line, exitPlan.pathUnitIds)
 
   return {
     entryUnitId: unitId,
@@ -844,6 +1110,42 @@ export function planMultiOutboundLoadPaths(
 
 function isAtDestination(load: PathSimulationLoad): boolean {
   return load.pathUnitIds.length > 0 && load.stepIndex >= load.pathUnitIds.length - 1
+}
+
+/** 시뮬 complete(출고) — STK I/O 비활성 시 적재·OUT 반출 없음, 라인 만재까지 자재 유지 */
+function canDischargeLoadAtCurrentStep(
+  load: PathSimulationLoad,
+  unitMap?: Map<string, ConveyorUnit>,
+): boolean {
+  const currentId = load.pathUnitIds[load.stepIndex]
+  if (!currentId) return false
+
+  const currentUnit = unitMap?.get(currentId)
+  if (!SIM_STK_IO_ENABLED) {
+    if (currentUnit && isStorageUnit(currentUnit)) return false
+    if (
+      currentUnit &&
+      isPortUnit(currentUnit) &&
+      (currentUnit.portDirection ?? 'IN') === 'OUT'
+    ) {
+      return false
+    }
+    if (load.direction === 'outbound') return false
+  }
+
+  const isInbound = load.direction === 'inbound' || load.continuousInject === true
+  if (!isInbound) return true
+
+  if (load.targetStkId) {
+    return currentId === load.targetStkId
+  }
+  if (load.routingUnitId) {
+    return currentId === load.routingUnitId
+  }
+  if (load.targetExitId) {
+    return currentId === load.targetExitId
+  }
+  return false
 }
 
 interface MergeProposal {
@@ -988,12 +1290,105 @@ export function initializeParallelLoads(
   }))
 }
 
+/** 시작 버튼 — 경로 순차 미리보기 후 동시 투입용 (출발 전 대기) */
+export function initializeLoadsForSequentialReveal(
+  loads: PathSimulationLoad[],
+): PathSimulationLoad[] {
+  return dedupeSimulationLoadsById(loads).map((load) => ({
+    ...load,
+    pathUnitIds: [...load.pathUnitIds],
+    released: false,
+    pendingReleaseTicks: 0,
+    stepIndex: 0,
+    entryTicks: 0,
+    exitTicks: 0,
+    transitTicks: 0,
+  }))
+}
+
+export function releaseAllSimulationLoads(
+  loads: PathSimulationLoad[],
+): PathSimulationLoad[] {
+  return loads.map((load) => ({
+    ...load,
+    released: true,
+    pendingReleaseTicks: 0,
+  }))
+}
+
+function sortLoadsByEntryLabel(loads: PathSimulationLoad[]): PathSimulationLoad[] {
+  return [...loads].sort((a, b) =>
+    a.label.localeCompare(b.label, undefined, { numeric: true }),
+  )
+}
+
+/**
+ * 시작 버튼 경로 미리보기 순서 — 투입점(이름·번호 순) → 출고 테스트 자재(이름·번호 순)
+ */
+export function buildSequentialRevealLoadOrder(
+  _line: ConveyorLine,
+  loads: PathSimulationLoad[],
+): PathSimulationLoad[] {
+  const entryLoads = sortLoadsByEntryLabel(
+    loads.filter((load) => !load.clearsTestMaterial),
+  )
+  const exitLoads = sortLoadsByEntryLabel(
+    loads.filter((load) => load.clearsTestMaterial),
+  )
+  return [...entryLoads, ...exitLoads]
+}
+
+/** 경로 미리보기에 쓸 유닛 순서 — previewPathUnitIds 우선 */
+export function revealPathUnitIdsForLoad(load: PathSimulationLoad): string[] {
+  if (load.previewPathUnitIds && load.previewPathUnitIds.length > 0) {
+    return load.previewPathUnitIds
+  }
+  return load.pathUnitIds
+}
+
+/** 순차 미리보기 — 완료된 경로 + 현재 진행 중 경로만 점등 */
+export function simulationSequentialRevealUnitIds(
+  loads: PathSimulationLoad[],
+  revealSteps: Record<string, number>,
+  revealOrder: string[],
+  activeRevealIndex: number,
+  unitMap?: Map<string, ConveyorUnit>,
+): string[] {
+  const seen = new Set<string>()
+  const ordered: string[] = []
+  const loadById = new Map(loads.map((load) => [load.id, load]))
+
+  for (let i = 0; i <= activeRevealIndex && i < revealOrder.length; i += 1) {
+    const load = loadById.get(revealOrder[i]!)
+    const revealPath = load ? revealPathUnitIdsForLoad(load) : []
+    if (!load || revealPath.length === 0) continue
+
+    const max = revealPath.length - 1
+    const step = i < activeRevealIndex ? max : (revealSteps[load.id] ?? 0)
+    for (let j = 0; j <= step && j < revealPath.length; j += 1) {
+      const unitId = revealPath[j]!
+      if (unitMap) {
+        const unit = unitMap.get(unitId)
+        if (unit && !isConveyorLineTransitUnit(unit)) continue
+      }
+      if (!seen.has(unitId)) {
+        seen.add(unitId)
+        ordered.push(unitId)
+      }
+    }
+  }
+
+  return ordered
+}
+
 export interface SimulationStepTiming {
   inputIntervalSec: number
   dischargeIntervalSec: number
   transitIntervalSec: number
   /** 연속 투입 활성 — 연속 자재 entry 체류 1틱 */
   continuousInputActive?: boolean
+  /** STK 적재 슬롯 — 만재 시 투입 자재 STK 진입 차단 */
+  warehouseFillCounts?: Record<string, number>
 }
 
 /** 시뮬 투입·이송·출고 시간 입력값 (0.1~60초) */
@@ -1113,6 +1508,19 @@ export function advanceSimulationLoads(
         load.waiting = load.entryTicks < entryRequired
         continue
       }
+      if (!canDischargeLoadAtCurrentStep(load, unitMap)) {
+        load.waiting = true
+        continue
+      }
+      const currentUnitId = load.pathUnitIds[load.stepIndex]
+      if (
+        currentUnitId &&
+        load.targetStkId === currentUnitId &&
+        isStkAtCapacity(currentUnitId, timing.warehouseFillCounts ?? {})
+      ) {
+        load.waiting = true
+        continue
+      }
       load.exitTicks += 1
       if (load.exitTicks >= exitTicksRequired) {
         load.complete = true
@@ -1168,6 +1576,8 @@ export function advanceSimulationLoads(
     const to = posAt(index, targetStep)
     if (from === to) continue
 
+    const load = next[index]!
+
     const mergeWinner = mergeWinnerByTarget.get(to)
     if (mergeWinner != null && mergeWinner !== index) {
       next[index]!.waiting = true
@@ -1212,16 +1622,25 @@ export function advanceSimulationLoads(
             : fromUnit.type === 'junction'
               ? fromUnit
               : null
+        const throughJunctionMove =
+          junction != null &&
+          isJunctionThroughMoveForLoad(junction, unitMap, line, load, from, to)
+        const ownJunctionTraversal =
+          junction != null &&
+          isOwnPlannedJunctionTraversal(load, junction, from, to)
         if (
           junction &&
-          isJunctionCrossPath(line, junction, next[index]!.pathUnitIds) &&
+          !throughJunctionMove &&
+          !ownJunctionTraversal &&
+          isJunctionCrossPath(line, junction, load.pathUnitIds) &&
+          isJunctionCrossRequestActive(line, junction, next) &&
           !canApproveJunctionCrossMove(line, junction, next, unitMap)
         ) {
-          const step = next[index]!.stepIndex
+          const step = load.stepIndex
           const enteringJunction = to === junction.id
           const leavingJunction = from === junction.id
           const onCrossApproach =
-            enteringJunction || leavingJunction || step + 1 < next[index]!.pathUnitIds.length
+            enteringJunction || leavingJunction || step + 1 < load.pathUnitIds.length
           if (onCrossApproach) {
             next[index]!.waiting = true
             continue
@@ -1234,6 +1653,20 @@ export function advanceSimulationLoads(
         continue
       }
       if (targetUnit && isPortUnit(targetUnit) && !isSimulationPortOperable(targetUnit)) {
+        next[index]!.waiting = true
+        continue
+      }
+
+      const inboundToTargetStk =
+        (load.direction === 'inbound' || load.continuousInject === true) &&
+        load.targetStkId != null &&
+        load.targetStkId === to
+      if (
+        targetUnit &&
+        isStorageUnit(targetUnit) &&
+        inboundToTargetStk &&
+        isStkAtCapacity(to, timing.warehouseFillCounts ?? {})
+      ) {
         next[index]!.waiting = true
         continue
       }
@@ -1278,10 +1711,24 @@ export function unionSimulationPathUnitIds(loads: PathSimulationLoad[]): string[
   return ordered
 }
 
+/** 경로 하이라이트 — 컨베이어(직선·분기·회전)만 표시 */
+export function unionSimulationConveyorPathUnitIds(
+  loads: PathSimulationLoad[],
+  unitMap: Map<string, ConveyorUnit>,
+): string[] {
+  return filterConveyorLineTransitIds(unionSimulationPathUnitIds(loads), unitMap)
+}
+
 export function activeSimulationUnitIds(loads: PathSimulationLoad[]): string[] {
   return dedupeSimulationLoadsById(loads)
     .filter((load) => load.released && !load.complete && load.pathUnitIds.length > 0)
-    .map((load) => load.pathUnitIds[load.stepIndex]!)
+    .map((load) => {
+      const step = Math.min(
+        Math.max(0, load.stepIndex),
+        load.pathUnitIds.length - 1,
+      )
+      return load.pathUnitIds[step]!
+    })
     .filter(Boolean)
 }
 
@@ -1296,7 +1743,11 @@ export function simulationCstUnitIds(
   for (const load of dedupeSimulationLoadsById(loads)) {
     if (!load.released || load.pathUnitIds.length === 0) continue
     if (!includeCompleted && load.complete) continue
-    const unitId = load.pathUnitIds[load.stepIndex]
+    const step = Math.min(
+      Math.max(0, load.stepIndex),
+      load.pathUnitIds.length - 1,
+    )
+    const unitId = load.pathUnitIds[step]
     if (!unitId || seen.has(unitId)) continue
     seen.add(unitId)
     ordered.push(unitId)
@@ -1332,13 +1783,19 @@ export function staticTestMaterialOriginUnitIds(
 export function simulationRevealUnitIds(
   loads: PathSimulationLoad[],
   revealSteps: Record<string, number>,
+  unitMap?: Map<string, ConveyorUnit>,
 ): string[] {
   const seen = new Set<string>()
   const ordered: string[] = []
   for (const load of loads) {
+    const revealPath = revealPathUnitIdsForLoad(load)
     const step = revealSteps[load.id] ?? 0
-    for (let i = 0; i <= step && i < load.pathUnitIds.length; i += 1) {
-      const unitId = load.pathUnitIds[i]!
+    for (let i = 0; i <= step && i < revealPath.length; i += 1) {
+      const unitId = revealPath[i]!
+      if (unitMap) {
+        const unit = unitMap.get(unitId)
+        if (unit && !isConveyorLineTransitUnit(unit)) continue
+      }
       if (!seen.has(unitId)) {
         seen.add(unitId)
         ordered.push(unitId)
@@ -1528,4 +1985,207 @@ export function buildLoadTackTimeSummaries(
         moduleCount: load.pathUnitIds.length,
       }
     })
+}
+
+/** 이름·code로 유닛 검색 (예: 30104) */
+export function findUnitsByDisplayCode(
+  line: ConveyorLine,
+  code: string,
+): ConveyorUnit[] {
+  const normalized = code.trim().toLowerCase()
+  if (!normalized) return []
+  return line.units.filter((unit) => {
+    const label = unitDisplayCode(unit).toLowerCase()
+    return (
+      label === normalized ||
+      label.includes(normalized) ||
+      unit.id.toLowerCase() === normalized
+    )
+  })
+}
+
+/** stkOrder로 STK 찾기 (1=1번 STK, 2=2번 STK) */
+export function findStkByOrder(
+  line: ConveyorLine,
+  stkOrder: number,
+): ConveyorUnit | null {
+  const matches = line.units
+    .filter(isStorageUnit)
+    .filter((unit) => getStkProperties(unit)?.enabled !== false)
+    .filter((unit) => (getStkProperties(unit)?.stkOrder ?? 999) === stkOrder)
+  return matches[0] ?? null
+}
+
+export interface InboundPathDiagnostic {
+  entryUnitId: string
+  entryUnitCode: string
+  targetUnitId: string
+  targetUnitCode: string
+  directBfsReachable: boolean
+  onInboundPlanPath: boolean
+  planTargetStkCode: string | null
+  planMessage: string
+  directPathLabels: string[]
+  planPathLabels: string[]
+  blockers: string[]
+}
+
+function pathLabels(
+  unitMap: Map<string, ConveyorUnit>,
+  pathUnitIds: string[],
+): string[] {
+  return pathUnitIds.map((id) => unitDisplayCode(unitMap.get(id)!) || id)
+}
+
+function collectStkRoutingBlockers(
+  line: ConveyorLine,
+  entryUnitId: string,
+  targetStk: ConveyorUnit,
+  unitMap: Map<string, ConveyorUnit>,
+): string[] {
+  const blockers: string[] = []
+  const stkProps = getStkProperties(targetStk)
+  if (stkProps?.enabled === false) {
+    blockers.push(`${unitDisplayCode(targetStk)} 비활성`)
+  }
+
+  const routingTurns = line.units.filter(isStkRoutingSourceUnit)
+  if (routingTurns.length > 0) {
+    const allowedOnAny = routingTurns.some((turn) => {
+      const props = getStkRoutingProperties(turn, line)
+      return props?.enabled !== false && props?.allowedStkIds.includes(targetStk.id)
+    })
+    if (!allowedOnAny) {
+      blockers.push(
+        `STK 분기 회전/분기의 허용 STK 목록에 ${unitDisplayCode(targetStk)} 없음`,
+      )
+    }
+    for (const turn of routingTurns) {
+      const tail = bfsPath(turn.id, targetStk.id, unitMap, {
+        forSimulationPlan: true,
+        allowIdleTransit: true,
+      })
+      if (!tail || tail.length === 0) {
+        blockers.push(
+          `${unitDisplayCode(turn)} → ${unitDisplayCode(targetStk)} BFS 경로 없음 (연결 확인)`,
+        )
+      }
+    }
+  } else {
+    const fromEntry = bfsPath(entryUnitId, targetStk.id, unitMap, {
+      forSimulationPlan: true,
+      allowIdleTransit: true,
+    })
+    if (!fromEntry || fromEntry.length <= 1) {
+      blockers.push(
+        `투입점 → ${unitDisplayCode(targetStk)} 직접 BFS 경로 없음 (STK 분기 미설정·연결 확인)`,
+      )
+    }
+  }
+
+  const otherStks = line.units.filter(
+    (unit) => isStorageUnit(unit) && unit.id !== targetStk.id,
+  )
+  for (const other of otherStks) {
+    const viaOther = bfsPath(entryUnitId, targetStk.id, unitMap, {
+      forSimulationPlan: true,
+      allowIdleTransit: true,
+    })
+    if (viaOther?.includes(other.id)) {
+      blockers.push(
+        `경로가 다른 STK(${unitDisplayCode(other)}) 칸을 통과해야 함 — 시뮬은 STK 경유 불가`,
+      )
+      break
+    }
+  }
+
+  return blockers
+}
+
+/** 투입점 → 목표 모듈(또는 STK) 경로 진단 */
+export function diagnoseInboundPathToUnit(
+  line: ConveyorLine,
+  entryUnitId: string,
+  targetUnitId: string,
+  routingSession?: StkRoutingSessionState,
+): InboundPathDiagnostic {
+  const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  const entry = unitMap.get(entryUnitId)
+  const target = unitMap.get(targetUnitId)
+  const blockers: string[] = []
+
+  if (!entry) blockers.push('투입점을 찾을 수 없습니다.')
+  if (!target) blockers.push('목표 모듈을 찾을 수 없습니다.')
+
+  const direct =
+    entry && target
+      ? bfsPath(entryUnitId, targetUnitId, unitMap, {
+          forSimulationPlan: true,
+          allowIdleTransit: true,
+        })
+      : null
+
+  if (entry && target && (!direct || direct.length <= 1)) {
+    blockers.push('투입점→목표 직접 연결 경로 없음')
+    if (isPortUnit(target) && target.status !== 'running') {
+      blockers.push(`${unitDisplayCode(target)} 포트 비가동`)
+    }
+  }
+
+  const plan = planInboundLoadPath(line, entryUnitId, routingSession)
+  const onInboundPlanPath = plan.pathUnitIds.includes(targetUnitId)
+  if (!onInboundPlanPath) {
+    blockers.push('투입 시뮬 계획 경로에 목표 모듈이 포함되지 않음')
+  }
+
+  if (target && isStorageUnit(target)) {
+    blockers.push(...collectStkRoutingBlockers(line, entryUnitId, target, unitMap))
+  }
+
+  const planStk = plan.targetStkId ? unitMap.get(plan.targetStkId) : null
+
+  return {
+    entryUnitId,
+    entryUnitCode: entry ? unitDisplayCode(entry) : entryUnitId,
+    targetUnitId,
+    targetUnitCode: target ? unitDisplayCode(target) : targetUnitId,
+    directBfsReachable: Boolean(direct && direct.length > 1),
+    onInboundPlanPath,
+    planTargetStkCode: planStk ? unitDisplayCode(planStk) : null,
+    planMessage: plan.message,
+    directPathLabels: direct ? pathLabels(unitMap, direct) : [],
+    planPathLabels: pathLabels(unitMap, plan.pathUnitIds),
+    blockers,
+  }
+}
+
+/** N번 STK(stkOrder) 경로 진단 */
+export function diagnoseInboundPathToStkOrder(
+  line: ConveyorLine,
+  entryUnitId: string,
+  stkOrder: number,
+  routingSession?: StkRoutingSessionState,
+): InboundPathDiagnostic & { matchedByName: ConveyorUnit[] } {
+  const stk = findStkByOrder(line, stkOrder)
+  const matchedByName = findUnitsByDisplayCode(line, String(stkOrder))
+  if (!stk) {
+    return {
+      entryUnitId,
+      entryUnitCode: '',
+      targetUnitId: '',
+      targetUnitCode: `stkOrder=${stkOrder}`,
+      directBfsReachable: false,
+      onInboundPlanPath: false,
+      planTargetStkCode: null,
+      planMessage: '',
+      directPathLabels: [],
+      planPathLabels: [],
+      blockers: [`stkOrder=${stkOrder} 인 STK 없음`],
+      matchedByName,
+    }
+  }
+  return {
+    ...diagnoseInboundPathToUnit(line, entryUnitId, stk.id, routingSession),
+    matchedByName,
+  }
 }

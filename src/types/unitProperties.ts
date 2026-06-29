@@ -23,13 +23,18 @@ export interface StkRoutingProperties {
   description?: string
 }
 
-/** 분기 유닛 — 분기 요청 컨베이어 지정 (평시 직진, 요청 시 수직 전환) */
+/** @deprecated transitLinkedUnits.linkedUnitIds 사용 — 하위 호환 마이그레이션용 */
 export interface JunctionRoutingProperties {
   /** @deprecated requestUnitIds 사용 — 하위 호환 */
   requestUnitId?: string
-  /** 분기 요청 컨베이어 — 최대 2개 (1: 직진 수직 측면, 2: 가로·세로 직선 연장 CV) */
+  /** @deprecated transitLinkedUnits.linkedUnitIds 사용 */
   requestUnitIds: string[]
   description?: string
+}
+
+/** 분기·회전 유닛 — 인접 연동 컨베이어 (투입 목적지·시뮬 연동) */
+export interface TransitLinkedUnitsProperties {
+  linkedUnitIds: string[]
 }
 
 /** 포트 — STK 투입고·출고구 공통 속성 */
@@ -77,6 +82,8 @@ export interface PathSimulationPlan {
   targetStkId: string | null
   targetExitId?: string | null
   pathUnitIds: string[]
+  /** 시작 전·경로 미리보기 — 직선·분기·회전 탐색 순서 */
+  previewPathUnitIds?: string[]
   message: string
   direction?: PathSimulationDirection
 }
@@ -91,6 +98,8 @@ export interface PathSimulationLoad {
   targetStkId: string | null
   targetExitId: string | null
   pathUnitIds: string[]
+  /** 경로 미리보기 — 직선·분기·회전 전체 탐색 후 목적지 확정 */
+  previewPathUnitIds?: string[]
   stepIndex: number
   complete: boolean
   /** 이번 틱에 충돌로 대기 중 */

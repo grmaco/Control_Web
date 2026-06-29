@@ -29,12 +29,20 @@ function isEntryOccupiedByLoad(
   loads: PathSimulationLoad[],
   entryUnitId: string,
 ): boolean {
-  return loads.some(
-    (load) =>
-      !load.complete &&
-      load.pathUnitIds.length > 0 &&
-      load.pathUnitIds[load.stepIndex] === entryUnitId,
-  )
+  return loads.some((load) => {
+    if (load.complete || load.pathUnitIds.length === 0) return false
+    if (load.entryUnitId !== entryUnitId) return false
+
+    const step = Math.min(
+      Math.max(0, load.stepIndex),
+      load.pathUnitIds.length - 1,
+    )
+    const entryIndex = load.pathUnitIds.indexOf(entryUnitId)
+    if (entryIndex < 0) {
+      return step === 0
+    }
+    return step <= entryIndex
+  })
 }
 
 function isEntryUnoccupied(

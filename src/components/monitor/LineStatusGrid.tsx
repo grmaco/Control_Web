@@ -59,11 +59,15 @@ interface LineStatusGridProps {
   continuousInputActive?: boolean
   continuousInputIntervalSec?: number
   continuousGatherAnimating?: boolean
+  /** 연속 투입 오버레이 표시 — 라인 만재 중지 시에도 포트 수집 연출 유지 */
+  continuousGatherOverlayActive?: boolean
   /** 연속 투입 — 적재창고 슬롯 채움 수 */
   warehouseFillCounts?: Record<string, number>
   onCalloutPanLockChange?: (locked: boolean) => void
   /** 증가 시 콜아웃 선택 해제 */
   calloutDeselectToken?: number
+  /** 투입점별 시뮬 목적지 이름 (콜아웃 표시) */
+  entrySimDestinationByUnitId?: Record<string, string>
   /** 모니터링 2.5D 시점 표현 */
   is25DView?: boolean
   className?: string
@@ -156,11 +160,13 @@ export function LineStatusGrid({
   simulationPathUnitIds = [],
   onCalloutPanLockChange,
   calloutDeselectToken = 0,
+  entrySimDestinationByUnitId = {},
   is25DView = false,
   continuousGatherProbes = [],
   continuousInputActive = false,
   continuousInputIntervalSec = 0.5,
   continuousGatherAnimating = false,
+  continuousGatherOverlayActive,
   warehouseFillCounts = {},
   className,
 }: LineStatusGridProps) {
@@ -388,9 +394,15 @@ export function LineStatusGrid({
                 isJunction={unit.type === 'junction'}
               />
             )}
-            {useTurnSvg && unit && showSimMaterial && !flow ? (
+            {useTurnSvg && unit && showSimMaterial ? (
               <div
-                className="pointer-events-none absolute inset-1 z-[6] rounded-sm ring-2 ring-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.75)]"
+                className="pointer-events-none absolute inset-1 z-[8] rounded-sm ring-2 ring-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.75)]"
+                aria-hidden
+              />
+            ) : null}
+            {useRollerSvg && unit && showSimMaterial && !flow ? (
+              <div
+                className="pointer-events-none absolute inset-1 z-[8] rounded-sm ring-2 ring-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.75)]"
                 aria-hidden
               />
             ) : null}
@@ -480,7 +492,9 @@ export function LineStatusGrid({
       })}
       </div>
       <ContinuousInputGatherOverlay
-        active={continuousInputActive && simulationInProgress}
+        active={
+          (continuousGatherOverlayActive ?? continuousInputActive) && simulationInProgress
+        }
         animating={continuousGatherAnimating}
         probes={continuousGatherProbes}
         line={line}
@@ -507,6 +521,7 @@ export function LineStatusGrid({
           activeUnitIds={simulationActiveSet}
           staticTestMaterialUnitIds={staticTestMaterialSet}
           simulating={simulationInProgress}
+          entrySimDestinationByUnitId={entrySimDestinationByUnitId}
         />
       ) : null}
     </div>

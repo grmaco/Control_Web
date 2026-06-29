@@ -39,11 +39,12 @@ export type FlowRole = 'entry' | 'exit'
 import type {
   StkRoutingProperties,
   JunctionRoutingProperties,
+  TransitLinkedUnitsProperties,
   UnitRole,
   UnitRoleProperties,
 } from './unitProperties'
 
-export type { UnitRole, StkPolicy, StkRoutingProperties, JunctionRoutingProperties, StkProperties, PortProperties, OutputPortProperties, UnitRoleProperties, RoutingSimulationResult } from './unitProperties'
+export type { UnitRole, StkPolicy, StkRoutingProperties, JunctionRoutingProperties, TransitLinkedUnitsProperties, StkProperties, PortProperties, OutputPortProperties, UnitRoleProperties, RoutingSimulationResult } from './unitProperties'
 
 export interface ConveyorUnit {
   id: string
@@ -65,7 +66,9 @@ export interface ConveyorUnit {
   properties?: UnitRoleProperties | null
   /** type === 'turn' | 'junction' — STK 분기 라우팅 */
   stkRouting?: StkRoutingProperties | null
-  /** type === 'junction' — 분기 요청 컨베이어 */
+  /** type === 'turn' | 'junction' — 인접 연동 컨베이어 */
+  transitLinkedUnits?: TransitLinkedUnitsProperties | null
+  /** @deprecated transitLinkedUnits 사용 — 하위 호환 */
   junctionRouting?: JunctionRoutingProperties | null
   /** 물류 시작(투입) / 종료(출고) — 분기 라인에서 복수 지정 */
   flowRole?: FlowRole | null

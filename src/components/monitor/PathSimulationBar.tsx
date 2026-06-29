@@ -8,6 +8,7 @@ import type { PathSimulationMode, PathSimulationStatus } from '../../hooks/usePa
 import type { LoadTackTimeSummary } from '../../utils/pathSimulation'
 import { formatTackTimeSec } from '../../utils/pathSimulation'
 import { CONTINUOUS_INPUT_INTERVAL_SEC, CONTINUOUS_PROBE_CYCLE_SEC } from '../../utils/continuousInputGather'
+import { SIM_STK_IO_ENABLED } from '../../constants/simStkIo'
 import { unitDisplayCode } from '../../utils/unitPropertyHelpers'
 
 interface PathSimulationBarProps {
@@ -319,11 +320,17 @@ export function PathSimulationBar({
               <ModeButton
                 label="출고 (OUT)"
                 active={mode === 'outbound'}
-                disabled={isBusy}
+                disabled={isBusy || !SIM_STK_IO_ENABLED}
                 wide
                 onClick={() => onModeChange('outbound')}
               />
             </div>
+            {!SIM_STK_IO_ENABLED ? (
+              <p className="text-[10px] leading-relaxed text-slate-500">
+                STK 출고는 추후 명령 버튼으로 연동됩니다. 현재는 투입·연속 투입으로 STK
+                앞 라인 만재만 확인할 수 있습니다.
+              </p>
+            ) : null}
             <div>
               <p className="mb-1.5 text-[10px] text-slate-500">{sourceLabel}</p>
               {sources.length === 0 ? (

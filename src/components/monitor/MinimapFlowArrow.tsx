@@ -399,6 +399,7 @@ function JunctionFlowArrow({
         if (neonPath) {
           return <FlowPath d={neonPath} hasMaterial filterId={filterId} />
         }
+        return <FlowPath d={pathInfo.d} hasMaterial filterId={filterId} />
       }
 
       return (
@@ -440,6 +441,7 @@ function TurnFlowArrow({
         if (neonPath) {
           return <FlowPath d={neonPath} hasMaterial filterId={filterId} />
         }
+        return <FlowPath d={pathInfo.d} hasMaterial filterId={filterId} />
       }
 
       return (

@@ -14,6 +14,8 @@ export interface CalloutDisplayInfo {
   location: string | null
   /** null이면 HOME 정보 없음 (회전·리프트에만 표시) */
   home: string | null
+  /** 투입점 시뮬 목적지 — null이면 행 숨김 */
+  simDestination: string | null
   productId: string
   /** 현재 활성 알람 코드. null이면 알람 없음 */
   alarm: string | null
@@ -47,7 +49,11 @@ export function buildCalloutDisplayInfo(
   flow: UnitFlowDirs | undefined,
   unitRuntime: Record<string, SemiCnvUnitRuntime>,
   simulationCstActive: boolean,
-  options?: { staticTestAtOrigin?: boolean; simulating?: boolean },
+  options?: {
+    staticTestAtOrigin?: boolean
+    simulating?: boolean
+    simDestination?: string | null
+  },
   unitAlarms?: Record<string, string>,
 ): CalloutDisplayInfo {
   const tags = collectCalloutTags(unit, flow)
@@ -76,6 +82,12 @@ export function buildCalloutDisplayInfo(
     location = formatCalloutLocation(unit, flow)
   }
 
+  const isEntry = unit.flowRole === 'entry' || unit.role === 'INPUT'
+  const simDestination =
+    isEntry && options?.simDestination?.trim()
+      ? options.simDestination.trim()
+      : null
+
   return {
     name: unit.name,
     status: STATUS_COLORS[unit.status].label,
@@ -83,6 +95,7 @@ export function buildCalloutDisplayInfo(
     cstOn: hasCst ? 'On' : 'Off',
     location,
     home,
+    simDestination,
     productId: cstId || '—',
     alarm: unitAlarms?.[unit.id] ?? null,
   }

@@ -2,6 +2,7 @@ import type { ConveyorLine, ConveyorUnit, PortDirection } from '../types/conveyo
 import type {
   PortProperties,
   JunctionRoutingProperties,
+  TransitLinkedUnitsProperties,
   StkProperties,
   StkRoutingProperties,
   UnitRole,
@@ -241,6 +242,12 @@ export function isJunctionUnit(unit: ConveyorUnit): boolean {
   return unit.type === 'junction'
 }
 
+/** 분기·회전 연동 유닛 — 출고점 CV·포트만 허용 */
+export function isTransitLinkedUnitCandidate(unit: ConveyorUnit): boolean {
+  if (isPortUnit(unit)) return true
+  return unit.flowRole === 'exit'
+}
+
 export function listJunctionLinkedUnitCandidates(
   line: UnitLineContext,
   junction: ConveyorUnit,
@@ -258,6 +265,114 @@ export function listJunctionLinkedUnitCandidates(
         numeric: true,
       }),
     )
+}
+
+/** 분기·회전 — 인접 출고점·포트 연동 후보 */
+export function listTransitLinkedUnitCandidates(
+  line: UnitLineContext,
+  unit: ConveyorUnit,
+): ConveyorUnit[] {
+  if (!isTurnRoutingUnit(unit)) return []
+  const { cols, rows } = lineGridSize(line)
+  return getOrthogonalNeighborUnits(line.units, unit, cols, rows)
+    .filter(
+      (candidate) =>
+        candidate.id !== unit.id && isTransitLinkedUnitCandidate(candidate),
+    )
+    .sort((a, b) =>
+      unitDisplayCode(a).localeCompare(unitDisplayCode(b), undefined, {
+        numeric: true,
+      }),
+    )
+}
+
+function coerceTransitLinkedUnits(
+  raw: TransitLinkedUnitsProperties | null | undefined,
+): TransitLinkedUnitsProperties | null {
+  if (!raw) return null
+  const linkedUnitIds = normalizeRequestUnitIds(raw.linkedUnitIds)
+  return { linkedUnitIds }
+}
+
+export function defaultTransitLinkedUnitsProperties(): TransitLinkedUnitsProperties {
+  return { linkedUnitIds: [] }
+}
+
+export function getTransitLinkedUnitsProperties(
+  unit: ConveyorUnit,
+  line?: UnitLineContext,
+): TransitLinkedUnitsProperties | null {
+  if (!isTurnRoutingUnit(unit)) return null
+  const coerced = coerceTransitLinkedUnits(unit.transitLinkedUnits)
+  if (coerced) return coerced
+  if (line && isJunctionUnit(unit) && unit.junctionRouting) {
+    const legacyIds = getJunctionRequestUnitIds(unit.junctionRouting)
+    if (legacyIds.length > 0) return { linkedUnitIds: legacyIds }
+  }
+  return defaultTransitLinkedUnitsProperties()
+}
+
+export function getTransitLinkedUnitIds(
+  line: UnitLineContext,
+  unit: ConveyorUnit,
+): string[] {
+  const props = getTransitLinkedUnitsProperties(unit, line)
+  if (!props) return []
+  const allowed = new Set(
+    listTransitLinkedUnitCandidates(line, unit).map((candidate) => candidate.id),
+  )
+  return [...new Set(props.linkedUnitIds)].filter((id) => allowed.has(id))
+}
+
+/** 교차 흐름 — 연동 유닛 2개 이상일 때 앞 2개 사용 */
+export function getTransitLinkedCrossPair(
+  line: UnitLineContext,
+  junction: ConveyorUnit,
+): [string, string] | null {
+  if (!isJunctionUnit(junction)) return null
+  const ids = getTransitLinkedUnitIds(line, junction)
+  if (ids.length < 2) return null
+  return [ids[0]!, ids[1]!]
+}
+
+export function validateTransitLinkedUnits(
+  line: UnitLineContext,
+  unit: ConveyorUnit,
+): Array<{ severity: 'warning' | 'error'; message: string }> {
+  if (!isTurnRoutingUnit(unit)) return []
+
+  const issues: Array<{ severity: 'warning' | 'error'; message: string }> = []
+  const { cols, rows } = lineGridSize(line)
+  const allowed = new Set(
+    listTransitLinkedUnitCandidates(line, unit).map((candidate) => candidate.id),
+  )
+  const linkedUnitIds = getTransitLinkedUnitIds(line, unit)
+
+  if (linkedUnitIds.length === 0) {
+    issues.push({
+      severity: 'warning',
+      message: '연동할 출고점 또는 포트를 1개 이상 선택하세요.',
+    })
+    return issues
+  }
+
+  for (const linkedUnitId of linkedUnitIds) {
+    if (!allowed.has(linkedUnitId)) {
+      issues.push({
+        severity: 'error',
+        message: '연동 유닛은 인접한 출고점 또는 포트만 선택할 수 있습니다.',
+      })
+      continue
+    }
+    if (!areGridAdjacent(line.units, unit.id, linkedUnitId, cols, rows)) {
+      issues.push({
+        severity: 'warning',
+        message: '연동 유닛과 그리드상 인접 배치가 필요합니다.',
+      })
+    }
+  }
+
+  return issues
 }
 
 function normalizeRequestUnitIds(
@@ -819,6 +934,7 @@ export function normalizeUnitRoleFields(
   let role = inferUnitRole(unit, line)
   let properties = unit.properties ?? null
   let stkRouting = unit.stkRouting ?? null
+  let transitLinkedUnits = unit.transitLinkedUnits ?? null
   let junctionRouting = unit.junctionRouting ?? null
   let portDirection = unit.portDirection
 
@@ -857,6 +973,7 @@ export function normalizeUnitRoleFields(
       role: portRole,
       properties,
       stkRouting: null,
+      transitLinkedUnits: null,
       junctionRouting: null,
     }
   }
@@ -871,6 +988,7 @@ export function normalizeUnitRoleFields(
       role: 'STORAGE',
       properties,
       stkRouting: null,
+      transitLinkedUnits: null,
       junctionRouting: null,
       portDirection: null,
     })
@@ -894,15 +1012,19 @@ export function normalizeUnitRoleFields(
         stkRouting = { ...stkRouting, allowedStkIds: allStkIds }
       }
     }
-    if (isJunctionUnit(unit)) {
-      junctionRouting =
-        coerceJunctionRouting(junctionRouting) ??
-        defaultJunctionRoutingProperties(line, unit)
-    } else {
-      junctionRouting = null
-    }
+    transitLinkedUnits =
+      coerceTransitLinkedUnits(transitLinkedUnits) ??
+      (isJunctionUnit(unit) && junctionRouting
+        ? (() => {
+            const legacyIds = getJunctionRequestUnitIds(junctionRouting)
+            return legacyIds.length > 0 ? { linkedUnitIds: legacyIds } : null
+          })()
+        : null) ??
+      defaultTransitLinkedUnitsProperties()
+    junctionRouting = null
   } else {
     stkRouting = null
+    transitLinkedUnits = null
     junctionRouting = null
   }
 
@@ -925,6 +1047,7 @@ export function normalizeUnitRoleFields(
     flowRole: syncedFlowRole,
     properties,
     stkRouting,
+    transitLinkedUnits,
     junctionRouting,
     portDirection,
   })

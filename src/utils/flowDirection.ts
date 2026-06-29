@@ -8,7 +8,7 @@ import {
   computeOutboundLinks,
   type OutboundLink,
 } from './outboundFlow'
-import { getPortProperties, resolvePortAdjacentStk, getJunctionRequestUnitIds, getJunctionRoutingProperties, listJunctionBranchUnitIds } from './unitPropertyHelpers'
+import { getPortProperties, resolvePortAdjacentStk, getTransitLinkedCrossPair, listJunctionBranchUnitIds } from './unitPropertyHelpers'
 
 export type FlowDir = 'N' | 'E' | 'S' | 'W'
 
@@ -912,11 +912,9 @@ export function overlaySimulationPathOnFlowMap(
     let outDir = next ? flowExitDir(unit, next) : null
 
     if (unit.type === 'junction' && i > 0 && i < pathUnitIds.length - 1) {
-      const props = getJunctionRoutingProperties(unit, line)
-      const [req1, req2] = getJunctionRequestUnitIds(
-        props ?? { requestUnitIds: [], requestUnitId: '' },
-      )
-      if (req1 && req2) {
+      const crossPair = getTransitLinkedCrossPair(line, unit)
+      if (crossPair) {
+        const [req1, req2] = crossPair
         const before = pathUnitIds[i - 1]!
         const after = pathUnitIds[i + 1]!
         const req1Branch = new Set(listJunctionBranchUnitIds(line, unit, req1))

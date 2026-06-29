@@ -31,6 +31,8 @@ interface FlowCalloutOverlayProps {
   activeUnitIds?: Set<string>
   staticTestMaterialUnitIds?: Set<string>
   simulating?: boolean
+  /** 투입점별 시뮬 목적지 이름 */
+  entrySimDestinationByUnitId?: Record<string, string>
   /** 증가 시 선택 해제 (시뮬레이션 초기화 등) */
   deselectToken?: number
 }
@@ -49,6 +51,7 @@ export function FlowCalloutOverlay({
   activeUnitIds,
   staticTestMaterialUnitIds,
   simulating = false,
+  entrySimDestinationByUnitId = {},
   deselectToken = 0,
 }: FlowCalloutOverlayProps) {
   const unitAlarms = useSemiCnvStore((s) => s.unitAlarms)
@@ -228,6 +231,7 @@ export function FlowCalloutOverlay({
                   simulating,
                   staticTestAtOrigin:
                     staticTestMaterialUnitIds?.has(callout.unitId) ?? false,
+                  simDestination: entrySimDestinationByUnitId[callout.unitId] ?? null,
                 },
                 unitAlarms,
               )
@@ -632,6 +636,18 @@ function SelectableFlowCalloutTable({
               {display?.cstOn === 'On' ? '● ON' : '○ OFF'}
             </td>
           </tr>
+
+          {/* 목적지 (투입점 시뮬) */}
+          {display?.simDestination != null && (
+            <tr style={{ borderBottom: `1px solid ${rowDivider}` }}>
+              <th style={{ padding: '2px 4px', fontWeight: 600, color: labelColor, textAlign: 'left', letterSpacing: '0.04em' }}>
+                DEST
+              </th>
+              <td style={{ padding: '2px 4px', color: '#a5f3fc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {display.simDestination}
+              </td>
+            </tr>
+          )}
 
           {/* 위치 (해당 유닛만) */}
           {display?.location != null && (
