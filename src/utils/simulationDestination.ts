@@ -1,5 +1,6 @@
 import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
 import { isPortUnit } from '../constants/conveyorTypes'
+import { isFlowCapableUnit } from './flowEntries'
 import { getOrthogonalNeighborUnits } from './units'
 import {
   getPortProperties,
@@ -56,12 +57,13 @@ export function listTransitLinkedFeederUnits(
   return listTransitLinkedUnitCandidates(line, unit)
 }
 
-/** 투입 목적지 후보 — 연동 CV가 있는 분기( junction ) 유닛만 */
+/** 투입 목적지 후보 — flowRole=exit 종료점, 또는 연동 CV가 있는 분기·회전 */
 export function isInboundJunctionDestination(
   line: ConveyorLine,
   unit: ConveyorUnit,
 ): boolean {
-  if (!isJunctionUnit(unit)) return false
+  if (unit.flowRole === 'exit' && isFlowCapableUnit(unit)) return true
+  if (!isTurnRoutingUnit(unit)) return false
   if (getTransitLinkedUnitIds(line, unit).length > 0) return true
   return listTransitLinkedFeederUnits(line, unit).length > 0
 }
@@ -127,7 +129,7 @@ function pickFarthestJunctionDestination(
   return candidates.length > 0 ? candidates[candidates.length - 1]! : null
 }
 
-/** 투입점에서 도달 가능한 분기 목적지 — 거리순(가까운→먼) */
+/** 투입점에서 도달 가능한 분기·회전·종료점 목적지 — 거리순(가까운→먼) */
 export function listReachableInboundDestinations(
   line: ConveyorLine,
   entryUnitIdOrDist: string | Map<string, number>,
@@ -148,6 +150,7 @@ export function listReachableInboundDestinations(
   const items: ConveyorUnit[] = []
   for (const unit of line.units) {
     if (!isInboundJunctionDestination(line, unit)) continue
+    if (unit.status !== 'running') continue
     const hops = dist.get(unit.id)
     if (hops == null || !Number.isFinite(hops)) continue
     items.push(unit)
@@ -216,6 +219,7 @@ export function planInboundPathFromFlowTraversal(
     if (
       candidate &&
       isInboundJunctionDestination(line, candidate) &&
+      candidate.status === 'running' &&
       hops != null &&
       Number.isFinite(hops)
     ) {

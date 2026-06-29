@@ -50,7 +50,7 @@ function isInboundConveyorTransitNode(
 ): boolean {
   if (isPortUnit(unit) || isStorageUnit(unit)) return false
   if (unitId === entryUnitId) return isFlowCapableUnit(unit)
-  if (unit.flowRole === 'exit') return false
+  if (unit.flowRole === 'exit') return isFlowCapableUnit(unit)
   if (isInboundOutPort(unit)) return false
   return isFlowCapableUnit(unit)
 }
