@@ -1,4 +1,4 @@
-import type { Rotation } from '../types/conveyor'
+import type { ConveyorUnit, Rotation } from '../types/conveyor'
 import type { FlowDir } from './flowDirection'
 
 const R = 28
@@ -20,6 +20,13 @@ const TURN_OPENINGS: Record<Rotation, readonly [FlowDir, FlowDir]> = {
 
 export function getTurnOpenings(rotation: Rotation): readonly [FlowDir, FlowDir] {
   return TURN_OPENINGS[rotation]
+}
+
+/** 회전 유닛 실제 개구부 — 사용자 설정이 있으면 그것을, 없으면 기본 2방향 반환 */
+export function getEffectiveTurnOpenings(unit: ConveyorUnit): readonly FlowDir[] {
+  const custom = (unit.turnOpeningsConfig as Partial<Record<Rotation, FlowDir[]>> | undefined)?.[unit.rotation]
+  if (custom != null && custom.length > 0) return custom
+  return TURN_OPENINGS[unit.rotation]
 }
 
 /** 시계방향 나침반 각도 — N=0°, E=90°, S=180°, W=270° */

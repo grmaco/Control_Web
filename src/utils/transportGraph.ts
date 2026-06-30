@@ -3,7 +3,7 @@ import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
 import { isFlowCapableUnit } from './flowEntries'
 import { getOrthogonalNeighborUnits } from './units'
 import { findUnitAtCell, getFootprintCells, getUnitFootprint } from './unitFootprint'
-import { getTurnOpenings } from './turnArc'
+import { getEffectiveTurnOpenings } from './turnArc'
 import type { FlowDir } from './flowDirection'
 
 const FLOW_DIR_DELTA: Record<FlowDir, readonly [number, number]> = {
@@ -64,7 +64,7 @@ function turnOpeningNeighborIds(
   turn: ConveyorUnit,
 ): Set<string> {
   const ids = new Set<string>()
-  for (const dir of getTurnOpenings(turn.rotation)) {
+  for (const dir of getEffectiveTurnOpenings(turn)) {
     const [dx, dy] = FLOW_DIR_DELTA[dir]
     const cellUnit = findUnitAtCell(line.units, turn.gridX + dx, turn.gridY + dy)
     if (cellUnit) ids.add(cellUnit.id)

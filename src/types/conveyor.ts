@@ -63,6 +63,8 @@ export interface ConveyorUnit {
   role?: UnitRole | null
   /** 역할별 상세 속성 — STORAGE, PORT_OUT */
   properties?: UnitRoleProperties | null
+  /** type === 'turn' — 각 회전 각도별 사용자 정의 개구부 (미설정 시 기본 2방향 사용) */
+  turnOpeningsConfig?: Partial<Record<Rotation, ('N' | 'E' | 'S' | 'W')[]>>
   /** type === 'turn' | 'junction' — 인접 연동 컨베이어 */
   transitLinkedUnits?: TransitLinkedUnitsProperties | null
   /** @deprecated transitLinkedUnits 사용 — 하위 호환 */

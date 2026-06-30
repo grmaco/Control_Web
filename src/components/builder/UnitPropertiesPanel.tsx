@@ -37,6 +37,7 @@ import {
 } from '../../constants/warehouseUnit'
 import { updateUnitInLine, updateUnitsStatusInLine, updateUnitsTestMaterialInLine } from '../../utils/units'
 import { formatFlowRoleLabel } from '../../utils/flowEntries'
+import { getTurnOpenings } from '../../utils/turnArc'
 import { RolePropertySections } from './UnitRolePropertySections'
 import { computeMinimapFlowMap } from '../../utils/flowDirection'
 import {
@@ -600,6 +601,72 @@ export function UnitPropertiesPanel({
       </div>
         </>
       ) : null}
+
+      {unit.type === 'turn' && (() => {
+        const DIRS = ['N', 'E', 'S', 'W'] as const
+        const DIR_LABEL: Record<string, string> = { N: '상(N)', E: '우(E)', S: '하(S)', W: '좌(W)' }
+        const defaultPair = getTurnOpenings(unit.rotation)
+        const customOpenings = unit.turnOpeningsConfig?.[unit.rotation]
+        const effectiveOpenings: readonly string[] = customOpenings ?? defaultPair
+
+        const handleToggle = (dir: 'N' | 'E' | 'S' | 'W') => {
+          const current = effectiveOpenings as string[]
+          const next = current.includes(dir)
+            ? current.filter((d) => d !== dir)
+            : [...current, dir]
+          if (next.length === 0) return
+          const isDefault = next.length === defaultPair.length && defaultPair.every((d) => next.includes(d))
+          const nextConfig = { ...(unit.turnOpeningsConfig ?? {}) }
+          if (isDefault) {
+            delete nextConfig[unit.rotation]
+          } else {
+            nextConfig[unit.rotation] = next as ('N' | 'E' | 'S' | 'W')[]
+          }
+          onChange(updateUnitInLine(line, unit.id, { turnOpeningsConfig: nextConfig }))
+        }
+
+        const handleReset = () => {
+          const nextConfig = { ...(unit.turnOpeningsConfig ?? {}) }
+          delete nextConfig[unit.rotation]
+          onChange(updateUnitInLine(line, unit.id, { turnOpeningsConfig: nextConfig }))
+        }
+
+        return (
+          <div className="border-t border-slate-700 pt-2">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs text-slate-400">개구방향</span>
+              {customOpenings != null && (
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="text-xs text-slate-500 hover:text-slate-300"
+                >
+                  초기화
+                </button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              {DIRS.map((dir) => {
+                const checked = effectiveOpenings.includes(dir)
+                const isDefault = defaultPair.includes(dir)
+                return (
+                  <label key={dir} className="flex cursor-pointer items-center gap-1 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => handleToggle(dir)}
+                      className="accent-sky-400"
+                    />
+                    <span className={isDefault && customOpenings == null ? 'text-sky-300' : 'text-slate-300'}>
+                      {DIR_LABEL[dir]}
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })()}
 
       <div className="flex gap-2">
         {canRotate && (
