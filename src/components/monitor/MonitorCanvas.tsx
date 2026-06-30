@@ -132,15 +132,9 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   const [simBlockPopupOpen, setSimBlockPopupOpen] = useState(false)
   const [runConfirmPopupOpen, setRunConfirmPopupOpen] = useState(false)
   const [portConfirmPopupOpen, setPortConfirmPopupOpen] = useState(false)
-  const [noRouteConfirmPopupOpen, setNoRouteConfirmPopupOpen] = useState(false)
   const pendingStartModeRef = useRef<'normal' | 'continuous' | null>(null)
   const preserveStatusOnStartRef = useRef(false)
   const portConfirmRequestedRef = useRef(false)
-  const noRouteConfirmRequestedRef = useRef(false)
-  const noRouteDetectedRef = useRef(simulation.noRouteDetected)
-  noRouteDetectedRef.current = simulation.noRouteDetected
-  const noRouteCanForceRef = useRef(simulation.noRouteCanForce)
-  noRouteCanForceRef.current = simulation.noRouteCanForce
   const viewStateRef = useRef(initialTransform)
 
   const logButton = (comment: string) => {
@@ -187,15 +181,8 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
       return
     }
 
-    if (noRouteDetectedRef.current && !noRouteConfirmRequestedRef.current) {
-      noRouteConfirmRequestedRef.current = true
-      setNoRouteConfirmPopupOpen(true)
-      return
-    }
-
     const preserveStatus = preserveStatusOnStartRef.current
     portConfirmRequestedRef.current = false
-    noRouteConfirmRequestedRef.current = false
     pendingStartModeRef.current = null
     preserveStatusOnStartRef.current = false
     startPendingSimulation(pendingMode, { preserveUnitStatus: preserveStatus })
@@ -210,7 +197,6 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
 
       pendingStartModeRef.current = startMode
       portConfirmRequestedRef.current = false
-      noRouteConfirmRequestedRef.current = false
 
       if (!allCvRunning) {
         setRunConfirmPopupOpen(true)
@@ -219,12 +205,6 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
       if (!allPortsRunning) {
         portConfirmRequestedRef.current = true
         setPortConfirmPopupOpen(true)
-        return
-      }
-
-      if (noRouteDetectedRef.current) {
-        noRouteConfirmRequestedRef.current = true
-        setNoRouteConfirmPopupOpen(true)
         return
       }
 
@@ -286,24 +266,6 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
     portConfirmRequestedRef.current = false
     preserveStatusOnStartRef.current = false
   }, [])
-
-  const dismissNoRouteConfirmPopup = useCallback(() => {
-    setNoRouteConfirmPopupOpen(false)
-    pendingStartModeRef.current = null
-    portConfirmRequestedRef.current = false
-    noRouteConfirmRequestedRef.current = false
-    preserveStatusOnStartRef.current = false
-  }, [])
-
-  const handleForceStartSimulation = useCallback(() => {
-    setNoRouteConfirmPopupOpen(false)
-    noRouteConfirmRequestedRef.current = true
-    const startMode = pendingStartModeRef.current ?? 'normal'
-    const preserveStatus = preserveStatusOnStartRef.current
-    pendingStartModeRef.current = null
-    preserveStatusOnStartRef.current = false
-    startPendingSimulation(startMode, { preserveUnitStatus: preserveStatus })
-  }, [startPendingSimulation])
 
   const handleConfirmPortRunAllAndStart = useCallback(async () => {
     setPortConfirmPopupOpen(false)
@@ -851,90 +813,6 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
               <button
                 type="button"
                 onClick={() => simulation.dismissInboundLineFullNotice()}
-                className="rounded border border-slate-600 bg-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-600"
-              >
-                확인
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {noRouteConfirmPopupOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          onClick={dismissNoRouteConfirmPopup}
-        >
-          <div
-            className="mx-4 w-full max-w-sm rounded-lg border border-amber-500/60 bg-slate-800 p-6 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="mb-1 text-base font-bold text-amber-300">물류 배치 이상</p>
-            <p className="mb-3 text-sm leading-relaxed text-slate-300">
-              {simulation.noRouteCanForce
-                ? '일부 투입점이 목적지까지 갈 수 없습니다. 경로가 있는 투입점만 시뮬레이션을 진행합니다.'
-                : '자재가 목적지까지 갈 수 없습니다. 직선 흐름 방향이 맞물리지 않거나 경로가 끊겨 있습니다.'}
-            </p>
-            {simulation.noRouteCanForce ? (
-              <p className="mb-5 text-xs text-slate-400">
-                강제 진행 시 경로 없는 투입점은 자재를 투입하지 않습니다.
-              </p>
-            ) : (
-              <p className="mb-5 text-xs text-slate-400">
-                목적지(분기·회전·출고지정 직선)를 확인하고 회전 유닛 방향을 점검하세요.
-              </p>
-            )}
-            <div className="flex flex-wrap justify-end gap-2">
-              {simulation.noRouteCanForce ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={dismissNoRouteConfirmPopup}
-                    className="app-btn app-btn-secondary app-btn-sm"
-                  >
-                    취소
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleForceStartSimulation}
-                    className="app-btn app-btn-secondary app-btn-sm border-amber-500/50 text-amber-200 hover:bg-amber-500/10"
-                  >
-                    강제 진행
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  onClick={dismissNoRouteConfirmPopup}
-                  className="rounded border border-slate-600 bg-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-600"
-                >
-                  확인
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {simulation.inboundNoRouteNotice && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          onClick={() => simulation.dismissInboundNoRouteNotice()}
-        >
-          <div
-            className="mx-4 w-full max-w-sm rounded-lg border border-amber-500/60 bg-slate-800 p-6 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="mb-1 text-base font-bold text-amber-300">물류 배치 이상 (시뮬 중)</p>
-            <p className="mb-5 text-sm leading-relaxed text-slate-300">
-              시뮬레이션 중 자재가 목적지까지 갈 수 없는 상황이 감지됐습니다.
-              경로가 끊겼거나 우회 경로 탐색에 실패했습니다.
-              자재는 갈 수 있는 마지막 모듈에서 대기합니다.
-            </p>
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={() => simulation.dismissInboundNoRouteNotice()}
                 className="rounded border border-slate-600 bg-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-600"
               >
                 확인

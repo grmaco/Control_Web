@@ -210,7 +210,6 @@ export function usePathSimulation(
   const [warehouseFullNotice, setWarehouseFullNotice] = useState(false)
   const [inboundLineFullBlocked, setInboundLineFullBlocked] = useState(false)
   const [inboundLineFullNotice, setInboundLineFullNotice] = useState(false)
-  const [inboundNoRouteNotice, setInboundNoRouteNotice] = useState(false)
   const [inboundDestinationByEntryId, setInboundDestinationByEntryId] = useState<
     Record<string, string>
   >({})
@@ -224,8 +223,6 @@ export function usePathSimulation(
   const injectSeqRef = useRef(0)
   const entryVacancyRef = useRef<Record<string, number>>({})
   const depositedLoadIdsRef = useRef<Set<string>>(new Set())
-  /** 갈 곳 없음 팝업 — 세션당 1회만 */
-  const noRouteNoticeShownRef = useRef(false)
   const warehouseFillCountsRef = useRef(warehouseFillCounts)
   warehouseFillCountsRef.current = warehouseFillCounts
   const selectedSourceUnitIdsRef = useRef(selectedSourceUnitIds)
@@ -330,25 +327,12 @@ export function usePathSimulation(
     () => [...sourceIds].sort().join('|'),
     [sourceIds],
   )
-  const initializedSourceKeyRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (sourceIds.length === 0) {
-      initializedSourceKeyRef.current = sourceIdsKey
-      setSelectedSourceUnitIds([])
-      return
-    }
-    // 새 소스 집합(라인 전환·최초 로드) → 투입점(IN) 전부 기본 선택.
-    // 이후 사용자가 개별 토글하면 유지(키가 바뀔 때만 전체 선택으로 재설정).
-    if (initializedSourceKeyRef.current !== sourceIdsKey) {
-      initializedSourceKeyRef.current = sourceIdsKey
-      setSelectedSourceUnitIds(mode === 'inbound' ? [...sourceIds] : [])
-      return
-    }
     setSelectedSourceUnitIds((current) =>
       current.filter((id) => sourceIds.includes(id)),
     )
-  }, [mode, sourceIds, sourceIdsKey])
+  }, [sourceIds, sourceIdsKey])
 
   const clearTimer = useCallback(() => {
     if (timerRef.current != null) {
@@ -639,8 +623,6 @@ export function usePathSimulation(
       setWarehouseFullNotice(false)
       setInboundLineFullBlocked(false)
       setInboundLineFullNotice(false)
-      setInboundNoRouteNotice(false)
-      noRouteNoticeShownRef.current = false
 
       const nextPlan = buildMultiPathPlan(
         activeLine,
@@ -828,14 +810,7 @@ export function usePathSimulation(
     setWarehouseFullNotice(false)
     setInboundLineFullBlocked(false)
     setInboundLineFullNotice(false)
-    setInboundNoRouteNotice(false)
-    noRouteNoticeShownRef.current = false
     setPreserveUnitStatus(false)
-    // 초기화 — 시뮬 타이밍(투입·이송·출고)도 기본값으로 복원.
-    // (변경한 이송 시간이 초기화 후 연속투입에 계속 남는 문제 방지)
-    setInputIntervalSecState(DEFAULT_SIM_INPUT_INTERVAL_SEC)
-    setDischargeIntervalSecState(DEFAULT_SIM_DISCHARGE_INTERVAL_SEC)
-    setTransitIntervalSecState(DEFAULT_SIM_TRANSIT_INTERVAL_SEC)
     simTickRef.current = 0
     lastInjectTickRef.current = 0
     injectSeqRef.current = 0
@@ -985,15 +960,6 @@ export function usePathSimulation(
         }
 
         const advanced = nextLoads
-
-        // 자재가 목적지까지 경로가 끊겨 갈 곳이 없으면 1회 팝업
-        if (
-          !noRouteNoticeShownRef.current &&
-          advanced.some((load) => load.noRoute && !load.complete)
-        ) {
-          noRouteNoticeShownRef.current = true
-          setInboundNoRouteNotice(true)
-        }
 
         if (
           continuousInputActiveRef.current &&
@@ -1386,30 +1352,6 @@ export function usePathSimulation(
     )
   }, [loads, mode, selectedSourceUnitIds, simulationLine, warehouseFillCounts])
 
-  /** 시작 전 경로 없음 감지
-   *  - noRouteDetected: 투입점 일부 이상이 목적지까지 도달 불가 (완전·부분 모두)
-   *  - noRouteCanForce: 일부는 경로 있어 강제 시작 시 실제로 동작 가능 (부분 실패만)
-   */
-  const { noRouteDetected, noRouteCanForce } = useMemo(() => {
-    if (mode !== 'inbound' || selectedSourceUnitIds.length === 0) {
-      return { noRouteDetected: false, noRouteCanForce: false }
-    }
-    const checkPlan = buildMultiPathPlan(
-      simulationLine,
-      mode,
-      selectedSourceUnitIds,
-      inboundDestinationByEntryId,
-    )
-    const planLoads = checkPlan?.loads ?? []
-    const routedCount = planLoads.filter((load) => !load.clearsTestMaterial).length
-    const detected = routedCount < selectedSourceUnitIds.length
-    return {
-      noRouteDetected: detected,
-      // 일부라도 경로가 있어야 강제 진행 시 자재가 실제로 움직임
-      noRouteCanForce: detected && routedCount > 0,
-    }
-  }, [inboundDestinationByEntryId, mode, selectedSourceUnitIds, simulationLine])
-
   const progressSummary = useMemo(
     () => buildSimulationProgressSummary(loads, incompleteLoadCount),
     [loads, incompleteLoadCount],
@@ -1565,10 +1507,6 @@ export function usePathSimulation(
     inboundLineFullNotice,
     inboundLineCurrentlyFull,
     dismissInboundLineFullNotice: () => setInboundLineFullNotice(false),
-    noRouteDetected,
-    noRouteCanForce,
-    inboundNoRouteNotice,
-    dismissInboundNoRouteNotice: () => setInboundNoRouteNotice(false),
     storageTargetId,
     entries: sources,
     selectedEntryUnitIds: selectedSourceUnitIds,

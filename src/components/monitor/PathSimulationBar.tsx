@@ -374,7 +374,7 @@ export function PathSimulationBar({
             selectedSourceUnitIds.length > 0 &&
             onSetInboundDestination ? (
               <div>
-                <p className="mb-1.5 text-[10px] text-slate-500">목적지 (분기·회전·종료)</p>
+                <p className="mb-1.5 text-[10px] text-slate-500">목적지 (분기)</p>
                 <div className="space-y-2">
                   {selectedSourceUnitIds.map((entryId) => {
                     const entry = sources.find((source) => source.id === entryId)
@@ -383,7 +383,7 @@ export function PathSimulationBar({
                     if (destinations.length === 0) {
                       return (
                         <p key={entryId} className="text-xs text-amber-300">
-                          {entry ? unitDisplayCode(entry) : entryId}: 도달 가능한 목적지 없음
+                          {entry ? unitDisplayCode(entry) : entryId}: 도달 가능한 분기 없음
                         </p>
                       )
                     }
@@ -441,14 +441,10 @@ export function PathSimulationBar({
                     <span className="text-right text-slate-300" title={`${summary.moduleCount}구간`}>
                       {summary.label}
                     </span>
-                    <span className="flex flex-col items-center">
-                      <TackTimeFlowArrow />
-                      <span className="mt-0.5 text-[10px] leading-none text-slate-500">
-                        {summary.moduleCount}구간
-                      </span>
-                    </span>
+                    <TackTimeFlowArrow />
                     <span className="truncate text-slate-300" title={`${summary.moduleCount}구간`}>
                       {summary.exitLabel}
+                      <span className="ml-1 text-[10px] text-slate-500">({summary.moduleCount}구간)</span>
                     </span>
                     <span className="shrink-0 text-right font-medium text-violet-300">
                       {formatTackTimeSec(summary.tackTimeSec)}

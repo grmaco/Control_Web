@@ -99,7 +99,6 @@ export function buildCalloutDisplayInfo(
   const showsSimDestination =
     unit.type === 'junction' ||
     unit.type === 'turn' ||
-    unit.flowRole === 'exit' ||
     isEntry
   const simDestination =
     showsSimDestination && hasCst && options?.simDestination?.trim()

@@ -105,8 +105,6 @@ export interface PathSimulationLoad {
   transitTicks?: number
   /** 연속 투입으로 생성된 자재 */
   continuousInject?: boolean
-  /** 우회 불가 — 현재 위치에서 목적지까지 도달 경로 없음 (갈 곳 없음) */
-  noRoute?: boolean
 }
 
 /** 모니터 — 다중 투입점 동시 시뮬레이션 계획 */
