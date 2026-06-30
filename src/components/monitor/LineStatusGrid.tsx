@@ -249,31 +249,13 @@ export function LineStatusGrid({
     [flowCallouts],
   )
   const [pinnedUnitId, setPinnedUnitId] = useState<string | null>(null)
-  const [hoveredUnitId, setHoveredUnitId] = useState<string | null>(null)
   const touchLayout = useTouchLayout()
 
   useEffect(() => {
     if (calloutDeselectToken > 0) {
       setPinnedUnitId(null)
-      setHoveredUnitId(null)
     }
   }, [calloutDeselectToken])
-
-  const handleMapPointerLeave = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (touchLayout) return
-    const next = event.relatedTarget
-    if (next instanceof Node && event.currentTarget.contains(next)) return
-    if (next instanceof Element && next.closest(`.${FLOW_CALLOUT_PANEL_CLASS}`)) return
-    setHoveredUnitId(null)
-  }, [touchLayout])
-
-  const handleUnitPointerEnter = useCallback(
-    (unitId: string) => {
-      if (touchLayout) return
-      setHoveredUnitId(unitId)
-    },
-    [touchLayout],
-  )
 
   const handleUnitPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>, unitId: string) => {
@@ -284,11 +266,8 @@ export function LineStatusGrid({
   )
 
   const peekUnitIds = useMemo(() => {
-    const ids: string[] = []
-    if (pinnedUnitId) ids.push(pinnedUnitId)
-    if (hoveredUnitId && hoveredUnitId !== pinnedUnitId) ids.push(hoveredUnitId)
-    return ids
-  }, [hoveredUnitId, pinnedUnitId])
+    return pinnedUnitId ? [pinnedUnitId] : []
+  }, [pinnedUnitId])
 
   const visibleCallouts = useMemo(() => {
     if (!showFlowCallouts) return []
@@ -347,7 +326,7 @@ export function LineStatusGrid({
   return (
     <div
       className={`relative overflow-visible transition-transform duration-300 ${className ?? ''}`}
-      onPointerLeave={showFlowCallouts ? handleMapPointerLeave : undefined}
+      onPointerLeave={undefined}
       style={
         is25DView
           ? {
@@ -473,7 +452,6 @@ export function LineStatusGrid({
               <div
                 className={`${FLOW_UNIT_PEEK_HIT_CLASS} absolute inset-0 z-[30] touch-none`}
                 aria-hidden
-                onPointerEnter={() => handleUnitPointerEnter(unit.id)}
                 onPointerDown={(event) => handleUnitPointerDown(event, unit.id)}
               />
             ) : null}
@@ -615,7 +593,7 @@ export function LineStatusGrid({
       {showFlowCallouts && visibleCallouts.length > 0 ? (
         <FlowCalloutOverlay
           callouts={visibleCallouts}
-          peekUnitId={pinnedUnitId ?? hoveredUnitId}
+          peekUnitId={pinnedUnitId}
           unitById={unitById}
           flowByUnitId={flowByUnitId}
           unitRuntime={unitRuntime}

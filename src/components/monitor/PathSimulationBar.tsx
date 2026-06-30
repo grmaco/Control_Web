@@ -34,6 +34,12 @@ interface PathSimulationBarProps {
   onInputIntervalSecChange: (value: number) => void
   onDischargeIntervalSecChange: (value: number) => void
   onTransitIntervalSecChange: (value: number) => void
+  turn90Sec?: number
+  turn180Sec?: number
+  turn270Sec?: number
+  onTurn90SecChange?: (value: number) => void
+  onTurn180SecChange?: (value: number) => void
+  onTurn270SecChange?: (value: number) => void
   tackTimeSummaries?: LoadTackTimeSummary[]
   mapControls?: ReactNode
   continuousInputActive?: boolean
@@ -73,12 +79,10 @@ export function PathSimulationPlaybackControls({
   const normalSessionActive = sessionActive && !continuousInputActive
 
   return (
-    <div className="flex flex-wrap items-center justify-end gap-1 border-b border-slate-800 bg-slate-900/80 px-3 py-2 sm:px-4">
+    <div className="grid grid-cols-3 gap-2 border-b border-slate-800 bg-slate-900/80 px-3 py-2 sm:grid-cols-6 sm:px-4">
       <SimButton
         label="시작"
-        disabled={
-          !canSimulate || isBusy || continuousInputActive || normalSessionActive
-        }
+        disabled={!canSimulate || isBusy || continuousInputActive || normalSessionActive}
         onClick={onStart}
         accent
       />
@@ -89,16 +93,19 @@ export function PathSimulationPlaybackControls({
           onClick={onStartContinuous}
           accent={continuousInputActive ? 'cyan' : undefined}
         />
-      ) : null}
-      {isBusy ? (
-        <SimButton label="일시정지" onClick={onPause} />
       ) : (
-        <SimButton
-          label="재개"
-          disabled={!plan || status === 'idle' || status === 'complete'}
-          onClick={onResume}
-        />
+        <div />
       )}
+      <SimButton
+        label="일시정지"
+        disabled={!isBusy}
+        onClick={onPause}
+      />
+      <SimButton
+        label="재개"
+        disabled={!plan || status === 'idle' || status === 'complete' || isBusy}
+        onClick={onResume}
+      />
       <SimButton label="한 칸" disabled={!canSimulate} onClick={onStepForward} />
       <SimButton label="초기화" disabled={status === 'idle' && !plan} onClick={onReset} />
     </div>
@@ -128,6 +135,12 @@ export function PathSimulationBar({
   onInputIntervalSecChange,
   onDischargeIntervalSecChange,
   onTransitIntervalSecChange,
+  turn90Sec = 1.0,
+  turn180Sec = 1.6,
+  turn270Sec = 2.2,
+  onTurn90SecChange,
+  onTurn180SecChange,
+  onTurn270SecChange,
   tackTimeSummaries = [],
   mapControls,
   continuousInputActive = false,
@@ -305,6 +318,16 @@ export function PathSimulationBar({
               onChange={onDischargeIntervalSecChange}
             />
           </div>
+          {onTurn90SecChange && (
+            <div className="mt-2 border-t border-slate-700/60 pt-2">
+              <p className="mb-2 text-center text-[10px] text-slate-500">회전 유닛 통과 (초)</p>
+              <div className="flex flex-wrap items-end justify-center gap-3">
+                <TimingField label="90°" hint="90° 꺾임" value={turn90Sec} disabled={timingLocked} onChange={onTurn90SecChange} />
+                <TimingField label="180°" hint="직통" value={turn180Sec} disabled={timingLocked} onChange={onTurn180SecChange ?? (() => {})} />
+                <TimingField label="270°" hint="270° 역방향" value={turn270Sec} disabled={timingLocked} onChange={onTurn270SecChange ?? (() => {})} />
+              </div>
+            </div>
+          )}
         </SimPanel>
 
         <SimPanel
@@ -317,14 +340,16 @@ export function PathSimulationBar({
           <div className="w-full space-y-2.5">
             <div className="flex w-full gap-2">
               <ModeButton
-                label="투입 (IN)"
+                icon={<InboundIcon />}
+                label="투입"
                 active={mode === 'inbound'}
                 disabled={isBusy}
                 wide
                 onClick={() => onModeChange('inbound')}
               />
               <ModeButton
-                label="출고 (OUT)"
+                icon={<OutboundIcon />}
+                label="출고"
                 active={mode === 'outbound'}
                 disabled={isBusy || !SIM_STK_IO_ENABLED}
                 wide
@@ -423,32 +448,23 @@ export function PathSimulationBar({
           summary={tackSummary}
         >
           {tackTimeSummaries.length > 0 ? (
-            <div className="w-full">
-              <ul className="space-y-1">
-                {tackTimeSummaries.map((summary) => (
-                  <li
-                    key={summary.loadId}
-                    className="grid grid-cols-[4.5rem_3.5rem_minmax(0,1fr)_auto] items-center gap-x-2 text-sm"
-                  >
-                    <span className="text-right text-slate-300" title={`${summary.moduleCount}구간`}>
-                      {summary.label}
-                    </span>
-                    <TackTimeFlowArrow />
-                    <span className="truncate text-slate-300" title={`${summary.moduleCount}구간`}>
-                      {summary.exitLabel}
-                      <span className="ml-1 text-[10px] text-slate-500">({summary.moduleCount}구간)</span>
-                    </span>
-                    <span className="shrink-0 text-right font-medium text-violet-300">
+            <div className="w-full space-y-3">
+              {tackTimeSummaries.map((summary) => (
+                <div key={summary.loadId}>
+                  <ConstellationPath summary={summary} />
+                  <div className="mt-1 flex items-center justify-between px-1">
+                    <span className="text-[10px] text-slate-500">{summary.moduleCount}구간</span>
+                    <span className="font-medium text-violet-300 text-sm">
                       {formatTackTimeSec(summary.tackTimeSec)}
-                      <span className="mt-0.5 block text-[10px] font-normal text-slate-500">
-                        예상 {formatTackTimeSec(summary.estimatedTackTimeSec)}
+                      <span className="ml-1 text-[10px] font-normal text-slate-500">
+                        (예상 {formatTackTimeSec(summary.estimatedTackTimeSec)})
                       </span>
                     </span>
-                  </li>
-                ))}
-              </ul>
-              <p className="mt-1.5 text-[10px] text-slate-600">
-                실측 0.1초 단위 · 구간당 약 {PATH_SIMULATION_STEP_MS / 1000}초(틱) — 렉이 아니라 경로 구간 수에 비례
+                  </div>
+                </div>
+              ))}
+              <p className="text-[10px] text-slate-600">
+                실측 0.1초 단위 · 구간당 약 {PATH_SIMULATION_STEP_MS / 1000}초(틱)
               </p>
             </div>
           ) : (
@@ -647,12 +663,14 @@ function TackTimeFlowArrow() {
 }
 
 function ModeButton({
+  icon,
   label,
   active,
   disabled,
   wide = false,
   onClick,
 }: {
+  icon?: React.ReactNode
   label: string
   active: boolean
   disabled?: boolean
@@ -664,7 +682,7 @@ function ModeButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`min-h-[2.5rem] rounded border py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
+      className={`flex min-h-[2.75rem] items-center justify-center gap-1.5 rounded border py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40 ${
         wide ? 'flex-1 px-3' : 'px-4'
       } ${
         active
@@ -672,8 +690,72 @@ function ModeButton({
           : 'border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700'
       }`}
     >
-      {label}
+      {icon}
+      <span>{label}</span>
     </button>
+  )
+}
+
+function InboundIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+      <rect x="2" y="9" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M7 2v8M4 7l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function OutboundIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+      <rect x="2" y="9" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M7 9V1M4 4l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function ConstellationPath({ summary }: { summary: LoadTackTimeSummary }) {
+  const nodes = [summary.label, ...summary.waypointLabels, summary.exitLabel]
+  const n = nodes.length
+  const W = 240
+  const H = 64
+  const cy = 28
+  const r = 6
+  const xs = nodes.map((_, i) => (n === 1 ? W / 2 : (i / (n - 1)) * (W - r * 4) + r * 2))
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" aria-hidden>
+      {xs.slice(0, -1).map((x, i) => {
+        const x2 = xs[i + 1]!
+        const pid = `cpath-${summary.loadId}-${i}`
+        return (
+          <g key={i}>
+            <line x1={x} y1={cy} x2={x2} y2={cy} stroke="#334155" strokeWidth="1.5" />
+            <path id={pid} d={`M${x},${cy} L${x2},${cy}`} fill="none" />
+            <circle r="2.5" fill="#a78bfa">
+              <animateMotion dur="1.8s" repeatCount="indefinite" begin={`${i * 0.45}s`}>
+                <mpath href={`#${pid}`} />
+              </animateMotion>
+            </circle>
+          </g>
+        )
+      })}
+      {nodes.map((label, i) => {
+        const x = xs[i]!
+        const isEntry = i === 0
+        const isExit = i === n - 1
+        const fill = isEntry ? '#0e7490' : isExit ? '#92400e' : '#3730a3'
+        const stroke = isEntry ? '#22d3ee' : isExit ? '#f59e0b' : '#818cf8'
+        return (
+          <g key={i}>
+            <circle cx={x} cy={cy} r={r} fill={fill} stroke={stroke} strokeWidth="1.5" />
+            <text x={x} y={cy + r + 13} textAnchor="middle" fontSize="9" fill="#94a3b8">
+              {label}
+            </text>
+          </g>
+        )
+      })}
+    </svg>
   )
 }
 
@@ -700,7 +782,7 @@ function SimButton({
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`rounded border px-2.5 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40 ${accentClass}`}
+      className={`w-full rounded border py-2.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${accentClass}`}
     >
       {label}
     </button>

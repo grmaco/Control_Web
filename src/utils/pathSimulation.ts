@@ -40,6 +40,7 @@ import {
   inboundDestinationDisplayName,
   planInboundPathFromFlowTraversal,
 } from './simulationDestination'
+import { turnRelativeAngleDegrees } from './turnArc'
 import {
   astarTransportPath,
   buildInboundTransportGraph,
@@ -1358,6 +1359,8 @@ export interface SimulationStepTiming {
   continuousInputActive?: boolean
   /** STK 적재 슬롯 — 만재 시 투입 자재 STK 진입 차단 */
   warehouseFillCounts?: Record<string, number>
+  /** 회전 유닛 각도별 통과 소요시간 (초) */
+  turnTransitSec?: { 90: number; 180: number; 270: number }
 }
 
 /** 시뮬 투입·이송·출고 시간 입력값 (0.1~60초) */
@@ -1402,6 +1405,48 @@ function resolveEntryTicksRequired(
 ): number {
   if (timing?.continuousInputActive && load.continuousInject) return 1
   return entryTicksRequired
+}
+
+function gridDeltaToFlowDir(dx: number, dy: number): 'N' | 'E' | 'S' | 'W' | null {
+  if (dx === 1 && dy === 0) return 'E'
+  if (dx === -1 && dy === 0) return 'W'
+  if (dx === 0 && dy === 1) return 'S'
+  if (dx === 0 && dy === -1) return 'N'
+  return null
+}
+
+function getTurnTraversalAngle(
+  load: PathSimulationLoad,
+  unitMap: Map<string, ConveyorUnit>,
+): 90 | 180 | 270 | null {
+  const idx = load.stepIndex
+  const curr = unitMap.get(load.pathUnitIds[idx] ?? '')
+  if (!curr || curr.type !== 'turn') return null
+  const prev = unitMap.get(load.pathUnitIds[idx - 1] ?? '')
+  const next = unitMap.get(load.pathUnitIds[idx + 1] ?? '')
+  if (!prev || !next) return null
+  const inDir = gridDeltaToFlowDir(curr.gridX - prev.gridX, curr.gridY - prev.gridY)
+  const outDir = gridDeltaToFlowDir(next.gridX - curr.gridX, next.gridY - curr.gridY)
+  if (!inDir || !outDir) return null
+  const angle = turnRelativeAngleDegrees(inDir, outDir)
+  if (angle === 90 || angle === 180 || angle === 270) return angle
+  return null
+}
+
+function resolveTransitTicksForLoad(
+  load: PathSimulationLoad,
+  baseTransitTicks: number,
+  timing: SimulationStepTiming,
+  unitMap?: Map<string, ConveyorUnit>,
+): number {
+  if (unitMap && timing.turnTransitSec) {
+    const angle = getTurnTraversalAngle(load, unitMap)
+    if (angle != null) {
+      const sec = timing.turnTransitSec[angle]
+      if (sec != null) return requiredTransitTicks(sec)
+    }
+  }
+  return baseTransitTicks
 }
 
 export function applySimulationStep(
@@ -1585,7 +1630,8 @@ export function advanceSimulationLoads(
       continue
     }
 
-    if (load.stepIndex > 0 && load.transitTicks < transitTicksRequired) {
+    const loadTransitTicks = resolveTransitTicksForLoad(load, transitTicksRequired, timing, unitMap)
+    if (load.stepIndex > 0 && load.transitTicks < loadTransitTicks) {
       load.transitTicks += 1
       load.waiting = true
     }
@@ -1612,7 +1658,7 @@ export function advanceSimulationLoads(
   for (let i = 0; i < next.length; i += 1) {
     const load = next[i]!
     if (!load.released || load.complete || isAtDestination(load)) continue
-    if (!isReadyToLeaveModule(load, entryTicksRequired, transitTicksRequired, timing)) {
+    if (!isReadyToLeaveModule(load, entryTicksRequired, resolveTransitTicksForLoad(load, transitTicksRequired, timing, unitMap), timing)) {
       load.waiting = true
       continue
     }
@@ -1999,6 +2045,8 @@ export interface LoadTackTimeSummary {
   tackTimeSec: number
   estimatedTackTimeSec: number
   moduleCount: number
+  /** 경로 중간 분기·회전 유닛 레이블 (별자리 노드 표시용) */
+  waypointLabels: string[]
 }
 
 export const MIN_TACK_TIME_SEC = 0
@@ -2151,6 +2199,12 @@ export function buildLoadTackTimeSummaries(
 
       const estimatedTackTimeSec = computeLoadTackTimeSec(load.pathUnitIds.length, timing)
 
+      const waypointLabels = load.pathUnitIds
+        .slice(1, -1)
+        .map((id) => unitMap.get(id))
+        .filter((u): u is ConveyorUnit => u != null && (u.type === 'junction' || u.type === 'turn'))
+        .map((u) => unitDisplayCode(u))
+
       return {
         loadId: load.id,
         entryUnitId: load.entryUnitId,
@@ -2159,6 +2213,7 @@ export function buildLoadTackTimeSummaries(
         tackTimeSec: estimatedTackTimeSec,
         estimatedTackTimeSec,
         moduleCount: load.pathUnitIds.length,
+        waypointLabels,
       }
     })
 }

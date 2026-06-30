@@ -20,7 +20,7 @@ export function MonitorMapControls({
   onFullMap,
 }: MonitorMapControlsProps) {
   return (
-    <div className="grid w-full grid-cols-3 grid-rows-[2.75rem_2.75rem] gap-2">
+    <div className="grid w-full grid-cols-2 grid-rows-[2.75rem_2.75rem] gap-2">
       <MapControlButton
         label={is25DView ? '2D 보기' : '3D 보기'}
         active={is25DView}
@@ -28,15 +28,13 @@ export function MonitorMapControls({
         block
       />
       <MapControlButton
-        label={hideModuleNames ? '이름 보기' : '이름 숨기기'}
+        label={hideModuleNames ? '이름 보기' : '숨기기'}
         active={hideModuleNames}
         onClick={onToggleHideModuleNames}
         block
       />
-      <MapControlButton label="+" onClick={onZoomIn} zoom block />
       <MapControlButton label="라인 맞춤" onClick={onLineFit} block />
       <MapControlButton label="전체 맵" onClick={onFullMap} block />
-      <MapControlButton label="−" onClick={onZoomOut} zoom block />
     </div>
   )
 }

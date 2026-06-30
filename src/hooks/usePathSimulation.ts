@@ -204,6 +204,9 @@ export function usePathSimulation(
   const [transitIntervalSec, setTransitIntervalSecState] = useState(
     DEFAULT_SIM_TRANSIT_INTERVAL_SEC,
   )
+  const [turn90Sec, setTurn90SecState] = useState(1.0)
+  const [turn180Sec, setTurn180SecState] = useState(1.6)
+  const [turn270Sec, setTurn270SecState] = useState(2.2)
   const [continuousInputActive, setContinuousInputActive] = useState(false)
   const [gatherProbes, setGatherProbes] = useState<GatherProbeState[]>([])
   const [warehouseFillCounts, setWarehouseFillCounts] = useState<Record<string, number>>({})
@@ -305,6 +308,10 @@ export function usePathSimulation(
     })
   }, [line, mode, selectedSourceUnitIds])
 
+  const setTurn90Sec = useCallback((v: number) => setTurn90SecState(clampSimIntervalSec(v, 1.0)), [])
+  const setTurn180Sec = useCallback((v: number) => setTurn180SecState(clampSimIntervalSec(v, 1.6)), [])
+  const setTurn270Sec = useCallback((v: number) => setTurn270SecState(clampSimIntervalSec(v, 2.2)), [])
+
   const stepTiming = useMemo(
     () => ({
       inputIntervalSec: continuousInputActive
@@ -313,8 +320,9 @@ export function usePathSimulation(
       dischargeIntervalSec,
       transitIntervalSec,
       continuousInputActive,
+      turnTransitSec: { 90: turn90Sec, 180: turn180Sec, 270: turn270Sec },
     }),
-    [continuousInputActive, dischargeIntervalSec, inputIntervalSec, transitIntervalSec],
+    [continuousInputActive, dischargeIntervalSec, inputIntervalSec, transitIntervalSec, turn90Sec, turn180Sec, turn270Sec],
   )
 
   const storageTargetId = useMemo(() => {
@@ -329,9 +337,11 @@ export function usePathSimulation(
   )
 
   useEffect(() => {
-    setSelectedSourceUnitIds((current) =>
-      current.filter((id) => sourceIds.includes(id)),
-    )
+    setSelectedSourceUnitIds((current) => {
+      const filtered = current.filter((id) => sourceIds.includes(id))
+      if (filtered.length === 0 && sourceIds.length > 0) return [...sourceIds]
+      return filtered.length !== current.length ? filtered : current
+    })
   }, [sourceIds, sourceIdsKey])
 
   const clearTimer = useCallback(() => {
@@ -1486,6 +1496,12 @@ export function usePathSimulation(
     setDischargeIntervalSec,
     transitIntervalSec,
     setTransitIntervalSec,
+    turn90Sec,
+    setTurn90Sec,
+    turn180Sec,
+    setTurn180Sec,
+    turn270Sec,
+    setTurn270Sec,
     incompleteLoadCount,
     tackTimeSummaries,
     continuousInputActive,
