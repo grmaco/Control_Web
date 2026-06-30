@@ -693,6 +693,15 @@ function buildFlowChain(
   return [entryId]
 }
 
+/** 직선 출고점에 연동된 포트 유닛이 있는지 — 있으면 자재 유지, 없으면 출고 후 사라짐 */
+function exitUnitHasLinkedPort(line: ConveyorLine, unitId: string): boolean {
+  for (const u of line.units) {
+    if (!isPortUnit(u)) continue
+    if (getPortProperties(u)?.linkedUnitId === unitId) return true
+  }
+  return false
+}
+
 /** 투입점 → 선택 목적지(분기) 또는 최원 분기 목적지 */
 export function planInboundLoadPath(
   line: ConveyorLine,
@@ -722,12 +731,13 @@ export function planInboundLoadPath(
     const destUnit = traversal.destinationUnit
     const destLabel = inboundDestinationDisplayName(destUnit)
     const isExitDest = destUnit.flowRole === 'exit'
+    const exitRetain = isExitDest && exitUnitHasLinkedPort(line, destUnit.id)
     const autoDest = !destinationUnitId || destinationUnitId !== traversal.destinationUnitId
     return {
       entryUnitId,
       routingUnitId: traversal.destinationUnitId,
       targetStkId: null,
-      targetExitId: isExitDest ? traversal.destinationUnitId : null,
+      targetExitId: isExitDest && !exitRetain ? traversal.destinationUnitId : null,
       pathUnitIds,
       previewPathUnitIds: traversal.previewTransitUnitIds,
       message: autoDest
@@ -1059,7 +1069,6 @@ function requiresDischargeDwellAtCurrentStep(
   if (isPortUnit(unit)) {
     return (unit.portDirection ?? 'IN') === 'OUT'
   }
-  if (unit.flowRole === 'exit') return true
   if (load.targetExitId === currentId) return true
   return false
 }
