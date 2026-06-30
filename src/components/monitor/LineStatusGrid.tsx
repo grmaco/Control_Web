@@ -27,7 +27,24 @@ import { StorageConveyorCell } from './StorageConveyorCell'
 import { ContinuousInputGatherOverlay } from './ContinuousInputGatherOverlay'
 import type { GatherProbeState } from '../../utils/continuousInputGather'
 import type { PathSimulationLoad } from '../../types/unitProperties'
+import { listSimulatableEntries, planMultiInboundLoadPaths } from '../../utils/pathSimulation'
 import { useTouchLayout } from '../../hooks/useTouchLayout'
+
+/** 시뮬 미가동 시에도 화살표가 시뮬 방향을 따르도록 — 투입점→최원 목적지 기본 경로 */
+function defaultInboundFlowPaths(
+  line: ConveyorLine,
+): Array<{ pathUnitIds: string[]; stepIndex: number }> {
+  const entryIds = listSimulatableEntries(line).map((unit) => unit.id)
+  if (entryIds.length === 0) return []
+  const plan = planMultiInboundLoadPaths(line, entryIds)
+  return plan.loads
+    .filter((load) => load.pathUnitIds.length > 1)
+    .map((load) => ({
+      pathUnitIds: load.pathUnitIds,
+      // 전체 경로를 덧씌우기 위해 마지막 칸까지
+      stepIndex: load.pathUnitIds.length - 1,
+    }))
+}
 
 interface LineStatusGridProps {
   line: ConveyorLine
@@ -217,14 +234,23 @@ export function LineStatusGrid({
   // 롤러 방향 애니메이션에도 필요하므로 항상 계산
   const flowByUnitId = useMemo(() => {
     let result = computeMinimapFlowMap(line)
-    if (simulationLoads.length === 0) return result
-    const sortedLoads = [...simulationLoads].sort((a, b) => a.stepIndex - b.stepIndex)
-    for (const load of sortedLoads) {
+    // 시뮬 가동 중이면 실제 자재 경로, 미가동(기본 상태)이면 기본 투입 경로를 덧씌워
+    // 화살표가 항상 시뮬레이션 흐름 방향을 따르게 한다.
+    const overlays =
+      simulationLoads.length > 0
+        ? simulationLoads.map((load) => ({
+            pathUnitIds: load.pathUnitIds,
+            stepIndex: load.stepIndex,
+          }))
+        : defaultInboundFlowPaths(line)
+    if (overlays.length === 0) return result
+    const sorted = [...overlays].sort((a, b) => a.stepIndex - b.stepIndex)
+    for (const overlay of sorted) {
       result = overlaySimulationPathOnFlowMap(
         line,
         result,
-        load.pathUnitIds,
-        load.stepIndex,
+        overlay.pathUnitIds,
+        overlay.stepIndex,
       )
     }
     return result

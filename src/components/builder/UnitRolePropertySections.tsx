@@ -174,7 +174,11 @@ export function TransitLinkedUnitsSection({ line, unit, onChange }: RoleSections
             <label key={candidate.id} className="flex items-center gap-2 text-slate-300">
               <input
                 type="checkbox"
-                checked={props.linkedUnitIds.includes(candidate.id)}
+                checked={
+                  props.linkedUnitIds.includes(candidate.id) ||
+                  // 후보가 하나뿐이면 시뮬이 자동으로 그 유닛을 연동(fallback)하므로 기본 체크
+                  (candidates.length === 1 && props.linkedUnitIds.length === 0)
+                }
                 onChange={(e) => toggleLinkedUnit(candidate.id, e.target.checked)}
               />
               {unitDisplayCode(candidate)}

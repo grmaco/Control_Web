@@ -1,6 +1,5 @@
 import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
 import { isPortUnit } from '../constants/conveyorTypes'
-import { isFlowCapableUnit } from './flowEntries'
 import { getOrthogonalNeighborUnits } from './units'
 import {
   getPortProperties,
@@ -57,15 +56,16 @@ export function listTransitLinkedFeederUnits(
   return listTransitLinkedUnitCandidates(line, unit)
 }
 
-/** 투입 목적지 후보 — flowRole=exit 종료점, 또는 연동 CV가 있는 분기·회전 */
+/** 투입 목적지 후보 — 분기·회전 유닛, 또는 출고지정(flowRole=exit) 직선 유닛 */
 export function isInboundJunctionDestination(
-  line: ConveyorLine,
+  _line: ConveyorLine,
   unit: ConveyorUnit,
 ): boolean {
-  if (unit.flowRole === 'exit' && isFlowCapableUnit(unit)) return true
-  if (!isTurnRoutingUnit(unit)) return false
-  if (getTransitLinkedUnitIds(line, unit).length > 0) return true
-  return listTransitLinkedFeederUnits(line, unit).length > 0
+  // 분기·회전 유닛: 항상 목적지 후보
+  if (unit.type === 'junction' || unit.type === 'turn') return true
+  // 직선 유닛: 출고지정(flowRole=exit)인 경우만
+  if (unit.type === 'straight' && unit.flowRole === 'exit') return true
+  return false
 }
 
 /** 분기 유닛이 포트와 인접하거나 분기 팔에 IN 포트 연동 CV가 있는지 */

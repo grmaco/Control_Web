@@ -1499,6 +1499,7 @@ export function advanceSimulationLoads(
   const next = dedupeSimulationLoadsById(loads).map((load) => ({
     ...load,
     waiting: false,
+    noRoute: false,
     entryTicks: load.entryTicks ?? 0,
     exitTicks: load.exitTicks ?? 0,
     transitTicks: load.transitTicks ?? 0,
@@ -1591,6 +1592,7 @@ export function advanceSimulationLoads(
       const reroute = tryRerouteInboundLoadPath(load, line, unitMap)
       if (reroute.blocked) {
         next[i]!.waiting = true
+        next[i]!.noRoute = true
         continue
       }
       if (reroute.pathUnitIds !== load.pathUnitIds) {

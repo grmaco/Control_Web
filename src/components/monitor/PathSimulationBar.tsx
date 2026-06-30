@@ -441,10 +441,14 @@ export function PathSimulationBar({
                     <span className="text-right text-slate-300" title={`${summary.moduleCount}구간`}>
                       {summary.label}
                     </span>
-                    <TackTimeFlowArrow />
+                    <span className="flex flex-col items-center">
+                      <TackTimeFlowArrow />
+                      <span className="mt-0.5 text-[10px] leading-none text-slate-500">
+                        {summary.moduleCount}구간
+                      </span>
+                    </span>
                     <span className="truncate text-slate-300" title={`${summary.moduleCount}구간`}>
                       {summary.exitLabel}
-                      <span className="ml-1 text-[10px] text-slate-500">({summary.moduleCount}구간)</span>
                     </span>
                     <span className="shrink-0 text-right font-medium text-violet-300">
                       {formatTackTimeSec(summary.tackTimeSec)}

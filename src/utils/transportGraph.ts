@@ -3,8 +3,8 @@ import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
 import { isFlowCapableUnit } from './flowEntries'
 import { getOrthogonalNeighborUnits } from './units'
 import { findUnitAtCell, getFootprintCells, getUnitFootprint } from './unitFootprint'
-import { getTurnOpenings } from './turnArc'
-import type { FlowDir } from './flowDirection'
+import { getEffectiveTurnOpenings } from './turnArc'
+import { computeMinimapFlowMap, type FlowDir, type UnitFlowDirs } from './flowDirection'
 
 const FLOW_DIR_DELTA: Record<FlowDir, readonly [number, number]> = {
   N: [0, -1],
@@ -58,13 +58,68 @@ function isStraightBridge(
   return inDir != null && inDir === outDir
 }
 
-/** 회전 유닛이 형상상 실제로 잇는 두 개구부 쪽 인접 유닛 ID */
+const lineFlowMapCache = new WeakMap<ConveyorLine, Map<string, UnitFlowDirs>>()
+
+/** 라인별 흐름맵 캐시 — 우회 매 틱 재계산 방지 (line 객체 단위, 편집 시 재계산) */
+function getLineFlowMap(line: ConveyorLine): Map<string, UnitFlowDirs> {
+  let fm = lineFlowMapCache.get(line)
+  if (!fm) {
+    fm = computeMinimapFlowMap(line)
+    lineFlowMapCache.set(line, fm)
+  }
+  return fm
+}
+
+/** 직선 컨베이어 흐름 축 — in/out 방향 기준 (H=가로, V=세로) */
+function straightFlowAxis(flow: UnitFlowDirs | undefined): 'H' | 'V' | null {
+  const dir = flow?.inDir ?? flow?.outDir
+  if (dir === 'E' || dir === 'W') return 'H'
+  if (dir === 'N' || dir === 'S') return 'V'
+  return null
+}
+
+function sideOnAxis(side: FlowDir, axis: 'H' | 'V'): boolean {
+  return axis === 'H' ? side === 'E' || side === 'W' : side === 'N' || side === 'S'
+}
+
+/**
+ * 직선↔직선만 흐름 축을 검사한다. 흐름이 다른 두 직선이 옆에 붙어 있어도
+ * (예: 가로 직선 CV12 ↔ 세로 직선 CV14) 수직 방향으로는 못 넘긴다.
+ *
+ * 단, 한쪽이라도 분기(junction)·회전(turn)이면 적용하지 않는다. 방향 전환은
+ * 분기·회전이 담당하므로, 분기에서 우회로(옆 라인)로 자재를 빼는 경로(예: CV05
+ * 오류 시 CV08 분기 → CV14 우회)까지 막지 않기 위함이다. 축이 계산되지 않은
+ * 직선은 과차단 방지로 통과를 허용한다.
+ */
+function straightFlowAllowsTraversal(
+  line: ConveyorLine,
+  fromUnit: ConveyorUnit,
+  toUnit: ConveyorUnit,
+): boolean {
+  // 양쪽이 모두 직선일 때만 흐름 축 제약 — 분기·회전이 끼면 허용
+  if (fromUnit.type !== 'straight' || toUnit.type !== 'straight') return true
+  const flowMap = getLineFlowMap(line)
+
+  if (fromUnit.type === 'straight') {
+    const axis = straightFlowAxis(flowMap.get(fromUnit.id))
+    const side = cardinalBetween(fromUnit, toUnit)
+    if (axis != null && side != null && !sideOnAxis(side, axis)) return false
+  }
+  if (toUnit.type === 'straight') {
+    const axis = straightFlowAxis(flowMap.get(toUnit.id))
+    const side = cardinalBetween(toUnit, fromUnit)
+    if (axis != null && side != null && !sideOnAxis(side, axis)) return false
+  }
+  return true
+}
+
+/** 회전 유닛이 형상상 실제로 잇는 개구부 쪽 인접 유닛 ID (사용자 설정 포함) */
 function turnOpeningNeighborIds(
   line: ConveyorLine,
   turn: ConveyorUnit,
 ): Set<string> {
   const ids = new Set<string>()
-  for (const dir of getTurnOpenings(turn.rotation)) {
+  for (const dir of getEffectiveTurnOpenings(turn)) {
     const [dx, dy] = FLOW_DIR_DELTA[dir]
     const cellUnit = findUnitAtCell(line.units, turn.gridX + dx, turn.gridY + dy)
     if (cellUnit) ids.add(cellUnit.id)
@@ -195,6 +250,8 @@ function listInboundGraphNeighborIds(
 
     // 인접하더라도 회전 유닛의 개구부가 아닌 변이면 통과 불가 (잘못된 점프 차단)
     if (!turnGeometryAllowsTraversal(line, unit, neighbor)) continue
+    // 직선은 자기 흐름 축으로만 — 흐름 다른 직선으로 수직 점프 차단
+    if (!straightFlowAllowsTraversal(line, unit, neighbor)) continue
 
     if (
       isInboundConveyorTransitNode(neighbor, neighborId, entryUnitId)
