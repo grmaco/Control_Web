@@ -558,6 +558,12 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
         onInputIntervalSecChange={simulation.setInputIntervalSec}
         onDischargeIntervalSecChange={simulation.setDischargeIntervalSec}
         onTransitIntervalSecChange={simulation.setTransitIntervalSec}
+        turn90Sec={simulation.turn90Sec}
+        turn180Sec={simulation.turn180Sec}
+        turn270Sec={simulation.turn270Sec}
+        onTurn90SecChange={simulation.setTurn90Sec}
+        onTurn180SecChange={simulation.setTurn180Sec}
+        onTurn270SecChange={simulation.setTurn270Sec}
         tackTimeSummaries={simulation.tackTimeSummaries}
         continuousInputActive={simulation.continuousInputActive}
         mapControlSummary={`${is25DView ? '3D' : '2D'} · ${hideModuleNames ? '이름 숨김' : '이름 표시'}`}
