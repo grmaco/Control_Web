@@ -374,7 +374,7 @@ export function PathSimulationBar({
             selectedSourceUnitIds.length > 0 &&
             onSetInboundDestination ? (
               <div>
-                <p className="mb-1.5 text-[10px] text-slate-500">목적지 (분기)</p>
+                <p className="mb-1.5 text-[10px] text-slate-500">목적지 (분기·회전·종료)</p>
                 <div className="space-y-2">
                   {selectedSourceUnitIds.map((entryId) => {
                     const entry = sources.find((source) => source.id === entryId)
@@ -383,7 +383,7 @@ export function PathSimulationBar({
                     if (destinations.length === 0) {
                       return (
                         <p key={entryId} className="text-xs text-amber-300">
-                          {entry ? unitDisplayCode(entry) : entryId}: 도달 가능한 분기 없음
+                          {entry ? unitDisplayCode(entry) : entryId}: 도달 가능한 목적지 없음
                         </p>
                       )
                     }

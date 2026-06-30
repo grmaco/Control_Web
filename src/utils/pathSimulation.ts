@@ -143,13 +143,18 @@ function finalizeConveyorSimulationPath(
   return finalizeSimulationPath(line, withWaypoints)
 }
 
-/** 투입 목적지 경로 — 그래프 최단경로(포트·STK 포함), 분기·턴 경유지 보정 */
+/** 투입 목적지 경로 — A* 물리 경로 사용 + 분기·턴 경유지 보강 */
 function finalizeInboundDestinationPath(
   line: ConveyorLine,
   pathUnitIds: string[],
 ): string[] {
   if (pathUnitIds.length === 0) return []
   const unitMap = new Map(line.units.map((unit) => [unit.id, unit]))
+  // pathUnitIds는 반송 그래프 A* 결과 — 물리적으로 인접(또는 STK 한 칸 브릿지)한
+  // 칸만 이어진 실제 경로다. 이를 buildInboundTransitPath의 물류순서(DFS) 슬라이스로
+  // 재구성하면, DFS가 한 가지를 끝까지 내려갔다가 다른 가지로 backtrack하는 순서를
+  // 직선 경로로 오인해 비인접 점프(예: CV05→CV09)가 생긴다. A* 경로를 그대로 쓰고
+  // 분기·턴 경유지만 보강한다.
   return ensureTransitWaypointsOnPath(pathUnitIds, unitMap)
 }
 
@@ -714,17 +719,19 @@ export function planInboundLoadPath(
 
   if (traversal) {
     const pathUnitIds = finalizeInboundDestinationPath(line, traversal.pathUnitIds)
-    const destLabel = inboundDestinationDisplayName(traversal.destinationUnit)
+    const destUnit = traversal.destinationUnit
+    const destLabel = inboundDestinationDisplayName(destUnit)
+    const isExitDest = destUnit.flowRole === 'exit'
     const autoDest = !destinationUnitId || destinationUnitId !== traversal.destinationUnitId
     return {
       entryUnitId,
       routingUnitId: traversal.destinationUnitId,
       targetStkId: null,
-      targetExitId: null,
+      targetExitId: isExitDest ? traversal.destinationUnitId : null,
       pathUnitIds,
       previewPathUnitIds: traversal.previewTransitUnitIds,
       message: autoDest
-        ? `${unitDisplayCode(entry)} → ${destLabel} (목적지 · 최원 분기)`
+        ? `${unitDisplayCode(entry)} → ${destLabel} (목적지 · 최원 ${isExitDest ? '종료점' : '분기·회전'})`
         : `${unitDisplayCode(entry)} → ${destLabel} (목적지)`,
     }
   }
@@ -749,7 +756,7 @@ export function planInboundLoadPath(
     targetExitId: null,
     pathUnitIds: [],
     message:
-      '투입 경로상 인접 컨베이어가 있는 분기·회전 목적지를 찾을 수 없습니다.',
+      '투입 경로상 도달 가능한 분기·회전·종료점(flowRole=exit) 목적지를 찾을 수 없습니다.',
   }
 }
 
@@ -1514,6 +1521,19 @@ export function advanceSimulationLoads(
     if (!load.released) continue
 
     if (isAtDestination(load)) {
+      const currentUnitId = load.pathUnitIds[load.stepIndex]
+      const currentUnit = currentUnitId ? unitMap?.get(currentUnitId) : undefined
+      const dischargeAtDest = requiresDischargeDwellAtCurrentStep(load, unitMap)
+      const retainAtDest = shouldRetainMaterialAtDestination(load, unitMap)
+      if (
+        currentUnit &&
+        !isSimulationTransitPassable(currentUnit) &&
+        !dischargeAtDest &&
+        !retainAtDest
+      ) {
+        load.waiting = true
+        continue
+      }
       const entryRequired = resolveEntryTicksRequired(load, entryTicksRequired, timing)
       if (load.stepIndex === 0 && load.entryTicks < entryRequired) {
         load.entryTicks += 1
@@ -1524,7 +1544,6 @@ export function advanceSimulationLoads(
         load.waiting = true
         continue
       }
-      const currentUnitId = load.pathUnitIds[load.stepIndex]
       if (
         currentUnitId &&
         load.targetStkId === currentUnitId &&
@@ -1630,10 +1649,13 @@ export function advanceSimulationLoads(
       const otherCurrent = posAt(otherIndex, next[otherIndex]!.stepIndex)
       if (otherCurrent !== to) continue
 
-      const otherTargetStep = proposals.get(otherIndex)
-      const otherLeaving =
-        otherTargetStep != null &&
-        posAt(otherIndex, otherTargetStep) !== otherCurrent
+      // 점유 자재가 "이번 틱에 실제로 비켜주는지"로 판단해야 한다.
+      // proposals(이동 의향)만 보면, 앞 칸이 막혀 대기 중인 자재(목적지 직전
+      // 칸 등)도 제안은 매 틱 내므로 "비켜준다"고 오판해 같은 칸에 자재가
+      // 겹쳐 사라진다. proposalEntries는 stepIndex 내림차순이라 앞 자재
+      // (otherIndex, 더 큰 stepIndex)는 항상 먼저 처리되어 approved 여부가
+      // 확정돼 있으므로 approved 집합으로 실제 이동 여부를 확인한다.
+      const otherLeaving = approved.has(otherIndex)
       if (!otherLeaving) {
         blocked = true
         break
@@ -1648,9 +1670,6 @@ export function advanceSimulationLoads(
     if (unitMap) {
       const targetUnit = unitMap.get(to)
       const fromUnit = unitMap.get(from)
-      const destinationId = next[index]!.pathUnitIds[next[index]!.pathUnitIds.length - 1]
-      const isDestination = to === destinationId
-      const onPlannedPath = next[index]!.pathUnitIds.includes(to)
 
       if (line && fromUnit && targetUnit) {
         const junction =
@@ -1710,8 +1729,6 @@ export function advanceSimulationLoads(
 
       if (
         targetUnit &&
-        !isDestination &&
-        !onPlannedPath &&
         !isSimulationTransitPassable(targetUnit)
       ) {
         next[index]!.waiting = true
@@ -1769,14 +1786,14 @@ export function activeSimulationUnitIds(loads: PathSimulationLoad[]): string[] {
     .filter(Boolean)
 }
 
-/** CST On 표시 — 진행 중 자재 위치 (종료점 도착·출고 완료 제외 가능) */
+/** CST On 표시 — 진행 중 자재 위치 (칸당 1 CST, 대기 자재 우선) */
 export function simulationCstUnitIds(
   loads: PathSimulationLoad[],
   options?: { includeCompleted?: boolean },
 ): string[] {
   const includeCompleted = options?.includeCompleted ?? true
-  const seen = new Set<string>()
-  const ordered: string[] = []
+  const bestByUnit = new Map<string, PathSimulationLoad>()
+
   for (const load of dedupeSimulationLoadsById(loads)) {
     if (!load.released || load.pathUnitIds.length === 0) continue
     if (!includeCompleted && load.complete) continue
@@ -1785,17 +1802,30 @@ export function simulationCstUnitIds(
       load.pathUnitIds.length - 1,
     )
     const unitId = load.pathUnitIds[step]
-    if (!unitId || seen.has(unitId)) continue
-    seen.add(unitId)
-    ordered.push(unitId)
+    if (!unitId) continue
+
+    const existing = bestByUnit.get(unitId)
+    if (!existing) {
+      bestByUnit.set(unitId, load)
+      continue
+    }
+    if (load.waiting && !existing.waiting) {
+      bestByUnit.set(unitId, load)
+      continue
+    }
+    if (load.waiting === existing.waiting && load.stepIndex < existing.stepIndex) {
+      bestByUnit.set(unitId, load)
+    }
   }
-  return ordered
+
+  return [...bestByUnit.keys()]
 }
 
 function unitShowsInboundSimDestination(unit: ConveyorUnit): boolean {
   return (
     unit.type === 'junction' ||
     unit.type === 'turn' ||
+    unit.flowRole === 'exit' ||
     unit.flowRole === 'entry' ||
     unit.role === 'INPUT'
   )
