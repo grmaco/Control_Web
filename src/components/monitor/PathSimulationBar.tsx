@@ -79,8 +79,9 @@ export function PathSimulationPlaybackControls({
   const normalSessionActive = sessionActive && !continuousInputActive
 
   return (
-    <div className="grid grid-cols-3 gap-2 border-b border-slate-800 bg-slate-900/80 px-3 py-2 sm:grid-cols-6 sm:px-4">
+    <div className="grid grid-cols-3 gap-1.5 border-b border-slate-800 bg-slate-900/80 px-3 py-2 sm:grid-cols-6 sm:px-4">
       <SimButton
+        icon={<SimPlayIcon />}
         label="시작"
         disabled={!canSimulate || isBusy || continuousInputActive || normalSessionActive}
         onClick={onStart}
@@ -88,6 +89,7 @@ export function PathSimulationPlaybackControls({
       />
       {mode === 'inbound' && onStartContinuous ? (
         <SimButton
+          icon={<SimContinuousIcon />}
           label="연속 투입"
           disabled={!canSimulate || isBusy || normalSessionActive}
           onClick={onStartContinuous}
@@ -97,17 +99,19 @@ export function PathSimulationPlaybackControls({
         <div />
       )}
       <SimButton
+        icon={<SimPauseIcon />}
         label="일시정지"
         disabled={!isBusy}
         onClick={onPause}
       />
       <SimButton
+        icon={<SimResumeIcon />}
         label="재개"
         disabled={!plan || status === 'idle' || status === 'complete' || isBusy}
         onClick={onResume}
       />
-      <SimButton label="한 칸" disabled={!canSimulate} onClick={onStepForward} />
-      <SimButton label="초기화" disabled={status === 'idle' && !plan} onClick={onReset} />
+      <SimButton icon={<SimStepIcon />} label="한 칸" disabled={!canSimulate} onClick={onStepForward} />
+      <SimButton icon={<SimResetIcon />} label="초기화" disabled={status === 'idle' && !plan} onClick={onReset} />
     </div>
   )
 }
@@ -287,13 +291,14 @@ export function PathSimulationBar({
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <SimPanel
           title="시뮬레이션 설정"
+          contentAlign="start"
           collapsible={touchLayout}
           defaultOpen={false}
           summary={timingSummary}
         >
-          <div className="flex flex-wrap items-end justify-center gap-3">
+          <div className="w-full space-y-2.5">
             <TimingField
-              label="투입 대기 (초)"
+              label="투입 대기"
               hint={
                 continuousInputActive
                   ? `프로브 2대 ${CONTINUOUS_INPUT_INTERVAL_SEC}초 교대 · ${CONTINUOUS_PROBE_CYCLE_SEC}초 왕복`
@@ -304,14 +309,14 @@ export function PathSimulationBar({
               onChange={onInputIntervalSecChange}
             />
             <TimingField
-              label="이송 (초)"
+              label="이송"
               hint="모듈 간 이동"
               value={transitIntervalSec}
               disabled={timingLocked}
               onChange={onTransitIntervalSecChange}
             />
             <TimingField
-              label="출고 대기 (초)"
+              label="출고 대기"
               hint="출고점 체류"
               value={dischargeIntervalSec}
               disabled={timingLocked}
@@ -319,9 +324,9 @@ export function PathSimulationBar({
             />
           </div>
           {onTurn90SecChange && (
-            <div className="mt-2 border-t border-slate-700/60 pt-2">
-              <p className="mb-2 text-center text-[10px] text-slate-500">회전 유닛 통과 (초)</p>
-              <div className="flex flex-wrap items-end justify-center gap-3">
+            <div className="mt-3 w-full border-t border-slate-700/60 pt-2.5">
+              <p className="mb-2 text-[10px] text-slate-500">회전 유닛 통과</p>
+              <div className="space-y-2.5">
                 <TimingField label="90°" hint="90° 꺾임" value={turn90Sec} disabled={timingLocked} onChange={onTurn90SecChange} />
                 <TimingField label="180°" hint="직통" value={turn180Sec} disabled={timingLocked} onChange={onTurn180SecChange ?? (() => {})} />
                 <TimingField label="270°" hint="270° 역방향" value={turn270Sec} disabled={timingLocked} onChange={onTurn270SecChange ?? (() => {})} />
@@ -566,50 +571,25 @@ function TimingField({
   disabled?: boolean
   onChange: (value: number) => void
 }) {
-  const [draft, setDraft] = useState(formatTimingDraft(value))
-
-  useEffect(() => {
-    setDraft(formatTimingDraft(value))
-  }, [value])
-
-  const commit = () => {
-    const normalized = draft.trim().replace(',', '.')
-    if (normalized === '') {
-      setDraft(formatTimingDraft(value))
-      return
-    }
-    const next = Number(normalized)
-    if (Number.isFinite(next)) {
-      onChange(next)
-      return
-    }
-    setDraft(formatTimingDraft(value))
-  }
-
   return (
-    <label className="block text-center text-xs text-slate-400" title={hint}>
-      <span className="mb-1 block whitespace-nowrap">{label}</span>
+    <div className="w-full" title={hint}>
+      <div className="mb-1.5 flex items-center justify-between text-xs">
+        <span className="text-slate-400">{label}</span>
+        <span className="font-mono font-semibold text-slate-100">{value.toFixed(1)}s</span>
+      </div>
       <input
-        type="text"
-        inputMode="decimal"
+        type="range"
+        min={0}
+        max={5}
+        step={0.1}
+        value={value}
         disabled={disabled}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') {
-            e.currentTarget.blur()
-          }
-        }}
-        className="mx-auto block w-[5rem] rounded border border-slate-700 bg-slate-900 px-2 py-1.5 text-center text-sm text-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-slate-700 accent-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
         aria-label={label}
       />
-    </label>
+    </div>
   )
-}
-
-function formatTimingDraft(value: number): string {
-  return Number.isFinite(value) ? String(value) : ''
 }
 
 function TackTimeFlowArrow() {
@@ -759,12 +739,69 @@ function ConstellationPath({ summary }: { summary: LoadTackTimeSummary }) {
   )
 }
 
+function SimPlayIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
+      <polygon points="5,3 17,10 5,17" fill="currentColor" />
+    </svg>
+  )
+}
+
+function SimContinuousIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
+      <circle cx="3.5" cy="5" r="1.8" fill="currentColor" />
+      <circle cx="3.5" cy="10" r="1.8" fill="currentColor" />
+      <circle cx="3.5" cy="15" r="1.8" fill="currentColor" />
+      <polygon points="8,4 18,10 8,16" fill="currentColor" />
+    </svg>
+  )
+}
+
+function SimPauseIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
+      <rect x="4" y="3" width="4" height="14" rx="1.5" fill="currentColor" />
+      <rect x="12" y="3" width="4" height="14" rx="1.5" fill="currentColor" />
+    </svg>
+  )
+}
+
+function SimResumeIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
+      <rect x="3" y="3" width="3" height="14" rx="1" fill="currentColor" />
+      <polygon points="9,4 18,10 9,16" fill="currentColor" />
+    </svg>
+  )
+}
+
+function SimStepIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
+      <polygon points="3,4 13,10 3,16" fill="currentColor" />
+      <rect x="14" y="3" width="3" height="14" rx="1" fill="currentColor" />
+    </svg>
+  )
+}
+
+function SimResetIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden>
+      <path d="M15 5A7 7 0 1 0 16.5 10" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+      <polygon points="14,2 18,6 14,9" fill="currentColor" />
+    </svg>
+  )
+}
+
 function SimButton({
+  icon,
   label,
   onClick,
   disabled,
   accent,
 }: {
+  icon: ReactNode
   label: string
   onClick: () => void
   disabled?: boolean
@@ -772,19 +809,21 @@ function SimButton({
 }) {
   const accentClass =
     accent === 'cyan'
-      ? 'border-cyan-600/70 bg-cyan-950/50 font-medium text-cyan-200 hover:bg-cyan-950'
+      ? 'border-cyan-600/70 bg-cyan-950/50 text-cyan-300 hover:bg-cyan-900/60 shadow-[0_0_8px_rgba(34,211,238,0.18)]'
       : accent
-        ? 'border-emerald-700 bg-emerald-900/50 font-medium text-emerald-200 hover:bg-emerald-900'
-        : 'border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700'
+        ? 'border-emerald-600/70 bg-emerald-950/50 text-emerald-300 hover:bg-emerald-900/60 shadow-[0_0_8px_rgba(52,211,153,0.18)]'
+        : 'border-slate-700 bg-slate-800/80 text-slate-300 hover:bg-slate-700'
 
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`w-full rounded border py-2.5 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${accentClass}`}
+      title={label}
+      aria-label={label}
+      className={`flex w-full items-center justify-center rounded-lg border py-3 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${accentClass}`}
     >
-      {label}
+      {icon}
     </button>
   )
 }

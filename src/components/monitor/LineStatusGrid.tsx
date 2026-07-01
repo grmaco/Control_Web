@@ -337,7 +337,7 @@ export function LineStatusGrid({
       }
     >
       <div
-        className={`inline-grid gap-0 overflow-visible bg-slate-950/50 ${
+        className={`inline-grid gap-0 overflow-visible bg-slate-900/60 ${
           showGridLines ? 'border border-slate-700' : ''
         }`}
         style={{
@@ -443,8 +443,8 @@ export function LineStatusGrid({
                   ? `${colors!.border} text-white`
                   : `${colors!.bg} ${colors!.border} text-white`
                 : showGridLines
-                  ? 'border-slate-800 bg-slate-900/60 text-slate-600'
-                  : 'bg-slate-900/60 text-slate-600'
+                  ? 'border-slate-800 bg-slate-900/80 text-slate-600'
+                  : 'bg-slate-900/80 text-slate-600'
             }`}
             title={isAnchor && unit ? unitTitle(unit) : undefined}
           >
