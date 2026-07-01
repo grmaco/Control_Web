@@ -413,11 +413,39 @@ function findLinkedInputPort(
 ): ConveyorUnit | null {
   for (const unit of line.units) {
     if (!isPortUnit(unit)) continue
-    if (unit.role !== 'INPUT' && unit.role !== 'PORT_IN') continue
+    // role 필드 또는 portDirection 으로 IN 포트 판별
+    const isInDir = (unit.portDirection ?? 'IN') === 'IN'
+    if (!isInDir && unit.role !== 'INPUT' && unit.role !== 'PORT_IN') continue
     const props = getPortProperties(unit)
     if (props?.linkedUnitId === entryUnitId) {
       return unit
     }
+  }
+  return null
+}
+
+/** EXIT 유닛에 연동된 OUT 포트 반환 — 없으면 null */
+function findLinkedOutPort(
+  line: ConveyorLine,
+  exitUnitId: string,
+): ConveyorUnit | null {
+  for (const unit of line.units) {
+    if (!isPortUnit(unit)) continue
+    if ((unit.portDirection ?? 'IN') !== 'OUT') continue
+    if (getPortProperties(unit)?.linkedUnitId === exitUnitId) return unit
+  }
+  return null
+}
+
+/** EXIT 유닛에 연동된 IN 포트 반환 — 없으면 null */
+function findLinkedInPortAtExit(
+  line: ConveyorLine,
+  exitUnitId: string,
+): ConveyorUnit | null {
+  for (const unit of line.units) {
+    if (!isPortUnit(unit)) continue
+    if ((unit.portDirection ?? 'IN') !== 'IN') continue
+    if (getPortProperties(unit)?.linkedUnitId === exitUnitId) return unit
   }
   return null
 }
@@ -728,17 +756,40 @@ export function planInboundLoadPath(
   )
 
   if (traversal) {
-    const pathUnitIds = finalizeInboundDestinationPath(line, traversal.pathUnitIds)
+    const basePath = finalizeInboundDestinationPath(line, traversal.pathUnitIds)
     const destUnit = traversal.destinationUnit
     const destLabel = inboundDestinationDisplayName(destUnit)
     const isExitDest = destUnit.flowRole === 'exit'
-    const exitRetain = isExitDest && exitUnitHasLinkedPort(line, destUnit.id)
     const autoDest = !destinationUnitId || destinationUnitId !== traversal.destinationUnitId
+
+    // EXIT 목적지에 연동된 포트 처리:
+    // OUT 포트(출고구) → 자재를 외부로 줌, IN 포트(투입고) → 자재를 수령
+    const linkedOutPort = isExitDest ? findLinkedOutPort(line, destUnit.id) : null
+    const linkedInPort = isExitDest ? findLinkedInPortAtExit(line, destUnit.id) : null
+    const linkedExitPort = linkedOutPort ?? linkedInPort
+
+    let targetExitId: string | null
+    if (linkedExitPort) {
+      targetExitId = linkedExitPort.id
+    } else if (isExitDest) {
+      targetExitId = traversal.destinationUnitId
+    } else {
+      targetExitId = null
+    }
+
+    // 투입점에 연동된 IN 포트를 경로 앞에 추가 (포트가 자재 공급) → ensureTransitWaypoints 포함
+    const pathWithEntry = prependLinkedInputPort(line, entryUnitId, basePath)
+
+    // EXIT 포트를 경로 끝에 추가 (ensureTransitWaypoints 이후라 불필요한 경유 삽입 없음)
+    const pathUnitIds = linkedExitPort
+      ? [...pathWithEntry, linkedExitPort.id]
+      : pathWithEntry
+
     return {
       entryUnitId,
       routingUnitId: traversal.destinationUnitId,
       targetStkId: null,
-      targetExitId: isExitDest && !exitRetain ? traversal.destinationUnitId : null,
+      targetExitId,
       pathUnitIds,
       previewPathUnitIds: traversal.previewTransitUnitIds,
       message: autoDest
@@ -1057,7 +1108,7 @@ export function isSimulationLoadOccupyingEntry(load: PathSimulationLoad): boolea
   return step <= entryIndex
 }
 
-/** 출고 대기( dischargeInterval ) — OUT 포트·출고점(flowRole exit)에서만 적용 */
+/** 출고 대기( dischargeInterval ) — 포트(IN·OUT)·출고점(flowRole exit)에서 적용 */
 function requiresDischargeDwellAtCurrentStep(
   load: PathSimulationLoad,
   unitMap?: Map<string, ConveyorUnit>,
@@ -1067,9 +1118,8 @@ function requiresDischargeDwellAtCurrentStep(
   const unit = unitMap.get(currentId)
   if (!unit) return false
 
-  if (isPortUnit(unit)) {
-    return (unit.portDirection ?? 'IN') === 'OUT'
-  }
+  // IN 포트(투입고)·OUT 포트(출고구) 모두 목적지 도달 시 대기
+  if (isPortUnit(unit)) return true
   if (load.targetExitId === currentId) return true
   return false
 }
@@ -1538,26 +1588,41 @@ function tryRerouteInboundLoadPath(
     return bridge == null
   }
 
+  const currentUnit = unitMap.get(currentId)
+  const currentIsPort = currentUnit != null && isPortUnit(currentUnit)
+
   let needsReroute = false
   for (let i = load.stepIndex; i < pathUnitIds.length - 1; i += 1) {
+    // 포트 유닛은 그래프에 없으므로 hop 검사 건너뜀
+    const fromUnit = unitMap.get(pathUnitIds[i]!)
+    if (fromUnit && isPortUnit(fromUnit)) continue
     if (isHopBlocked(pathUnitIds[i]!, pathUnitIds[i + 1]!)) {
       needsReroute = true
       break
     }
   }
 
-  const nextId = pathUnitIds[load.stepIndex + 1]
-  if (nextId && isHopBlocked(currentId, nextId)) {
-    needsReroute = true
+  // 현재 위치가 포트가 아닐 때만 다음 hop 검사
+  if (!currentIsPort) {
+    const nextId = pathUnitIds[load.stepIndex + 1]
+    if (nextId && isHopBlocked(currentId, nextId)) {
+      needsReroute = true
+    }
   }
 
   if (!needsReroute) return { pathUnitIds, blocked: false }
 
-  const astar = astarTransportPath(graph, currentId, destinationId, unitMap)
+  // 포트 위치에서 재탐색할 때는 다음 CV 유닛을 A* 시작점으로 사용
+  const rerouteFromId = currentIsPort
+    ? (pathUnitIds[load.stepIndex + 1] ?? currentId)
+    : currentId
+  const astar = astarTransportPath(graph, rerouteFromId, destinationId, unitMap)
   if (!astar) return { pathUnitIds, blocked: true }
 
   const prefix = pathUnitIds.slice(0, load.stepIndex + 1)
-  const tail = astar.pathUnitIds.slice(1)
+  const tail = currentIsPort
+    ? astar.pathUnitIds          // 포트 이후 전체 경로
+    : astar.pathUnitIds.slice(1) // 현재 위치는 이미 prefix에 있으므로 제외
   return { pathUnitIds: [...prefix, ...tail], blocked: false }
 }
 

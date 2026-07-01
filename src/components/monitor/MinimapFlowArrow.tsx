@@ -45,11 +45,8 @@ function flowDir(flow: UnitFlowDirs): FlowDir | null {
   return null
 }
 
-/** 포트 홀로 — IN은 STK(outDir), OUT은 라인(outDir) */
+/** 포트 홀로 방향 — outDir 우선, 없으면 inDir 역방향 */
 function portHoloDir(flow: UnitFlowDirs): FlowDir | null {
-  if (flow.portDirection === 'IN') {
-    return flow.outDir ?? null
-  }
   return flow.outDir ?? (flow.inDir ? oppositeDir(flow.inDir) : null)
 }
 
