@@ -67,6 +67,7 @@ export function MonitorDashboard({
 
   const [autoCondPopupOpen, setAutoCondPopupOpen] = useState(false)
   const [powerSelectPopupOpen, setPowerSelectPopupOpen] = useState(false)
+  const [autoStopPopupOpen, setAutoStopPopupOpen] = useState(false)
 
   const control = getLineControl(line.id)
   const stats = useMemo(
@@ -154,6 +155,7 @@ export function MonitorDashboard({
           etherCatConnected={etherCatConnected}
           allPowerOn={allPowerOn}
           allAutoRun={allAutoRun}
+          autoCondEnabled={ioStatus != null ? ioStatus.autoConditionOk : autoEnabled}
           hasActiveAlarm={hasActiveAlarm}
           onToggleEtherCat={() => {
             toggleEtherCat()
@@ -190,14 +192,7 @@ export function MonitorDashboard({
               })
             }
           }}
-          onAllAutoStop={() => {
-            useSemiCnvStore.getState().sendCommand('all_auto_stop')
-            void logApplication({
-              title: 'Button Click',
-              comment: 'HOME: All Auto Stop (long press)',
-              lineId: line.id,
-            })
-          }}
+          onAllAutoStop={() => setAutoStopPopupOpen(true)}
           onAlarmReset={() => {
             useSemiCnvStore.getState().sendCommand('alarm_reset')
             void logApplication({
@@ -322,6 +317,45 @@ export function MonitorDashboard({
                 type="button"
                 onClick={() => setPowerSelectPopupOpen(false)}
                 className="text-xs text-slate-500 hover:text-slate-400"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 설비 가동 정지 확인 팝업 */}
+      {autoStopPopupOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setAutoStopPopupOpen(false)}
+        >
+          <div
+            className="mx-4 w-full max-w-xs rounded-lg border border-slate-600 bg-slate-800 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mb-1 text-base font-bold text-slate-100">설비 가동 정지</p>
+            <p className="mb-6 text-sm text-slate-400">
+              현재 가동 중인 설비를 정지하시겠습니까?
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setAutoStopPopupOpen(false)
+                  useSemiCnvStore.getState().sendCommand('all_auto_stop')
+                  setAllAutoRun(line.id)
+                  void logApplication({ title: 'Button Click', comment: 'HOME: All Auto Stop', lineId: line.id })
+                }}
+                className="flex-1 rounded border border-red-600/70 bg-red-900/50 py-2.5 text-sm font-semibold text-red-200 hover:bg-red-800/60"
+              >
+                정지
+              </button>
+              <button
+                type="button"
+                onClick={() => setAutoStopPopupOpen(false)}
+                className="flex-1 rounded border border-slate-500 bg-slate-700 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-600"
               >
                 취소
               </button>

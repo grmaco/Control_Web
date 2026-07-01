@@ -99,6 +99,43 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
     ),
   })
 
+  const completedLoadIdsRef = useRef<Set<string>>(new Set())
+  const prevSimStatusRef = useRef(simulation.status)
+
+  useEffect(() => {
+    const prev = prevSimStatusRef.current
+    prevSimStatusRef.current = simulation.status
+
+    if (simulation.status === 'idle') {
+      completedLoadIdsRef.current.clear()
+      return
+    }
+    if (simulation.status === 'complete' && prev !== 'complete') {
+      const total = simulation.loads.filter((l) => l.complete).length
+      void logApplication({
+        title: 'Path Simulation: Complete',
+        comment: `시뮬레이션 완료 · 자재 ${total}개 이송 완료`,
+        lineId: line.id,
+      })
+      return
+    }
+    const unitMap = new Map(line.units.map((u) => [u.id, u]))
+    for (const load of simulation.loads) {
+      if (!load.complete || completedLoadIdsRef.current.has(load.id)) continue
+      completedLoadIdsRef.current.add(load.id)
+      const fromId = load.pathUnitIds[0]
+      const toId = load.pathUnitIds[load.pathUnitIds.length - 1]
+      const fromName = fromId ? (unitMap.get(fromId)?.name ?? fromId) : '-'
+      const toName = toId ? (unitMap.get(toId)?.name ?? toId) : '-'
+      const dir = load.direction === 'inbound' ? '투입' : '출고'
+      void logApplication({
+        title: 'Path Simulation: Transfer',
+        comment: `[${load.label}] ${fromName} → ${toName} · ${dir} ${load.pathUnitIds.length}구간`,
+        lineId: line.id,
+      })
+    }
+  }, [simulation.loads, simulation.status, line, logApplication])
+
   const initialTransform = useMemo(() => {
     if (isSavedViewValid(savedView, layoutSignature)) {
       return {

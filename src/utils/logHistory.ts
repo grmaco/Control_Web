@@ -35,13 +35,10 @@ export function formatGenerateTime(timestamp: string): string {
   const yyyy = date.getFullYear()
   const mm = String(date.getMonth() + 1).padStart(2, '0')
   const dd = String(date.getDate()).padStart(2, '0')
-  const hours = date.getHours()
-  const ampm = hours < 12 ? '오전' : '오후'
-  const h12 = String(hours % 12 || 12).padStart(2, '0')
+  const hh = String(date.getHours()).padStart(2, '0')
   const min = String(date.getMinutes()).padStart(2, '0')
   const sec = String(date.getSeconds()).padStart(2, '0')
-  const ms = String(date.getMilliseconds()).padStart(3, '0')
-  return `${yyyy}-${mm}-${dd} ${ampm} ${h12}:${min}:${sec}.${ms}`
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}:${sec}`
 }
 
 function resolveUnitName(
@@ -69,11 +66,14 @@ export function historyRecordToLogEntry(
   lines: ConveyorLine[],
 ): LogEntry {
   if (record.eventType === 'application') {
+    const title = record.logTitle ?? ''
+    const isSimulation =
+      title.startsWith('Path Simulation') || title.startsWith('Simulation')
     return {
       id: record.id,
       timestamp: record.timestamp,
       generateTime: formatGenerateTime(record.timestamp),
-      logType: 'Application',
+      logType: isSimulation ? 'Simulation' : 'Application',
       logLevel: 'Normal',
       logTitle: record.logTitle ?? 'Application Event',
       logComment: buildLogComment(record),
