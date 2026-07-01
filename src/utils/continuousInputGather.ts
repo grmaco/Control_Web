@@ -901,7 +901,8 @@ export function gatherProbeVisualsSmooth(
     )
     return toVisuals.map((toV) => {
       const fromV = fromByKey.get(`${toV.entryUnitId}:${toV.probeSlot}`)
-      if (!fromV || fromV.travelT >= 0.999) return toV
+      if (!fromV) return toV
+      // travelT=1.0(depot hold 상태)일 때도 fromV를 유지해 미네랄이 순간 사라지는 현상 방지
       return fromV
     })
   }

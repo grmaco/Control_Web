@@ -226,6 +226,7 @@ export function usePathSimulation(
   const lastInjectTickRef = useRef(0)
   const injectSeqRef = useRef(0)
   const entryVacancyRef = useRef<Record<string, number>>({})
+  const inboundLineFullConsecutiveRef = useRef(0)
   const turnReturnDwellsRef = useRef<Record<string, number>>({})
   const depositedLoadIdsRef = useRef<Set<string>>(new Set())
   const warehouseFillCountsRef = useRef(warehouseFillCounts)
@@ -545,6 +546,7 @@ export function usePathSimulation(
         ),
       )
       entryVacancyRef.current = {}
+      inboundLineFullConsecutiveRef.current = 0
       simTickRef.current = 0
       lastInjectTickRef.current = 0
       injectSeqRef.current = 0
@@ -1003,21 +1005,21 @@ export function usePathSimulation(
 
         const advanced = nextLoads
 
-        if (
-          continuousInputActiveRef.current &&
-          mode === 'inbound' &&
-          entryIds.length > 0 &&
-          isInboundConveyorLineFull(
-            simulationLine,
-            advanced,
-            entryIds,
-            fillCounts,
-          )
-        ) {
-          continuousInputActiveRef.current = false
-          setContinuousInputActive(false)
-          setInboundLineFullBlocked(true)
-          setInboundLineFullNotice(true)
+        if (continuousInputActiveRef.current && mode === 'inbound' && entryIds.length > 0) {
+          const postAdvanceFull = isInboundConveyorLineFull(simulationLine, advanced, entryIds, fillCounts)
+          if (postAdvanceFull) {
+            inboundLineFullConsecutiveRef.current += 1
+            // 1틱 디바운스: 같은 틱에 spawn된 자재가 애니메이션상 투입구에 도달하기 전에
+            // 팝업이 뜨는 현상을 방지하기 위해 2틱 연속 만재 확인 후 팝업 표시
+            if (inboundLineFullConsecutiveRef.current >= 2) {
+              continuousInputActiveRef.current = false
+              setContinuousInputActive(false)
+              setInboundLineFullBlocked(true)
+              setInboundLineFullNotice(true)
+            }
+          } else {
+            inboundLineFullConsecutiveRef.current = 0
+          }
         }
 
         if (beforeStep !== advanced) {
