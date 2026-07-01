@@ -1361,6 +1361,15 @@ export interface SimulationStepTiming {
   warehouseFillCounts?: Record<string, number>
   /** 회전 유닛 각도별 통과 소요시간 (초) */
   turnTransitSec?: { 90: number; 180: number; 270: number }
+  /** 회전 유닛 복귀 대기 — 자재 전달 후 복귀 중인 유닛 ID → 잔여 틱 */
+  turnReturnDwells?: Record<string, number>
+}
+
+/** applySimulationStep 반환값 */
+export interface SimulationStepResult {
+  loads: PathSimulationLoad[]
+  /** 이 틱에 자재를 전달하고 복귀 동작을 시작한 회전 유닛 (unitId → 복귀 틱 수) */
+  newTurnReturnDwells: Record<string, number>
 }
 
 /** 시뮬 투입·이송·출고 시간 입력값 (0.1~60초) */
@@ -1455,8 +1464,32 @@ export function applySimulationStep(
   timing?: SimulationStepTiming,
   flowMap?: Map<string, UnitFlowDirs>,
   line?: ConveyorLine,
-): PathSimulationLoad[] {
-  return advanceSimulationLoads(loads, unitMap, timing, flowMap, line)
+): SimulationStepResult {
+  const nextLoads = advanceSimulationLoads(loads, unitMap, timing, flowMap, line)
+
+  // 자재를 전달한 회전 유닛 검출 → 복귀 대기 틱 계산
+  const baseTransitTicks = requiredTransitTicks(timing?.transitIntervalSec ?? 0.5)
+  const fallbackTiming: SimulationStepTiming = {
+    inputIntervalSec: 0.5,
+    dischargeIntervalSec: 0.5,
+    transitIntervalSec: 0.5,
+  }
+  const effectiveTiming = timing ?? fallbackTiming
+  const beforeById = new Map(loads.map((l) => [l.id, l]))
+  const newTurnReturnDwells: Record<string, number> = {}
+
+  for (const after of nextLoads) {
+    const before = beforeById.get(after.id)
+    if (!before || before.complete || after.stepIndex <= before.stepIndex) continue
+    const fromUnitId = before.pathUnitIds[before.stepIndex]
+    if (!fromUnitId) continue
+    const fromUnit = unitMap?.get(fromUnitId)
+    if (fromUnit?.type !== 'turn') continue
+    const returnTicks = resolveTransitTicksForLoad(before, baseTransitTicks, effectiveTiming, unitMap)
+    newTurnReturnDwells[fromUnitId] = returnTicks
+  }
+
+  return { loads: nextLoads, newTurnReturnDwells }
 }
 
 export function countIncompleteSimulationLoads(loads: PathSimulationLoad[]): number {
@@ -1693,6 +1726,15 @@ export function advanceSimulationLoads(
     if (mergeWinner != null && mergeWinner !== index) {
       next[index]!.waiting = true
       continue
+    }
+
+    // 회전 유닛 복귀 대기 — 자재 전달 후 복귀 중이면 신규 진입 차단
+    if (timing.turnReturnDwells && unitMap) {
+      const targetUnit = unitMap.get(to)
+      if (targetUnit?.type === 'turn' && (timing.turnReturnDwells[to] ?? 0) > 0) {
+        next[index]!.waiting = true
+        continue
+      }
     }
 
     let blocked = false

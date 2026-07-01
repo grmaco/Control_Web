@@ -45,6 +45,7 @@ import {
   simulationRevealUnitIds,
   staticTestMaterialOriginUnitIds,
   unionSimulationConveyorPathUnitIds,
+  type SimulationStepResult,
 } from '../utils/pathSimulation'
 import { SIM_STK_IO_ENABLED } from '../constants/simStkIo'
 import {
@@ -225,6 +226,7 @@ export function usePathSimulation(
   const lastInjectTickRef = useRef(0)
   const injectSeqRef = useRef(0)
   const entryVacancyRef = useRef<Record<string, number>>({})
+  const turnReturnDwellsRef = useRef<Record<string, number>>({})
   const depositedLoadIdsRef = useRef<Set<string>>(new Set())
   const warehouseFillCountsRef = useRef(warehouseFillCounts)
   warehouseFillCountsRef.current = warehouseFillCounts
@@ -825,6 +827,7 @@ export function usePathSimulation(
     lastInjectTickRef.current = 0
     injectSeqRef.current = 0
     entryVacancyRef.current = {}
+    turnReturnDwellsRef.current = {}
     depositedLoadIdsRef.current = new Set()
     setStatus('idle')
   }, [
@@ -881,13 +884,27 @@ export function usePathSimulation(
 
     setPlan(nextPlan)
     const base = loads.length > 0 ? loads : initializeParallelLoads(nextPlan.loads, stepTiming, simulationLine)
-    const advanced = applySimulationStep(
+    const stepResult: SimulationStepResult = applySimulationStep(
       base,
       unitMap,
-      { ...stepTiming, warehouseFillCounts: warehouseFillCountsRef.current },
+      {
+        ...stepTiming,
+        warehouseFillCounts: warehouseFillCountsRef.current,
+        turnReturnDwells: turnReturnDwellsRef.current,
+      },
       flowMap,
       simulationLine,
     )
+    // 복귀 대기 틱 갱신: 기존 감소 + 신규 추가
+    const nextManualDwells: Record<string, number> = {}
+    for (const [uid, ticks] of Object.entries(turnReturnDwellsRef.current)) {
+      const rem = ticks - 1
+      if (rem > 0) nextManualDwells[uid] = rem
+    }
+    for (const [uid, ticks] of Object.entries(stepResult.newTurnReturnDwells)) {
+      nextManualDwells[uid] = ticks
+    }
+    turnReturnDwellsRef.current = nextManualDwells
     if (status === 'paused') {
       if (tackSessionStartRef.current == null) {
         beginTackSession()
@@ -898,8 +915,8 @@ export function usePathSimulation(
       )
       setTackClockTick((tick) => tick + 1)
     }
-    setLoads(advanced)
-    if (allLoadsComplete(advanced)) {
+    setLoads(stepResult.loads)
+    if (allLoadsComplete(stepResult.loads)) {
       beginEndHold()
     } else {
       setStatus('paused')
@@ -919,13 +936,28 @@ export function usePathSimulation(
         const beforeStep = nextLoads
 
         const fillCounts = warehouseFillCountsRef.current
-        nextLoads = applySimulationStep(
+        const tickStepResult: SimulationStepResult = applySimulationStep(
           nextLoads,
           unitMapRef.current,
-          { ...stepTimingRef.current, warehouseFillCounts: fillCounts },
+          {
+            ...stepTimingRef.current,
+            warehouseFillCounts: fillCounts,
+            turnReturnDwells: turnReturnDwellsRef.current,
+          },
           flowMapRef.current,
           simulationLine,
         )
+        // 복귀 대기 틱 갱신: 기존 감소 + 신규 추가
+        const nextDwells: Record<string, number> = {}
+        for (const [uid, ticks] of Object.entries(turnReturnDwellsRef.current)) {
+          const rem = ticks - 1
+          if (rem > 0) nextDwells[uid] = rem
+        }
+        for (const [uid, ticks] of Object.entries(tickStepResult.newTurnReturnDwells)) {
+          nextDwells[uid] = ticks
+        }
+        turnReturnDwellsRef.current = nextDwells
+        nextLoads = tickStepResult.loads
 
         if (continuousInputActiveRef.current && mode === 'inbound' && entryIds.length > 0) {
           const lineFull = isInboundConveyorLineFull(
