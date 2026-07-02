@@ -37,8 +37,8 @@ interface FlowCalloutOverlayProps {
   simDestinationByUnitId?: Record<string, string>
   /** 증가 시 선택 해제 (시뮬레이션 초기화 등) */
   deselectToken?: number
-  /** 맵 호버·터치로 열린 유닛 — 강조 표시 */
-  peekUnitId?: string | null
+  /** 맵 클릭으로 핀된 유닛 집합 — 강조 표시 */
+  peekUnitIds?: ReadonlySet<string>
   /** 경로 시뮬 — LD/ULD/BUSY 판별용 */
   simulationLoads?: PathSimulationLoad[]
   inputIntervalSec?: number
@@ -63,7 +63,7 @@ export function FlowCalloutOverlay({
   simulating = false,
   simDestinationByUnitId = {},
   deselectToken = 0,
-  peekUnitId = null,
+  peekUnitIds,
   simulationLoads = [],
   inputIntervalSec,
   transitIntervalSec,
@@ -171,7 +171,7 @@ export function FlowCalloutOverlay({
 
         {callouts.map((callout) => {
           const active    = activeUnitIds?.has(callout.unitId)
-          const peeking   = peekUnitId === callout.unitId
+          const peeking   = peekUnitIds?.has(callout.unitId) ?? false
           const selected  = selectedId === callout.unitId
           const hasAlarm  = Boolean(unitAlarms[callout.unitId])
           const pos = positions[callout.unitId] ?? {
@@ -273,7 +273,7 @@ export function FlowCalloutOverlay({
             panelY={pos.panelY}
             scale={scale}
             selected={selectedId === callout.unitId}
-            highlighted={(activeUnitIds?.has(callout.unitId) ?? false) || peekUnitId === callout.unitId}
+            highlighted={(activeUnitIds?.has(callout.unitId) ?? false) || (peekUnitIds?.has(callout.unitId) ?? false)}
             onSelect={() => setSelectedId(callout.unitId)}
             onDrag={(panelX, panelY) => updatePosition(callout.unitId, panelX, panelY)}
             onDragEnd={handleDragEnd}

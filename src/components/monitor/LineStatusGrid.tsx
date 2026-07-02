@@ -248,26 +248,29 @@ export function LineStatusGrid({
     () => new Map(flowCallouts.map((callout) => [callout.unitId, callout])),
     [flowCallouts],
   )
-  const [pinnedUnitId, setPinnedUnitId] = useState<string | null>(null)
+  const [pinnedUnitIds, setPinnedUnitIds] = useState<ReadonlySet<string>>(new Set())
   const touchLayout = useTouchLayout()
 
   useEffect(() => {
     if (calloutDeselectToken > 0) {
-      setPinnedUnitId(null)
+      setPinnedUnitIds(new Set())
     }
   }, [calloutDeselectToken])
 
   const handleUnitPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>, unitId: string) => {
       event.stopPropagation()
-      setPinnedUnitId((current) => (current === unitId ? null : unitId))
+      setPinnedUnitIds((current) => {
+        const next = new Set(current)
+        if (next.has(unitId)) next.delete(unitId)
+        else next.add(unitId)
+        return next
+      })
     },
     [],
   )
 
-  const peekUnitIds = useMemo(() => {
-    return pinnedUnitId ? [pinnedUnitId] : []
-  }, [pinnedUnitId])
+  const peekUnitIds = useMemo(() => [...pinnedUnitIds], [pinnedUnitIds])
 
   const visibleCallouts = useMemo(() => {
     if (!showFlowCallouts) return []
@@ -593,7 +596,7 @@ export function LineStatusGrid({
       {showFlowCallouts && visibleCallouts.length > 0 ? (
         <FlowCalloutOverlay
           callouts={visibleCallouts}
-          peekUnitId={pinnedUnitId}
+          peekUnitIds={pinnedUnitIds}
           unitById={unitById}
           flowByUnitId={flowByUnitId}
           unitRuntime={unitRuntime}
