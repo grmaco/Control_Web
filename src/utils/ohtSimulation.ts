@@ -77,18 +77,28 @@ export function resolveOhtTargets(line: ConveyorLine, graph: OhtRailGraph): OhtT
     if (unit.status !== 'running') continue
     const railNodeIds = new Set<string>()
     for (const cell of unitFootprintCells(unit)) {
-      const candidates = [
-        [cell.x, cell.y],
-        [cell.x, cell.y - 1],
-        [cell.x, cell.y + 1],
-        [cell.x - 1, cell.y],
-        [cell.x + 1, cell.y],
-      ] as const
-      for (const [cx, cy] of candidates) {
+      // 유닛 셀과 인접한 4방향 레일만 검사 (유닛 자체 셀 제외)
+      const adjacentCells = [
+        { cx: cell.x,     cy: cell.y - 1, dirToUnit: 'S' as OhtDir }, // 북쪽 레일 → 유닛이 남쪽
+        { cx: cell.x,     cy: cell.y + 1, dirToUnit: 'N' as OhtDir }, // 남쪽 레일 → 유닛이 북쪽
+        { cx: cell.x - 1, cy: cell.y,     dirToUnit: 'E' as OhtDir }, // 서쪽 레일 → 유닛이 동쪽
+        { cx: cell.x + 1, cy: cell.y,     dirToUnit: 'W' as OhtDir }, // 동쪽 레일 → 유닛이 서쪽
+      ]
+      for (const { cx, cy, dirToUnit } of adjacentCells) {
         const railId = graph.cellIndex.get(cellKey(cx, cy))
-        if (railId) railNodeIds.add(railId)
+        if (!railId) continue
+        const rail = graph.nodes.get(railId)
+        if (!rail) continue
+        // 레일 개구부가 유닛 방향을 향하고 있어야 인터페이스 가능
+        const openings = ohtRailOpenings(rail.type, rail.rotation)
+        if (!openings.includes(dirToUnit)) continue
+        // 고립 노드(이웃 없음)는 도달 불가 → 제외
+        const adj = graph.adjacency.get(railId) ?? []
+        if (adj.length === 0) continue
+        railNodeIds.add(railId)
       }
     }
+
     if (railNodeIds.size > 0) {
       const fp = getUnitFootprint(unit)
       targets.push({
