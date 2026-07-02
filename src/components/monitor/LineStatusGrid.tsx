@@ -87,6 +87,7 @@ interface LineStatusGridProps {
   ohtGraph?: OhtRailGraph
   ohtSimActive?: boolean
   ohtStepMs?: number
+  ohtPoodleMode?: boolean
   className?: string
 }
 
@@ -194,6 +195,7 @@ export function LineStatusGrid({
   ohtGraph,
   ohtSimActive = false,
   ohtStepMs = 600,
+  ohtPoodleMode = false,
   className,
 }: LineStatusGridProps) {
   const layoutSignature = useMemo(() => lineLayoutSignature(line), [line])
@@ -264,11 +266,14 @@ export function LineStatusGrid({
     [flowCallouts],
   )
   const [pinnedUnitIds, setPinnedUnitIds] = useState<ReadonlySet<string>>(new Set())
+  /** 더블클릭으로 숨긴 초기 콜아웃 ID 집합 */
+  const [hiddenCalloutIds, setHiddenCalloutIds] = useState<ReadonlySet<string>>(new Set())
   const touchLayout = useTouchLayout()
 
   useEffect(() => {
     if (calloutDeselectToken > 0) {
       setPinnedUnitIds(new Set())
+      setHiddenCalloutIds(new Set())
     }
   }, [calloutDeselectToken])
 
@@ -285,12 +290,30 @@ export function LineStatusGrid({
     [],
   )
 
+  const handleUnitDoubleClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>, unitId: string) => {
+      event.stopPropagation()
+      setHiddenCalloutIds((current) => {
+        const next = new Set(current)
+        if (next.has(unitId)) next.delete(unitId)
+        else next.add(unitId)
+        return next
+      })
+    },
+    [],
+  )
+
   const peekUnitIds = useMemo(() => [...pinnedUnitIds], [pinnedUnitIds])
 
   const visibleCallouts = useMemo(() => {
     if (!showFlowCallouts) return []
 
-    const merged = new Map(flowCallouts.map((callout) => [callout.unitId, callout]))
+    // 더블클릭으로 숨긴 초기 콜아웃 제외
+    const merged = new Map(
+      flowCallouts
+        .filter((callout) => !hiddenCalloutIds.has(callout.unitId))
+        .map((callout) => [callout.unitId, callout]),
+    )
 
     for (const unitId of peekUnitIds) {
       if (merged.has(unitId)) continue
@@ -320,6 +343,7 @@ export function LineStatusGrid({
     cellSize,
     flowByUnitId,
     flowCallouts,
+    hiddenCalloutIds,
     line,
     peekUnitIds,
     showFlowCallouts,
@@ -471,6 +495,7 @@ export function LineStatusGrid({
                 className={`${FLOW_UNIT_PEEK_HIT_CLASS} absolute inset-0 z-[30] touch-none`}
                 aria-hidden
                 onPointerDown={(event) => handleUnitPointerDown(event, unit.id)}
+                onDoubleClick={(event) => handleUnitDoubleClick(event, unit.id)}
               />
             ) : null}
             {useRollerSvg && unit && (
@@ -610,6 +635,7 @@ export function LineStatusGrid({
           cellSize={cellSize}
           active={ohtSimActive}
           stepMs={ohtStepMs}
+          poodleMode={ohtPoodleMode}
         />
       ) : null}
       <ContinuousInputGatherOverlay

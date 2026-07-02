@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { OhtRailGraph, OhtVehicleState } from '../../utils/ohtSimulation'
 import { OHT_INTERFACE_MS, ohtVehicleCell, ohtVehiclePrevCell } from '../../utils/ohtSimulation'
-import { OhtVehicleGlyph } from '../builder/OhtPaletteItem'
+import { OhtVehicleGlyph, PoodleGlyph } from '../builder/OhtPaletteItem'
 
 interface OhtViewport {
   minX: number
@@ -17,6 +17,7 @@ interface OhtVehicleOverlayProps {
   cellSize: number
   active: boolean
   stepMs: number
+  poodleMode?: boolean
 }
 
 function easeInOut(t: number): number {
@@ -30,6 +31,7 @@ export function OhtVehicleOverlay({
   cellSize,
   active,
   stepMs,
+  poodleMode = false,
 }: OhtVehicleOverlayProps) {
   const tickKey = vehicles
     .map((v) => `${v.id}:${v.nodeId}:${v.prevNodeId}:${v.phase}:${v.carrying}:${v.interfaceElapsedMs}`)
@@ -156,7 +158,7 @@ export function OhtVehicleOverlay({
               </div>
             ) : null}
 
-            {/* OHT 대차 */}
+            {/* OHT 대차 (또는 푸들) */}
             <div
               className="absolute"
               style={{
@@ -167,11 +169,19 @@ export function OhtVehicleOverlay({
                 height: glyphSize,
               }}
             >
-              <OhtVehicleGlyph
-                size={glyphSize}
-                carrying={v.carrying}
-                materialOpacity={materialOpacity}
-              />
+              {poodleMode ? (
+                <PoodleGlyph
+                  size={glyphSize}
+                  materialOpacity={materialOpacity}
+                  running={moving}
+                />
+              ) : (
+                <OhtVehicleGlyph
+                  size={glyphSize}
+                  carrying={v.carrying}
+                  materialOpacity={materialOpacity}
+                />
+              )}
             </div>
           </div>
         )

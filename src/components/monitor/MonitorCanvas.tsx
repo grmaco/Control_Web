@@ -169,6 +169,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   const [simMode, setSimMode] = useState<'conveyor' | 'oht'>('conveyor')
   const oht = useOhtSimulation(line)
   const ohtMode = simMode === 'oht'
+  const [ohtPoodleMode, setOhtPoodleMode] = useState(false)
   const [calloutPanLock, setCalloutPanLock] = useState(false)
   const [calloutDeselectToken, setCalloutDeselectToken] = useState(0)
   const [simBlockPopupOpen, setSimBlockPopupOpen] = useState(false)
@@ -457,6 +458,8 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             oht.reset()
             logButton('OHT Simulation Reset')
           }}
+          poodleMode={ohtPoodleMode}
+          onPoodleModeToggle={() => setOhtPoodleMode((v) => !v)}
         />
       ) : null}
 
@@ -523,6 +526,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
                 ohtGraph={oht.graph}
                 ohtSimActive={ohtMode && oht.status === 'playing'}
                 ohtStepMs={oht.stepMs}
+                ohtPoodleMode={ohtPoodleMode}
                 className="select-none"
               />
             </TransformComponent>
@@ -807,6 +811,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             ohtGraph={oht.graph}
             ohtSimActive={ohtMode && oht.status === 'playing'}
             ohtStepMs={oht.stepMs}
+            ohtPoodleMode={ohtPoodleMode}
             className="select-none"
           />
         </TransformComponent>

@@ -10,6 +10,8 @@ interface OhtSimulationBarProps {
   onPause: () => void
   onResume: () => void
   onReset: () => void
+  poodleMode?: boolean
+  onPoodleModeToggle?: () => void
 }
 
 export function OhtSimulationBar({
@@ -22,6 +24,8 @@ export function OhtSimulationBar({
   onPause,
   onResume,
   onReset,
+  poodleMode = false,
+  onPoodleModeToggle,
 }: OhtSimulationBarProps) {
   const statusText =
     status === 'playing' ? '반송 중' : status === 'paused' ? '일시정지' : '대기'
@@ -46,6 +50,25 @@ export function OhtSimulationBar({
           <span className="text-slate-500">상태</span>{' '}
           <span className="text-cyan-300">{statusText}</span>
         </span>
+
+        {/* 변환 토글 버튼 */}
+        <button
+          type="button"
+          onClick={onPoodleModeToggle}
+          title={poodleMode ? 'OHT 모드로 전환' : '푸들 모드로 변환 🐩'}
+          className={`ml-auto flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-all ${
+            poodleMode
+              ? 'border-amber-400/70 bg-amber-900/40 text-amber-200 shadow-[0_0_8px_rgba(251,191,36,0.4)]'
+              : 'border-slate-600 bg-slate-800/80 text-slate-400 hover:border-cyan-600 hover:text-cyan-300'
+          }`}
+        >
+          {/* 변환 아이콘 (swap arrows) */}
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden>
+            <path d="M2 5h9M8 2l3 3-3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M14 11H5M8 14l-3-3 3-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          {poodleMode ? '🤖 OHT' : '🐩 푸들'}
+        </button>
       </div>
 
       <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">

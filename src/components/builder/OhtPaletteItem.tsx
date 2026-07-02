@@ -190,3 +190,164 @@ export function OhtVehicleGlyph({
     </svg>
   )
 }
+
+/**
+ * 황금 푸들 얼굴 글리프 — OHT 반송 "푸들 모드" 전용.
+ * running=true 일 때 달리는 바운스 애니메이션 적용.
+ * materialOpacity > 0 일 때 뼈다귀(Bone) 표시.
+ */
+export function PoodleGlyph({
+  size = 24,
+  materialOpacity = 0,
+  running = false,
+}: {
+  size?: number
+  materialOpacity?: number
+  running?: boolean
+}) {
+  const showBone = materialOpacity > 0.01
+  const boneBlur  = Math.round(materialOpacity * 5)
+  const boneSoftBlur = Math.round(materialOpacity * 11)
+
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        animation: running
+          ? 'poodle-run 0.34s ease-in-out infinite'
+          : 'poodle-idle 2.2s ease-in-out infinite',
+      }}
+    >
+      {/* 뼈다귀 (자재) — 머리 위에 표시 */}
+      {showBone && (
+        <svg
+          viewBox="0 0 38 16"
+          width={size * 1.3}
+          height={size * 0.45}
+          style={{
+            position: 'absolute',
+            top: '-42%',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            opacity: materialOpacity,
+            filter: `drop-shadow(0 0 ${boneBlur}px rgba(255,240,160,0.95)) drop-shadow(0 0 ${boneSoftBlur}px rgba(255,215,80,0.6))`,
+            overflow: 'visible',
+          }}
+          aria-hidden
+        >
+          {/* 가운데 막대 */}
+          <rect x="10" y="6" width="18" height="4" rx="2" fill="#FFF8DC" />
+          {/* 왼쪽 골단 */}
+          <circle cx="8.5"  cy="5"  r="4" fill="#FFF8DC" />
+          <circle cx="8.5"  cy="11" r="4" fill="#FFF8DC" />
+          {/* 오른쪽 골단 */}
+          <circle cx="29.5" cy="5"  r="4" fill="#FFF8DC" />
+          <circle cx="29.5" cy="11" r="4" fill="#FFF8DC" />
+        </svg>
+      )}
+
+      {/* 푸들 얼굴 */}
+      <svg
+        viewBox="0 0 44 44"
+        width={size}
+        height={size}
+        aria-hidden
+        style={{ overflow: 'visible' }}
+      >
+        <defs>
+          <radialGradient id="pdl-ear-l" cx="60%" cy="40%" r="55%">
+            <stop offset="0%"   stopColor="#E8A010" />
+            <stop offset="100%" stopColor="#A06808" />
+          </radialGradient>
+          <radialGradient id="pdl-ear-r" cx="40%" cy="40%" r="55%">
+            <stop offset="0%"   stopColor="#E8A010" />
+            <stop offset="100%" stopColor="#A06808" />
+          </radialGradient>
+          <radialGradient id="pdl-head" cx="40%" cy="35%" r="60%">
+            <stop offset="0%"   stopColor="#FADA5E" />
+            <stop offset="50%"  stopColor="#F0B830" />
+            <stop offset="100%" stopColor="#C88010" />
+          </radialGradient>
+          <radialGradient id="pdl-top" cx="50%" cy="30%" r="55%">
+            <stop offset="0%"   stopColor="#FDE07A" />
+            <stop offset="100%" stopColor="#E0A020" />
+          </radialGradient>
+        </defs>
+
+        {/* 귀 (왼쪽) — 크고 둥글고 푹신 */}
+        <circle cx="7"  cy="20" r="10" fill="url(#pdl-ear-l)" />
+        <circle cx="5"  cy="16" r="7"  fill="url(#pdl-ear-l)" opacity="0.9" />
+
+        {/* 귀 (오른쪽) */}
+        <circle cx="37" cy="20" r="10" fill="url(#pdl-ear-r)" />
+        <circle cx="39" cy="16" r="7"  fill="url(#pdl-ear-r)" opacity="0.9" />
+
+        {/* 머리 */}
+        <circle cx="22" cy="25" r="16" fill="url(#pdl-head)" />
+
+        {/* 탑 폼폼 (금발 곱슬머리) */}
+        <circle cx="22" cy="10" r="8"  fill="url(#pdl-top)" />
+        <circle cx="16" cy="12" r="6"  fill="url(#pdl-top)" />
+        <circle cx="28" cy="12" r="6"  fill="url(#pdl-top)" />
+        <circle cx="13" cy="16" r="4.5" fill="url(#pdl-top)" opacity="0.85" />
+        <circle cx="31" cy="16" r="4.5" fill="url(#pdl-top)" opacity="0.85" />
+
+        {/* 탑 폼폼 윤기 하이라이트 */}
+        <ellipse cx="19" cy="7" rx="4" ry="2.5" fill="#FFF5C0" opacity="0.45" />
+
+
+        {/* 눈 */}
+        <circle cx="15" cy="22" r="3.2" fill="#1A0800" />
+        <circle cx="29" cy="22" r="3.2" fill="#1A0800" />
+        {/* 눈 광택 1 */}
+        <circle cx="16.2" cy="20.6" r="1.2" fill="white" opacity="0.9" />
+        <circle cx="30.2" cy="20.6" r="1.2" fill="white" opacity="0.9" />
+        {/* 눈 광택 2 (작은 반짝이) */}
+        <circle cx="14"   cy="23"   r="0.6" fill="white" opacity="0.55" />
+        <circle cx="28"   cy="23"   r="0.6" fill="white" opacity="0.55" />
+
+        {/* 볼 홍조 */}
+        <circle cx="9"  cy="29" r="4.5" fill="#FF8FAB" opacity="0.28" />
+        <circle cx="35" cy="29" r="4.5" fill="#FF8FAB" opacity="0.28" />
+
+        {/* 주둥이 (밝은 영역) */}
+        <ellipse cx="22" cy="32" rx="7" ry="5.5" fill="#FADA5E" opacity="0.7" />
+
+        {/* 코 */}
+        <ellipse cx="22" cy="29" rx="3.5" ry="2.5" fill="#1A0800" />
+        <ellipse cx="21" cy="28.2" rx="1.2" ry="0.8" fill="white" opacity="0.38" />
+
+        {/* 인중 */}
+        <line x1="22" y1="31" x2="22" y2="33" stroke="#1A0800" strokeWidth="1.2" strokeLinecap="round" />
+
+        {/* 미소 */}
+        <path d="M16 33 Q22 38 28 33" stroke="#1A0800" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+
+        {/* 혀 (살짝 내밀어) */}
+        <ellipse cx="22" cy="36" rx="3" ry="2.2" fill="#FF6B8A" />
+        <ellipse cx="22" cy="35.5" rx="2" ry="1.2" fill="#FF8FAB" opacity="0.7" />
+      </svg>
+
+      <style>{`
+        @keyframes poodle-run {
+          0%   { transform: translateY(0px)  rotate(-7deg) scaleX(1.06); }
+          20%  { transform: translateY(-5px) rotate(-3deg) scaleX(1); }
+          40%  { transform: translateY(-6px) rotate(0deg)  scaleX(0.97); }
+          60%  { transform: translateY(-5px) rotate(3deg)  scaleX(1); }
+          80%  { transform: translateY(-2px) rotate(7deg)  scaleX(1.06); }
+          100% { transform: translateY(0px)  rotate(-7deg) scaleX(1.06); }
+        }
+        @keyframes poodle-idle {
+          0%, 100% { transform: translateY(0px) rotate(0deg); }
+          30%      { transform: translateY(-3px) rotate(-2deg); }
+          70%      { transform: translateY(-2px) rotate(2deg); }
+        }
+      `}</style>
+    </div>
+  )
+}
