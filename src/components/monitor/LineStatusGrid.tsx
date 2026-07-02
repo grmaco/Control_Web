@@ -28,6 +28,9 @@ import { ContinuousInputGatherOverlay } from './ContinuousInputGatherOverlay'
 import type { GatherProbeState } from '../../utils/continuousInputGather'
 import type { PathSimulationLoad } from '../../types/unitProperties'
 import { useTouchLayout } from '../../hooks/useTouchLayout'
+import { OhtRailLayer } from './OhtRailLayer'
+import { OhtVehicleOverlay } from './OhtVehicleOverlay'
+import type { OhtRailGraph, OhtVehicleState } from '../../utils/ohtSimulation'
 
 interface LineStatusGridProps {
   line: ConveyorLine
@@ -77,6 +80,13 @@ interface LineStatusGridProps {
   simDestinationByUnitId?: Record<string, string>
   /** 모니터링 2.5D 시점 표현 */
   is25DView?: boolean
+  /** OHT 레일 오버레이 표시 (표시 전용) */
+  showOhtRails?: boolean
+  /** OHT 시뮬 대차 (애니메이션) */
+  ohtVehicles?: OhtVehicleState[]
+  ohtGraph?: OhtRailGraph
+  ohtSimActive?: boolean
+  ohtStepMs?: number
   className?: string
 }
 
@@ -179,6 +189,11 @@ export function LineStatusGrid({
   continuousGatherAnimating = false,
   continuousGatherOverlayActive,
   warehouseFillCounts = {},
+  showOhtRails = false,
+  ohtVehicles = [],
+  ohtGraph,
+  ohtSimActive = false,
+  ohtStepMs = 600,
   className,
 }: LineStatusGridProps) {
   const layoutSignature = useMemo(() => lineLayoutSignature(line), [line])
@@ -579,6 +594,24 @@ export function LineStatusGrid({
         )
       })}
       </div>
+      {showOhtRails ? (
+        <OhtRailLayer
+          line={line}
+          viewport={{ minX, minY, cols, rows }}
+          cellSize={cellSize}
+          interactive={false}
+        />
+      ) : null}
+      {ohtGraph && ohtVehicles.length > 0 ? (
+        <OhtVehicleOverlay
+          vehicles={ohtVehicles}
+          graph={ohtGraph}
+          viewport={{ minX, minY, cols, rows }}
+          cellSize={cellSize}
+          active={ohtSimActive}
+          stepMs={ohtStepMs}
+        />
+      ) : null}
       <ContinuousInputGatherOverlay
         active={
           (continuousGatherOverlayActive ?? continuousInputActive) && simulationInProgress

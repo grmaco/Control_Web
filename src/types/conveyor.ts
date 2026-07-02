@@ -45,6 +45,9 @@ import type {
 
 export type { UnitRole, JunctionRoutingProperties, TransitLinkedUnitsProperties, StkProperties, PortProperties, OutputPortProperties, UnitRoleProperties } from './unitProperties'
 
+import type { OhtRailUnit, OhtUnit } from './oht'
+export type { OhtRailUnit, OhtUnit, OhtDir, OhtRailType } from './oht'
+
 export interface ConveyorUnit {
   id: string
   /** @deprecated name과 동일하게 유지 — 로드 시 name으로 마이그레이션 */
@@ -96,6 +99,10 @@ export interface ConveyorLine {
   semiCnvWsUrl?: string
   gridSize: { cols: number; rows: number }
   units: ConveyorUnit[]
+  /** OHT 반송 레이어 — 맵 위에 겹쳐지는 레일(별도 레이어, 컨베이어 units[]와 독립) */
+  ohtRails?: OhtRailUnit[]
+  /** OHT 대차/도크 유닛 — 시뮬레이션 시 레일을 따라 이동 */
+  ohtUnits?: OhtUnit[]
   /** @deprecated flowRole=entry 사용 — 로드 시 자동 마이그레이션 */
   baseUnitId?: string | null
   createdAt: string

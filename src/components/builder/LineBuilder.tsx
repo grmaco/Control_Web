@@ -40,6 +40,27 @@ import {
   parseCellId,
   type PaletteDragData,
 } from './dnd'
+import type { OhtSelection } from '../../types/oht'
+import { OHT_RAIL_TYPES, ohtRailLabel } from '../../constants/ohtRail'
+import {
+  addOhtRailToLine,
+  addOhtUnitToLine,
+  canPlaceOhtRailAt,
+  canPlaceOhtUnitAt,
+  moveOhtRailInLine,
+  moveOhtUnitInLine,
+  removeOhtRailFromLine,
+  removeOhtUnitFromLine,
+  renameOhtUnitInLine,
+  rotateOhtRailInLine,
+  rotateOhtUnitInLine,
+  setOhtUnitRotation,
+  getOhtRails,
+  getOhtUnits,
+} from '../../utils/ohtLayer'
+import { OhtRailPaletteItem, OhtUnitPaletteItem } from './OhtPaletteItem'
+import { OhtRailLayer } from '../monitor/OhtRailLayer'
+import { OhtBuilderPropertiesPanel } from './OhtBuilderPropertiesPanel'
 import type { LineViewport } from '../../utils/lineViewport'
 import { assignSequentialNamesFromEntries } from '../../utils/sequentialNaming'
 import { hasFlowEntries, isFlowCapableUnit, isOutputDestinationCandidate, getEntryUnits, getExitUnits } from '../../utils/flowEntries'
@@ -76,6 +97,8 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     string | null
   >(null)
   const [mobileToolbarOpen, setMobileToolbarOpen] = useState(false)
+  const [paletteMode, setPaletteMode] = useState<'conveyor' | 'oht'>('conveyor')
+  const [ohtSelection, setOhtSelection] = useState<OhtSelection | null>(null)
   const touchLayout = useTouchLayout()
   const logApplication = useConveyorStore((s) => s.logApplication)
   const draftRef = useRef(draft)
@@ -88,6 +111,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     setSelectedUnitIds([])
     setCompletionMessage(null)
     setOutputDestinationPickPortId(null)
+    setOhtSelection(null)
   }, [line.id])
 
   useEffect(() => {
@@ -147,10 +171,15 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
       return { isValidDrop: false, isInvalidDrop: false }
     }
 
+    const isOhtDrag =
+      activeDrag.source === 'oht-palette' || activeDrag.source === 'oht-grid'
+
     const footprint =
       activeDrag.source === 'palette'
         ? getUnitFootprint(activeDrag.type)
-        : getUnitFootprint(draggingUnit ?? { type: 'straight' } as ConveyorUnit)
+        : isOhtDrag
+          ? { cols: 1, rows: 1 }
+          : getUnitFootprint(draggingUnit ?? { type: 'straight' } as ConveyorUnit)
 
     const footprintCells = getFootprintCells(
       overCell.gridX,
@@ -162,6 +191,18 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     )
     if (!inFootprint) {
       return { isValidDrop: false, isInvalidDrop: false }
+    }
+
+    if (isOhtDrag) {
+      const kind =
+        activeDrag.source === 'oht-palette' ? activeDrag.kind : activeDrag.kind
+      const excludeId =
+        activeDrag.source === 'oht-grid' ? activeDrag.ohtId : undefined
+      const canPlaceOht =
+        kind === 'rail'
+          ? canPlaceOhtRailAt(draft, overCell.gridX, overCell.gridY, excludeId)
+          : canPlaceOhtUnitAt(draft, overCell.gridX, overCell.gridY, excludeId)
+      return { isValidDrop: canPlaceOht, isInvalidDrop: !canPlaceOht }
     }
 
     const canPlace =
@@ -248,6 +289,37 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
       return
     }
 
+    if (dragData.source === 'oht-palette') {
+      const next =
+        dragData.kind === 'rail' && dragData.railType
+          ? addOhtRailToLine(currentDraft, dragData.railType, gridX, gridY)
+          : dragData.kind === 'unit'
+            ? addOhtUnitToLine(currentDraft, gridX, gridY)
+            : null
+      if (!next) return
+      await persist(next)
+      const placed =
+        dragData.kind === 'rail'
+          ? getOhtRails(next).find((r) => r.gridX === gridX && r.gridY === gridY)
+          : getOhtUnits(next).find((u) => u.gridX === gridX && u.gridY === gridY)
+      if (placed) {
+        setSelectedUnitIds([])
+        setOhtSelection({ kind: dragData.kind, id: placed.id })
+      }
+      return
+    }
+
+    if (dragData.source === 'oht-grid') {
+      const next =
+        dragData.kind === 'rail'
+          ? moveOhtRailInLine(currentDraft, dragData.ohtId, gridX, gridY)
+          : moveOhtUnitInLine(currentDraft, dragData.ohtId, gridX, gridY)
+      if (!next) return
+      await persist(next)
+      setOhtSelection({ kind: dragData.kind, id: dragData.ohtId })
+      return
+    }
+
     const isGroupMove =
       currentSelectedIds.length > 1 && currentSelectedSet.has(dragData.unitId)
 
@@ -308,6 +380,43 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
       setSelectedUnitIds([])
     },
     [draft, persist],
+  )
+
+  const handleOhtRotate = useCallback(async () => {
+    if (!ohtSelection) return
+    const next =
+      ohtSelection.kind === 'rail'
+        ? rotateOhtRailInLine(draftRef.current, ohtSelection.id)
+        : rotateOhtUnitInLine(draftRef.current, ohtSelection.id)
+    if (next) await persist(next)
+  }, [ohtSelection, persist])
+
+  const handleOhtSetRotation = useCallback(
+    async (rotation: 0 | 90 | 180 | 270) => {
+      if (ohtSelection?.kind !== 'unit') return
+      const next = setOhtUnitRotation(draftRef.current, ohtSelection.id, rotation)
+      if (next) await persist(next)
+    },
+    [ohtSelection, persist],
+  )
+
+  const handleOhtDelete = useCallback(async () => {
+    if (!ohtSelection) return
+    const next =
+      ohtSelection.kind === 'rail'
+        ? removeOhtRailFromLine(draftRef.current, ohtSelection.id)
+        : removeOhtUnitFromLine(draftRef.current, ohtSelection.id)
+    await persist(next)
+    setOhtSelection(null)
+  }, [ohtSelection, persist])
+
+  const handleOhtRename = useCallback(
+    async (name: string) => {
+      if (ohtSelection?.kind !== 'unit') return
+      const next = renameOhtUnitInLine(draftRef.current, ohtSelection.id, name)
+      await persist(next)
+    },
+    [ohtSelection, persist],
   )
 
   const handleSelectAll = useCallback(() => {
@@ -423,6 +532,19 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
         setOutputDestinationPickPortId(null)
         return
       }
+      // OHT 레이어 선택 시 R 회전 · Delete 삭제
+      if (ohtSelection) {
+        if (e.key.toLowerCase() === 'r' && ohtSelection.kind === 'rail') {
+          e.preventDefault()
+          void handleOhtRotate()
+          return
+        }
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          e.preventDefault()
+          void handleOhtDelete()
+          return
+        }
+      }
       if (e.key.toLowerCase() !== 'r' || selectedCount !== 1 || !selectedUnit) return
       if (!showsRotation(selectedUnit.type)) return
       e.preventDefault()
@@ -430,7 +552,15 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [outputDestinationPickPortId, selectedCount, selectedUnit, handleRotate])
+  }, [
+    outputDestinationPickPortId,
+    selectedCount,
+    selectedUnit,
+    handleRotate,
+    ohtSelection,
+    handleOhtRotate,
+    handleOhtDelete,
+  ])
 
   const activeUnit: ConveyorUnit | null =
     activeDrag?.source === 'grid'
@@ -465,14 +595,55 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[200px_1fr_240px]">
         <aside className="rounded-lg border border-slate-800 bg-slate-900 p-4">
           <h3 className="mb-3 text-sm font-medium text-slate-300">팔레트</h3>
-          <ul className="grid grid-cols-2 gap-2 lg:block lg:space-y-2">
-            {PALETTE_TYPES.map((type) => (
-              <PaletteItem key={type} type={type} />
-            ))}
-          </ul>
-          <p className="mt-4 text-xs leading-relaxed text-slate-500">
-            팔레트 항목을 그리드 빈 칸으로 드래그해 배치하세요.
-          </p>
+          <div className="mb-3 grid grid-cols-2 gap-1 rounded-md border border-slate-700 bg-slate-950 p-1">
+            <button
+              type="button"
+              onClick={() => setPaletteMode('conveyor')}
+              className={`rounded px-2 py-1.5 text-xs font-medium transition-colors ${
+                paletteMode === 'conveyor'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-400 hover:bg-slate-800'
+              }`}
+            >
+              컨베이어
+            </button>
+            <button
+              type="button"
+              onClick={() => setPaletteMode('oht')}
+              className={`rounded px-2 py-1.5 text-xs font-medium transition-colors ${
+                paletteMode === 'oht'
+                  ? 'bg-cyan-600 text-white'
+                  : 'text-slate-400 hover:bg-slate-800'
+              }`}
+            >
+              OHT
+            </button>
+          </div>
+          {paletteMode === 'conveyor' ? (
+            <>
+              <ul className="grid grid-cols-2 gap-2 lg:block lg:space-y-2">
+                {PALETTE_TYPES.map((type) => (
+                  <PaletteItem key={type} type={type} />
+                ))}
+              </ul>
+              <p className="mt-4 text-xs leading-relaxed text-slate-500">
+                팔레트 항목을 그리드 빈 칸으로 드래그해 배치하세요.
+              </p>
+            </>
+          ) : (
+            <>
+              <ul className="space-y-2">
+                {OHT_RAIL_TYPES.map((railType) => (
+                  <OhtRailPaletteItem key={railType} railType={railType} />
+                ))}
+                <OhtUnitPaletteItem />
+              </ul>
+              <p className="mt-4 text-xs leading-relaxed text-slate-500">
+                OHT 레일·대차를 맵 위로 드래그해 배치하세요. 레일은 컨베이어 위에
+                겹쳐지는 별도 레이어입니다.
+              </p>
+            </>
+          )}
         </aside>
 
         <section className="rounded-lg border border-slate-800 bg-slate-900 p-4">
@@ -511,6 +682,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                 doubleClick={{ disabled: true }}
               >
                 <TransformComponent wrapperStyle={{ width: '100%', height: '100%' }}>
+                  <div className="relative inline-block">
                   <div
                     className="inline-grid gap-0 select-none"
                     style={{
@@ -522,6 +694,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                         setOutputDestinationPickPortId(null)
                       }
                       setSelectedUnitIds([])
+                      setOhtSelection(null)
                     }}
                   >
             {Array.from({ length: viewport.cols * viewport.rows }).map((_, index) => {
@@ -602,6 +775,23 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
               )
             })}
                   </div>
+                  <OhtRailLayer
+                    line={draft}
+                    viewport={{
+                      minX: viewport.minX,
+                      minY: viewport.minY,
+                      cols: viewport.cols,
+                      rows: viewport.rows,
+                    }}
+                    cellSize={BUILDER_CELL_SIZE}
+                    interactive={paletteMode === 'oht'}
+                    selection={ohtSelection}
+                    onSelect={(selection) => {
+                      setSelectedUnitIds([])
+                      setOhtSelection(selection)
+                    }}
+                  />
+                  </div>
                 </TransformComponent>
               </TransformWrapper>
             </div>
@@ -663,17 +853,28 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
           {!touchLayout ? (
             <h3 className="mb-3 text-sm font-medium text-slate-300">속성</h3>
           ) : null}
-          <UnitPropertiesPanel
-            line={draft}
-            unit={selectedUnit}
-            selectedUnitIds={selectedUnitIds}
-            onChange={persist}
-            onDelete={handleDelete}
-            onRotate={handleRotate}
-            outputDestinationPickPortId={outputDestinationPickPortId}
-            onStartPickOutputDestination={handleStartPickOutputDestination}
-            onCancelPickOutputDestination={handleCancelPickOutputDestination}
-          />
+          {ohtSelection ? (
+            <OhtBuilderPropertiesPanel
+              line={draft}
+              selection={ohtSelection}
+              onRotate={handleOhtRotate}
+              onSetRotation={handleOhtSetRotation}
+              onDelete={handleOhtDelete}
+              onRename={handleOhtRename}
+            />
+          ) : (
+            <UnitPropertiesPanel
+              line={draft}
+              unit={selectedUnit}
+              selectedUnitIds={selectedUnitIds}
+              onChange={persist}
+              onDelete={handleDelete}
+              onRotate={handleRotate}
+              outputDestinationPickPortId={outputDestinationPickPortId}
+              onStartPickOutputDestination={handleStartPickOutputDestination}
+              onCancelPickOutputDestination={handleCancelPickOutputDestination}
+            />
+          )}
         </aside>
       </div>
 
@@ -682,6 +883,16 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
           <PaletteDragPreview
             label={typeLabel((activeDrag as PaletteDragData).type)}
           />
+        ) : activeDrag?.source === 'oht-palette' ? (
+          <PaletteDragPreview
+            label={
+              activeDrag.kind === 'rail' && activeDrag.railType
+                ? ohtRailLabel(activeDrag.railType)
+                : 'OHT 대차'
+            }
+          />
+        ) : activeDrag?.source === 'oht-grid' ? (
+          <PaletteDragPreview label={activeDrag.kind === 'rail' ? 'OHT 레일' : 'OHT 대차'} />
         ) : activeUnit ? (
           <UnitDragPreview unit={activeUnit} cellSize={BUILDER_CELL_SIZE} />
         ) : null}

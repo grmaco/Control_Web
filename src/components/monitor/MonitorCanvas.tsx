@@ -28,6 +28,8 @@ import { LineStatusGrid } from './LineStatusGrid'
 import { MonitorMapControls } from './MonitorMapControls'
 import { PathSimulationBar, PathSimulationPlaybackControls } from './PathSimulationBar'
 import { FLOW_CALLOUT_PANEL_CLASS, FLOW_UNIT_PEEK_HIT_CLASS } from './FlowCalloutLayer'
+import { OhtSimulationBar } from './OhtSimulationBar'
+import { useOhtSimulation } from '../../hooks/useOhtSimulation'
 
 const CELL_SIZE = MONITOR_CELL_SIZE
 const LABELS_MIN_EFFECTIVE_CELL = 32
@@ -164,6 +166,9 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   )
   const [scale, setScale] = useState(initialTransform.scale)
   const [is25DView, setIs25DView] = useState(false)
+  const [simMode, setSimMode] = useState<'conveyor' | 'oht'>('conveyor')
+  const oht = useOhtSimulation(line)
+  const ohtMode = simMode === 'oht'
   const [calloutPanLock, setCalloutPanLock] = useState(false)
   const [calloutDeselectToken, setCalloutDeselectToken] = useState(0)
   const [simBlockPopupOpen, setSimBlockPopupOpen] = useState(false)
@@ -397,11 +402,63 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
         touchLayout ? 'overflow-visible' : 'overflow-hidden'
       }`}
     >
-      <div className="border-b border-slate-800 px-3 py-2 sm:px-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-3 py-2 sm:px-4">
         <p className="text-sm text-slate-400">
           {line.name} · {viewport.cols}×{viewport.rows}
         </p>
+        <div className="flex gap-1 rounded-md border border-slate-700 bg-slate-950 p-1">
+          <button
+            type="button"
+            onClick={() => {
+              setSimMode('conveyor')
+              logButton('Sim Mode: Conveyor')
+            }}
+            className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+              !ohtMode ? 'bg-blue-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+            }`}
+          >
+            컨베이어 모드
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSimMode('oht')
+              logButton('Sim Mode: OHT')
+            }}
+            className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+              ohtMode ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:bg-slate-800'
+            }`}
+          >
+            OHT 모드
+          </button>
+        </div>
       </div>
+
+      {ohtMode ? (
+        <OhtSimulationBar
+          status={oht.status}
+          railCount={oht.graph.nodes.size}
+          vehicleCount={line.ohtUnits?.length ?? 0}
+          targetCount={oht.targets.length}
+          canSimulate={oht.canSimulate}
+          onStart={() => {
+            oht.start()
+            logButton('OHT Simulation Start')
+          }}
+          onPause={() => {
+            oht.pause()
+            logButton('OHT Simulation Pause')
+          }}
+          onResume={() => {
+            oht.resume()
+            logButton('OHT Simulation Resume')
+          }}
+          onReset={() => {
+            oht.reset()
+            logButton('OHT Simulation Reset')
+          }}
+        />
+      ) : null}
 
       {touchLayout ? (
         <>
@@ -461,11 +518,18 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
                 calloutDeselectToken={calloutDeselectToken}
                 simDestinationByUnitId={simulation.simDestinationByUnitId}
                 is25DView={is25DView}
+                showOhtRails={ohtMode}
+                ohtVehicles={ohtMode ? oht.vehicles : []}
+                ohtGraph={oht.graph}
+                ohtSimActive={ohtMode && oht.status === 'playing'}
+                ohtStepMs={oht.stepMs}
                 className="select-none"
               />
             </TransformComponent>
           </TransformWrapper>
 
+          {!ohtMode && (
+          <>
           <PathSimulationBar
             unitCount={line.units.length}
             mode={simulation.mode}
@@ -569,9 +633,13 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
               logButton('Path Simulation Step')
             }}
           />
+          </>
+          )}
         </>
       ) : (
         <>
+      {!ohtMode && (
+      <>
       <PathSimulationBar
         unitCount={line.units.length}
         mode={simulation.mode}
@@ -675,6 +743,8 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
           logButton('Path Simulation Step')
         }}
       />
+      </>
+      )}
 
       <TransformWrapper
         key={line.id}
@@ -732,6 +802,11 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             calloutDeselectToken={calloutDeselectToken}
             simDestinationByUnitId={simulation.simDestinationByUnitId}
             is25DView={is25DView}
+            showOhtRails={ohtMode}
+            ohtVehicles={ohtMode ? oht.vehicles : []}
+            ohtGraph={oht.graph}
+            ohtSimActive={ohtMode && oht.status === 'playing'}
+            ohtStepMs={oht.stepMs}
             className="select-none"
           />
         </TransformComponent>
