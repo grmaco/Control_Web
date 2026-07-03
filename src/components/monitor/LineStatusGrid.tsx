@@ -32,7 +32,7 @@ import { OhtRailLayer } from './OhtRailLayer'
 import { OhtVehicleOverlay } from './OhtVehicleOverlay'
 import type { OhtRailGraph, OhtVehicleState } from '../../utils/ohtSimulation'
 import { StorageSimCalloutOverlay } from './PortStorageSimOverlay'
-import type { StorageSimState } from '../../hooks/usePortStorageSimulation'
+import type { StorageSimState, PortSimState } from '../../hooks/usePortStorageSimulation'
 
 interface LineStatusGridProps {
   line: ConveyorLine
@@ -93,6 +93,7 @@ interface LineStatusGridProps {
   /** 포트/창고 시뮬레이션 */
   portStorageSimActive?: boolean
   storageSimStates?: Record<string, StorageSimState>
+  portSimStates?: Record<string, PortSimState>
   onStorageSimClick?: (storageId: string) => void
   onStorageSimDoubleClick?: (storageId: string) => void
   hiddenStorageCalloutIds?: Set<string>
@@ -206,6 +207,7 @@ export function LineStatusGrid({
   ohtPoodleMode = false,
   portStorageSimActive = false,
   storageSimStates,
+  portSimStates,
   onStorageSimClick,
   onStorageSimDoubleClick,
   hiddenStorageCalloutIds,
@@ -740,6 +742,7 @@ export function LineStatusGrid({
           transitIntervalSec={simulationTransitIntervalSec}
           dischargeIntervalSec={simulationDischargeIntervalSec}
           continuousInputActive={continuousInputActive}
+          portSimStates={portSimStates}
         />
       ) : null}
     </div>

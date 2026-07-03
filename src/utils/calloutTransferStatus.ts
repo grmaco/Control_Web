@@ -1,11 +1,12 @@
 import type { SemiCnvAutoStatus, SemiCnvUnitRuntime } from '../types/semicnv'
 
-export type CalloutTransferStatus = 'LD' | 'ULD' | 'BUSY'
+export type CalloutTransferStatus = 'LD' | 'ULD' | 'BUSY' | 'READY'
 
 export const CALLOUT_TRANSFER_STATUS_LABEL: Record<CalloutTransferStatus, string> = {
   LD: 'LD',
   ULD: 'ULD',
   BUSY: 'BUSY',
+  READY: 'READY',
 }
 
 /** V3 런타임 — CST 유무 + autoStatus 기반 LD / ULD / BUSY */

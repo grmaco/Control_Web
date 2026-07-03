@@ -590,6 +590,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
                 ohtPoodleMode={ohtPoodleMode}
                 portStorageSimActive={portStorageSim.isRunning}
                 storageSimStates={portStorageSim.storageStates}
+                portSimStates={portStorageSim.isRunning ? portStorageSim.portStates : undefined}
                 onStorageSimClick={portStorageSim.isRunning ? setSelectedStorageId : undefined}
                 onStorageSimDoubleClick={portStorageSim.isRunning ? handleStorageDoubleClick : undefined}
                 hiddenStorageCalloutIds={hiddenStorageCalloutIds}
@@ -881,6 +882,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             ohtPoodleMode={ohtPoodleMode}
             portStorageSimActive={portStorageSim.isRunning}
             storageSimStates={portStorageSim.storageStates}
+            portSimStates={portStorageSim.isRunning ? portStorageSim.portStates : undefined}
             onStorageSimClick={portStorageSim.isRunning ? setSelectedStorageId : undefined}
             className="select-none"
           />

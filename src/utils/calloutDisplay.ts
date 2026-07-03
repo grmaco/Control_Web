@@ -10,6 +10,7 @@ import {
   type CalloutTransferStatus,
 } from './calloutTransferStatus'
 import { resolveSimulationUnitTransferStatus } from './pathSimulation'
+import type { PortSimState } from '../hooks/usePortStorageSimulation'
 
 export interface CalloutDisplayInfo {
   name: string
@@ -66,6 +67,8 @@ export function buildCalloutDisplayInfo(
     transitIntervalSec?: number
     dischargeIntervalSec?: number
     continuousInputActive?: boolean
+    /** 포트/창고 핸드쉐이크 시뮬 상태 — READY/BUSY 오버라이드용 */
+    portSimState?: PortSimState
   },
   unitAlarms?: Record<string, string>,
 ): CalloutDisplayInfo {
@@ -118,8 +121,12 @@ export function buildCalloutDisplayInfo(
         })
       : null
   const liveStatus = resolveLiveTransferStatus(runtime, hasCst)
-  const transferStatus: CalloutTransferStatus =
+  const baseStatus: CalloutTransferStatus =
     simStatus ?? (runtime ? liveStatus : hasCst ? 'ULD' : 'LD')
+  // 핸드쉐이크 중 READY/BUSY는 portSimState가 우선 — 경로 시뮬이 모르는 상태
+  const portSimStatus = options?.portSimState?.status
+  const transferStatus: CalloutTransferStatus =
+    portSimStatus === 'READY' || portSimStatus === 'BUSY' ? portSimStatus : baseStatus
 
   return {
     name: unit.name,

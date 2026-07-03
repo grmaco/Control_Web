@@ -45,6 +45,8 @@ interface FlowCalloutOverlayProps {
   transitIntervalSec?: number
   dischargeIntervalSec?: number
   continuousInputActive?: boolean
+  /** 포트/창고 핸드쉐이크 시뮬 — READY/BUSY 콜아웃 오버라이드 */
+  portSimStates?: Record<string, import('../hooks/usePortStorageSimulation').PortSimState>
 }
 
 export function FlowCalloutOverlay({
@@ -69,6 +71,7 @@ export function FlowCalloutOverlay({
   transitIntervalSec,
   dischargeIntervalSec,
   continuousInputActive = false,
+  portSimStates,
 }: FlowCalloutOverlayProps) {
   const unitAlarms = useSemiCnvStore((s) => s.unitAlarms)
   const [positions, setPositions] = useState<Record<string, FlowCalloutPosition>>(() =>
@@ -255,6 +258,7 @@ export function FlowCalloutOverlay({
                   transitIntervalSec,
                   dischargeIntervalSec,
                   continuousInputActive,
+                  portSimState: portSimStates?.[callout.unitId],
                 },
                 unitAlarms,
               )
