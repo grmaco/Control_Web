@@ -37,6 +37,7 @@ import {
 import { isStkAtCapacity } from './warehouseSlots'
 import { SIM_STK_IO_ENABLED } from '../constants/simStkIo'
 import {
+  findJunctionAdjacentPort,
   inboundDestinationDisplayName,
   planInboundPathFromFlowTraversal,
 } from './simulationDestination'
@@ -768,9 +769,18 @@ export function planInboundLoadPath(
     const linkedInPort = isExitDest ? findLinkedInPortAtExit(line, destUnit.id) : null
     const linkedExitPort = linkedOutPort ?? linkedInPort
 
+    // 분기 목적지에 직접 인접한 포트 — 직선 EXIT 연동 포트와 동일하게 경로 끝에 추가하여
+    // 분기유닛에서 포트로 자재가 이동하는 것을 시각화하고 LD/ULD/BUSY 신호를 생성
+    const junctionAdjacentPort =
+      !isExitDest && destUnit.type === 'junction'
+        ? findJunctionAdjacentPort(line, destUnit, unitMap)
+        : null
+
     let targetExitId: string | null
     if (linkedExitPort) {
       targetExitId = linkedExitPort.id
+    } else if (junctionAdjacentPort) {
+      targetExitId = junctionAdjacentPort.id
     } else if (isExitDest) {
       targetExitId = traversal.destinationUnitId
     } else {
@@ -780,9 +790,11 @@ export function planInboundLoadPath(
     // 투입점에 연동된 IN 포트를 경로 앞에 추가 (포트가 자재 공급) → ensureTransitWaypoints 포함
     const pathWithEntry = prependLinkedInputPort(line, entryUnitId, basePath)
 
-    // EXIT 포트를 경로 끝에 추가 (ensureTransitWaypoints 이후라 불필요한 경유 삽입 없음)
+    // EXIT 포트 또는 분기 인접 포트를 경로 끝에 추가
     const pathUnitIds = linkedExitPort
       ? [...pathWithEntry, linkedExitPort.id]
+      : junctionAdjacentPort
+      ? [...pathWithEntry, junctionAdjacentPort.id]
       : pathWithEntry
 
     return {
@@ -1553,6 +1565,24 @@ export function isLoadFullyDischarged(load: PathSimulationLoad): boolean {
     return load.stepIndex >= load.pathUnitIds.length - 1
   }
   return shouldRetainMaterialAtDestination(load)
+}
+
+/**
+ * SIM_STK_IO_ENABLED=false 일 때 OUT 포트에 자재가 영구 대기 중인지 — 택 타임 동결 조건.
+ * OUT 포트는 I/O 비활성 상태에서 discharge 가 차단되어 complete 가 절대 설정되지 않는다.
+ */
+export function isLoadAtBlockedPortDestination(
+  load: PathSimulationLoad,
+  unitMap: Map<string, ConveyorUnit>,
+): boolean {
+  if (load.complete || load.pathUnitIds.length === 0) return false
+  if (load.stepIndex < load.pathUnitIds.length - 1) return false
+  const currentId = load.pathUnitIds[load.stepIndex]
+  if (!currentId) return false
+  const unit = unitMap.get(currentId)
+  if (!unit || !isPortUnit(unit)) return false
+  if (SIM_STK_IO_ENABLED) return false
+  return (unit.portDirection ?? 'IN') === 'OUT'
 }
 
 type InboundRerouteResult = {

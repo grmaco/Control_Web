@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isPortUnit, isStorageUnit, unitTitle } from '../../constants/conveyorTypes'
 import type { ConveyorLine, ConveyorUnit } from '../../types/conveyor'
 import { STATUS_COLORS } from '../../constants/statusColors'
@@ -31,6 +31,8 @@ import { useTouchLayout } from '../../hooks/useTouchLayout'
 import { OhtRailLayer } from './OhtRailLayer'
 import { OhtVehicleOverlay } from './OhtVehicleOverlay'
 import type { OhtRailGraph, OhtVehicleState } from '../../utils/ohtSimulation'
+import { StorageSimCalloutOverlay } from './PortStorageSimOverlay'
+import type { StorageSimState } from '../../hooks/usePortStorageSimulation'
 
 interface LineStatusGridProps {
   line: ConveyorLine
@@ -88,6 +90,12 @@ interface LineStatusGridProps {
   ohtSimActive?: boolean
   ohtStepMs?: number
   ohtPoodleMode?: boolean
+  /** 포트/창고 시뮬레이션 */
+  portStorageSimActive?: boolean
+  storageSimStates?: Record<string, StorageSimState>
+  onStorageSimClick?: (storageId: string) => void
+  onStorageSimDoubleClick?: (storageId: string) => void
+  hiddenStorageCalloutIds?: Set<string>
   className?: string
 }
 
@@ -196,8 +204,15 @@ export function LineStatusGrid({
   ohtSimActive = false,
   ohtStepMs = 600,
   ohtPoodleMode = false,
+  portStorageSimActive = false,
+  storageSimStates,
+  onStorageSimClick,
+  onStorageSimDoubleClick,
+  hiddenStorageCalloutIds,
   className,
 }: LineStatusGridProps) {
+  // 창고 싱글/더블 클릭 구분 타이머 (200ms 내 2번 = 더블클릭)
+  const storageClickTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
   const layoutSignature = useMemo(() => lineLayoutSignature(line), [line])
   const unitByCell = useMemo(() => {
     const map = new Map<string, ConveyorUnit>()
@@ -540,9 +555,49 @@ export function LineStatusGrid({
                 height={spanHeight}
                 status={unit.status}
                 uid={`${unit.id}-${gridX}-${gridY}`}
-                filledSlotCount={warehouseFillCounts[unit.id] ?? 0}
+                filledSlotCount={
+                  portStorageSimActive && storageSimStates?.[unit.id] != null
+                    ? (storageSimStates[unit.id]!.filledSlots)
+                    : (warehouseFillCounts[unit.id] ?? 0)
+                }
               />
             )}
+            {/* 창고 시뮬 COMPLETE 파란박스 */}
+            {portStorageSimActive && isStorage && isMultiCellAnchor && unit &&
+              storageSimStates?.[unit.id]?.status === 'COMPLETE' ? (
+              <div
+                className="pointer-events-none absolute top-0 left-0 z-[6] box-border rounded-sm border-2 border-blue-400 bg-blue-400/12 shadow-[0_0_18px_rgba(96,165,250,0.7)]"
+                style={{ width: spanWidth, height: spanHeight }}
+                aria-hidden
+              />
+            ) : null}
+            {/* 창고 클릭 → 포트 선택 / 더블클릭 → 콜아웃 토글 (시뮬 중) */}
+            {portStorageSimActive && isStorage && isMultiCellAnchor &&
+              (onStorageSimClick ?? onStorageSimDoubleClick) ? (
+              <div
+                className="absolute top-0 left-0 z-[31] cursor-pointer touch-none"
+                style={{ width: spanWidth, height: spanHeight }}
+                aria-hidden
+                onClick={(e) => {
+                  e.stopPropagation()
+                  const uid = unit!.id
+                  const existing = storageClickTimersRef.current.get(uid)
+                  if (existing) {
+                    // 두 번째 클릭 → 더블클릭
+                    clearTimeout(existing)
+                    storageClickTimersRef.current.delete(uid)
+                    onStorageSimDoubleClick?.(uid)
+                  } else {
+                    // 첫 번째 클릭 — 200ms 내 두 번째가 없으면 싱글클릭
+                    const timer = setTimeout(() => {
+                      storageClickTimersRef.current.delete(uid)
+                      onStorageSimClick?.(uid)
+                    }, 200)
+                    storageClickTimersRef.current.set(uid, timer)
+                  }
+                }}
+              />
+            ) : null}
             {flow && unit && !isStorageUnit(unit) ? (
               <MinimapFlowArrow
                 unitType={unit.type}
@@ -652,6 +707,16 @@ export function LineStatusGrid({
         gridHeight={rows * cellSize}
         inputIntervalSec={continuousInputIntervalSec}
       />
+      {portStorageSimActive && storageSimStates ? (
+        <StorageSimCalloutOverlay
+          storageStates={storageSimStates}
+          line={line}
+          viewport={{ minX, minY, cols, rows }}
+          cellSize={cellSize}
+          scale={scale}
+          hiddenIds={hiddenStorageCalloutIds}
+        />
+      ) : null}
       {showFlowCallouts && visibleCallouts.length > 0 ? (
         <FlowCalloutOverlay
           callouts={visibleCallouts}

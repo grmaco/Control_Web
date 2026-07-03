@@ -22,6 +22,7 @@ import {
   countIncompleteSimulationLoads,
   initializeParallelLoads,
   isLoadFullyDischarged,
+  isLoadAtBlockedPortDestination,
   listSimulatableEntries,
   listSimulatableOutboundPorts,
   listTestMaterialUnits,
@@ -58,7 +59,6 @@ import { computeMinimapFlowMap } from '../utils/flowDirection'
 import { listReachableInboundDestinations } from '../utils/simulationDestination'
 import {
   anyInboundStkHasCapacity,
-  createFullStkFillCounts,
   isInboundConveyorLineFull,
   detectWarehouseDeposits,
   resolveInboundStorageTarget,
@@ -438,7 +438,11 @@ export function usePathSimulation(
     if (tackSessionStartRef.current == null && manualStepBonusSecRef.current <= 0) return
     const liveSec = getLiveTackSec()
     for (const load of loads) {
-      if (isLoadFullyDischarged(load) && frozenLoadTackSecRef.current[load.id] == null) {
+      if (frozenLoadTackSecRef.current[load.id] != null) continue
+      if (
+        isLoadFullyDischarged(load) ||
+        isLoadAtBlockedPortDestination(load, unitMapRef.current)
+      ) {
         frozenLoadTackSecRef.current[load.id] = liveSec
       }
     }
@@ -651,10 +655,6 @@ export function usePathSimulation(
         mode === 'inbound' &&
         selectedSourceUnitIds.length > 0
       ) {
-        const fullStkCounts = createFullStkFillCounts(activeLine)
-        warehouseFillCountsRef.current = fullStkCounts
-        setWarehouseFillCounts(fullStkCounts)
-        setWarehouseFullNotice(true)
         beginContinuousInputSession(activeLine)
         const testOnlyLoads = planLoads.filter((load) => load.clearsTestMaterial)
         const initialized =
@@ -1490,6 +1490,17 @@ export function usePathSimulation(
     status,
   ])
 
+  /** 포트 저장 핸드쉐이크 완료 시 호출 — 해당 포트에 있는 자재 로드를 경로 시뮬에서 제거 */
+  const dischargeLoadAtPort = useCallback((portUnitId: string) => {
+    setLoads((prev) =>
+      prev.filter((load) => {
+        if (load.pathUnitIds.length === 0) return true
+        const step = Math.min(Math.max(0, load.stepIndex), load.pathUnitIds.length - 1)
+        return load.pathUnitIds[step] !== portUnitId
+      }),
+    )
+  }, [])
+
   return {
     mode,
     changeMode,
@@ -1536,6 +1547,7 @@ export function usePathSimulation(
     setTurn180Sec,
     turn270Sec,
     setTurn270Sec,
+    dischargeLoadAtPort,
     incompleteLoadCount,
     tackTimeSummaries,
     continuousInputActive,

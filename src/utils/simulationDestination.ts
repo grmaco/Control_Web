@@ -112,6 +112,41 @@ export function isJunctionPortConnected(
   return false
 }
 
+/**
+ * 분기유닛 목적지에 연동된 포트를 반환.
+ * 아래 두 설정 중 하나라도 맞으면 포트를 경로에 추가한다.
+ *
+ * - Case A: 분기 속성의 "연동 유닛"에 포트가 직접 선택됨
+ *   (빌더 > 분기 클릭 > 연동 유닛 > 포트 선택)
+ * - Case B: 포트 속성의 "LOAD UNIT"에 분기유닛이 선택됨
+ *   (빌더 > 포트 클릭 > LOAD UNIT > 분기유닛 선택)
+ *
+ * 두 케이스 모두 분기의 transitLinkedUnits가 비어있지 않을 것을 전제로 한다.
+ */
+export function findJunctionAdjacentPort(
+  line: ConveyorLine,
+  junction: ConveyorUnit,
+  unitMap: Map<string, ConveyorUnit>,
+): ConveyorUnit | null {
+  const linkedUnitIds = getTransitLinkedUnitIds(line, junction)
+  if (linkedUnitIds.length === 0) return null
+
+  // Case A: 분기의 연동 유닛 중에 포트가 있는 경우
+  for (const linkedId of linkedUnitIds) {
+    const unit = unitMap.get(linkedId)
+    if (unit && isPortUnit(unit)) return unit
+  }
+
+  // Case B: 포트의 LOAD UNIT이 이 분기유닛인 경우
+  for (const unit of line.units) {
+    if (!isPortUnit(unit)) continue
+    const portLinkedId = getPortProperties(unit)?.linkedUnitId
+    if (portLinkedId === junction.id) return unit
+  }
+
+  return null
+}
+
 export type InboundTraversalPlan = {
   /** 시뮬 이동 경로(컨베이어만) — 최원 분기 목적지까지 */
   pathUnitIds: string[]

@@ -20,6 +20,7 @@ import {
   lineWithAllCvUnitsRunning,
   lineWithAllPortsRunning,
   listNonRunningPorts,
+  simulationCstUnitIds,
 } from '../../utils/pathSimulation'
 import { unitTitle } from '../../constants/conveyorTypes'
 import { isCvUnit } from '../../utils/unitMaterial'
@@ -30,6 +31,9 @@ import { PathSimulationBar, PathSimulationPlaybackControls } from './PathSimulat
 import { FLOW_CALLOUT_PANEL_CLASS, FLOW_UNIT_PEEK_HIT_CLASS } from './FlowCalloutLayer'
 import { OhtSimulationBar } from './OhtSimulationBar'
 import { useOhtSimulation } from '../../hooks/useOhtSimulation'
+import { usePortStorageSimulation } from '../../hooks/usePortStorageSimulation'
+import { PortSelectModal } from './PortStorageSimOverlay'
+import { isStorageUnit } from '../../constants/conveyorTypes'
 
 const CELL_SIZE = MONITOR_CELL_SIZE
 const LABELS_MIN_EFFECTIVE_CELL = 32
@@ -170,6 +174,63 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   const oht = useOhtSimulation(line)
   const ohtMode = simMode === 'oht'
   const [ohtPoodleMode, setOhtPoodleMode] = useState(false)
+  // 포트 ULD 감지용 — complete된 자재도 포함해야 포트 셀에 머문 자재가 ULD로 표시됨
+  // (simulation.cstUnitIds는 complete=true 자재를 제외하므로 별도 계산)
+  const portCstIds = useMemo(
+    () => simulationCstUnitIds(simulation.loads, { includeCompleted: true }),
+    [simulation.loads],
+  )
+  const portStorageSim = usePortStorageSimulation(
+    line,
+    portCstIds,
+    simulation.status,
+    simulation.dischargeLoadAtPort,
+  )
+
+  // 시뮬 완료 후에도 자재가 있던 셀을 시각적으로 유지 (glow 지속)
+  const visualCstIds = useMemo(() => {
+    if (simulation.status === 'complete') {
+      return simulationCstUnitIds(simulation.loads, { includeCompleted: true })
+    }
+    return simulation.cstUnitIds
+  }, [simulation.status, simulation.cstUnitIds, simulation.loads])
+
+  // 포트가 ULD/BUSY/READY 상태면 해당 셀도 glow — 포트는 경로 그래프에 미포함이어서
+  // 분기유닛에서 끝나는 경로여도 포트 셀까지 자재가 들어온 것을 시각화
+  const extendedVisualCstIds = useMemo(() => {
+    if (!portStorageSim.isRunning) return visualCstIds
+    const portActiveIds = Object.values(portStorageSim.portStates)
+      .filter((s) => s.status !== 'LD')
+      .map((s) => s.unitId)
+    if (portActiveIds.length === 0) return visualCstIds
+    return [...new Set([...visualCstIds, ...portActiveIds])]
+  }, [visualCstIds, portStorageSim.isRunning, portStorageSim.portStates])
+  const [selectedStorageId, setSelectedStorageId] = useState<string | null>(null)
+  const [hiddenStorageCalloutIds, setHiddenStorageCalloutIds] = useState<Set<string>>(new Set())
+
+  const handleStorageDoubleClick = useCallback((storageId: string) => {
+    setHiddenStorageCalloutIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(storageId)) next.delete(storageId)
+      else next.add(storageId)
+      return next
+    })
+  }, [])
+
+  // 컨베이어 시뮬 시작/종료에 맞춰 포트/창고 시뮬 자동 연동
+  const portSimStartedRef = useRef(false)
+  useEffect(() => {
+    const isActive = simulation.status !== 'idle'
+    if (isActive && !portSimStartedRef.current) {
+      portSimStartedRef.current = true
+      portStorageSim.start()
+    } else if (!isActive && portSimStartedRef.current) {
+      portSimStartedRef.current = false
+      portStorageSim.stop()
+    }
+  // portStorageSim.start/stop은 안정적 콜백이므로 status만 의존
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [simulation.status])
   const [calloutPanLock, setCalloutPanLock] = useState(false)
   const [calloutDeselectToken, setCalloutDeselectToken] = useState(0)
   const [simBlockPopupOpen, setSimBlockPopupOpen] = useState(false)
@@ -494,7 +555,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
                 showFlowArrows={line.units.length > 0}
                 showFlowCallouts={line.units.length > 0}
                 simulationNeonUnitIds={simulation.neonUnitIds}
-                simulationActiveUnitIds={simulation.cstUnitIds}
+                simulationActiveUnitIds={extendedVisualCstIds}
                 simulationStaticTestMaterialUnitIds={[
                   ...simulation.staticTestMaterialUnitIds,
                 ]}
@@ -527,6 +588,11 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
                 ohtSimActive={ohtMode && oht.status === 'playing'}
                 ohtStepMs={oht.stepMs}
                 ohtPoodleMode={ohtPoodleMode}
+                portStorageSimActive={portStorageSim.isRunning}
+                storageSimStates={portStorageSim.storageStates}
+                onStorageSimClick={portStorageSim.isRunning ? setSelectedStorageId : undefined}
+                onStorageSimDoubleClick={portStorageSim.isRunning ? handleStorageDoubleClick : undefined}
+                hiddenStorageCalloutIds={hiddenStorageCalloutIds}
                 className="select-none"
               />
             </TransformComponent>
@@ -626,6 +692,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             onReset={() => {
               simulation.reset()
               setCalloutDeselectToken((token) => token + 1)
+              setHiddenStorageCalloutIds(new Set())
               logButton('Path Simulation Reset')
             }}
             onStepForward={() => {
@@ -779,7 +846,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             showFlowArrows={line.units.length > 0}
             showFlowCallouts={line.units.length > 0}
             simulationNeonUnitIds={simulation.neonUnitIds}
-            simulationActiveUnitIds={simulation.cstUnitIds}
+            simulationActiveUnitIds={extendedVisualCstIds}
             simulationStaticTestMaterialUnitIds={[
               ...simulation.staticTestMaterialUnitIds,
             ]}
@@ -812,6 +879,9 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             ohtSimActive={ohtMode && oht.status === 'playing'}
             ohtStepMs={oht.stepMs}
             ohtPoodleMode={ohtPoodleMode}
+            portStorageSimActive={portStorageSim.isRunning}
+            storageSimStates={portStorageSim.storageStates}
+            onStorageSimClick={portStorageSim.isRunning ? setSelectedStorageId : undefined}
             className="select-none"
           />
         </TransformComponent>
@@ -1007,6 +1077,26 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
           </div>
         </div>
       )}
+
+      {/* 포트/창고 시뮬 - 포트 선택 모달 */}
+      {selectedStorageId && portStorageSim.isRunning ? (() => {
+        const storageUnit = line.units.find(
+          (u) => u.id === selectedStorageId && isStorageUnit(u),
+        )
+        if (!storageUnit) return null
+        const connectablePorts = portStorageSim.getConnectablePorts(selectedStorageId)
+        return (
+          <PortSelectModal
+            storageUnit={storageUnit}
+            connectablePorts={connectablePorts}
+            onSelect={(portId) => {
+              portStorageSim.startTransfer(selectedStorageId, portId)
+              setSelectedStorageId(null)
+            }}
+            onDismiss={() => setSelectedStorageId(null)}
+          />
+        )
+      })() : null}
     </div>
   )
 }

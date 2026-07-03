@@ -23,7 +23,9 @@ import {
 import { resolveOutputDestinationId, findUnitByRef } from './unitRefs'
 import {
   areGridAdjacent,
+  findUnitAtCell,
   getOrthogonalNeighborUnits,
+  getUnitFootprint,
   updateUnitInLine,
 } from './units'
 
@@ -236,6 +238,36 @@ export function resolvePortAdjacentStk(
     getOrthogonalNeighborUnits(line.units, port, cols, rows).find(isStorageUnit) ??
     null
   )
+}
+
+/** STK에 인접한 포트 목록 — 멀티셀 스토커 전체 외곽을 순회 (포트 선택 모달용) */
+export function resolveAdjacentPortsForStk(
+  line: UnitLineContext,
+  storage: ConveyorUnit,
+): ConveyorUnit[] {
+  const fp = getUnitFootprint(storage)
+  const seen = new Set<string>()
+  const ports: ConveyorUnit[] = []
+  const offsets = [[0, -1], [0, 1], [-1, 0], [1, 0]] as const
+  for (let dy = 0; dy < fp.rows; dy++) {
+    for (let dx = 0; dx < fp.cols; dx++) {
+      const cx = storage.gridX + dx
+      const cy = storage.gridY + dy
+      for (const [ox, oy] of offsets) {
+        const nx = cx + ox
+        const ny = cy + oy
+        // 스토커 자신의 풋프린트 내부 제외
+        if (nx >= storage.gridX && nx < storage.gridX + fp.cols &&
+            ny >= storage.gridY && ny < storage.gridY + fp.rows) continue
+        const neighbor = findUnitAtCell(line.units, nx, ny)
+        if (neighbor && isPortUnit(neighbor) && !seen.has(neighbor.id)) {
+          seen.add(neighbor.id)
+          ports.push(neighbor)
+        }
+      }
+    }
+  }
+  return ports
 }
 
 export function isJunctionUnit(unit: ConveyorUnit): boolean {
