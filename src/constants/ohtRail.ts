@@ -57,12 +57,12 @@ const BASE_OPENINGS: Record<OhtRailType, OhtDir[]> = {
   curve90:       ['N', 'E'],
   branchR:       ['N', 'S', 'E'],
   branchL:       ['N', 'S', 'W'],
-  yBypass:       ['N', 'E', 'W'],
+  yBypass:       ['S', 'E', 'W'],
   uBypass:       ['N', 'S'],
   doubleUBypass: ['N', 'S'],
   doubleBranchR: ['N', 'S', 'E'],
   doubleBranchL: ['N', 'S', 'W'],
-  doubleBranch2: ['N', 'E', 'W'],
+  doubleBranch2: ['S', 'E', 'W'],
 }
 
 const DIR_ORDER: OhtDir[] = ['N', 'E', 'S', 'W']
@@ -105,4 +105,34 @@ export const OHT_DIR_OPPOSITE: Record<OhtDir, OhtDir> = {
   E: 'W',
   S: 'N',
   W: 'E',
+}
+
+// ── 멀티셀 푸트프린트 ────────────────────────────────────────────────────────────
+
+/** 회전 0° 기준 추가 점유 칸 오프셋 (앵커=(0,0) 포함) */
+const BASE_FOOTPRINTS: Partial<Record<OhtRailType, Array<{ dx: number; dy: number }>>> = {
+  uBypass:       [{ dx: 0, dy: 0 }, { dx: 0, dy: 1 }],
+  doubleUBypass: [{ dx: 0, dy: 0 }, { dx: 0, dy: 1 }],
+}
+
+/** 오프셋 벡터를 90° CW 1스텝 회전 (스크린 좌표 y-down 기준) */
+function rotateOffset90CW({ dx, dy }: { dx: number; dy: number }) {
+  return { dx: -dy, dy: dx }
+}
+
+/**
+ * 레일이 실제로 점유하는 칸의 앵커 기준 오프셋 목록 (회전 적용).
+ * 1×1 레일은 [{dx:0,dy:0}] 단독 반환.
+ */
+export function ohtRailFootprint(
+  type: OhtRailType,
+  rotation: Rotation,
+): Array<{ dx: number; dy: number }> {
+  const base = BASE_FOOTPRINTS[type] ?? [{ dx: 0, dy: 0 }]
+  const steps = (rotation / 90) % 4
+  return base.map((p) => {
+    let r = p
+    for (let i = 0; i < steps; i++) r = rotateOffset90CW(r)
+    return r
+  })
 }

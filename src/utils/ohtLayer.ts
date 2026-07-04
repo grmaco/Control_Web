@@ -4,6 +4,7 @@ import type { OhtRailType, OhtRailUnit, OhtUnit } from '../types/oht'
 import {
   OHT_DIR_OFFSET,
   OHT_DIR_OPPOSITE,
+  ohtRailFootprint,
   ohtRailOpenings,
 } from '../constants/ohtRail'
 
@@ -40,7 +41,10 @@ export function findOhtRailAt(
   gridX: number,
   gridY: number,
 ): OhtRailUnit | undefined {
-  return rails.find((rail) => rail.gridX === gridX && rail.gridY === gridY)
+  return rails.find((rail) => {
+    const fp = ohtRailFootprint(rail.type, rail.rotation)
+    return fp.some(({ dx, dy }) => rail.gridX + dx === gridX && rail.gridY + dy === gridY)
+  })
 }
 
 export function findOhtUnitAt(
@@ -62,19 +66,30 @@ function withinBounds(line: ConveyorLine, gridX: number, gridY: number): boolean
 
 /**
  * OHT 레일 배치 가능 여부.
- * 레일은 컨베이어 위에 겹쳐지는 별도 레이어이므로 컨베이어 units[]와는 충돌하지 않는다.
- * OHT 레일끼리만 같은 칸 중복 배치를 막는다.
+ * type/rotation 을 제공하면 멀티셀 푸트프린트 전체를 검사한다.
+ * 생략하면 앵커 1칸만 검사 (드래그 오버 미리보기 용).
  */
 export function canPlaceOhtRailAt(
   line: ConveyorLine,
   gridX: number,
   gridY: number,
   excludeRailId?: string,
+  type?: OhtRailType,
+  rotation?: Rotation,
 ): boolean {
-  if (!withinBounds(line, gridX, gridY)) return false
-  const occupant = findOhtRailAt(getOhtRails(line), gridX, gridY)
-  if (!occupant) return true
-  return occupant.id === excludeRailId
+  const rails = getOhtRails(line)
+  const fp =
+    type != null
+      ? ohtRailFootprint(type, rotation ?? 0)
+      : [{ dx: 0, dy: 0 }]
+  for (const { dx, dy } of fp) {
+    const fx = gridX + dx
+    const fy = gridY + dy
+    if (!withinBounds(line, fx, fy)) return false
+    const occupant = findOhtRailAt(rails, fx, fy)
+    if (occupant && occupant.id !== excludeRailId) return false
+  }
+  return true
 }
 
 export function canPlaceOhtUnitAt(
@@ -108,7 +123,7 @@ export function addOhtRailToLine(
   gridX: number,
   gridY: number,
 ): ConveyorLine | null {
-  if (!canPlaceOhtRailAt(line, gridX, gridY)) return null
+  if (!canPlaceOhtRailAt(line, gridX, gridY, undefined, type, 0)) return null
   const now = new Date().toISOString()
   const rail: OhtRailUnit = {
     id: uuidv4(),
@@ -136,7 +151,7 @@ export function moveOhtRailInLine(
   const rail = rails.find((item) => item.id === railId)
   if (!rail) return null
   if (rail.gridX === gridX && rail.gridY === gridY) return line
-  if (!canPlaceOhtRailAt(line, gridX, gridY, railId)) return null
+  if (!canPlaceOhtRailAt(line, gridX, gridY, railId, rail.type, rail.rotation)) return null
   const now = new Date().toISOString()
   return {
     ...line,
