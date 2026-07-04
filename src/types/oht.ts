@@ -4,23 +4,33 @@ import type { Rotation } from './conveyor'
 export type OhtDir = 'N' | 'E' | 'S' | 'W'
 
 /**
- * OHT Rail 모듈 종류 (GPT 목업 팔레트 기준)
- * - straight  : 직선 레일 (N·S)
- * - curve     : 45° 곡선 레일 (N·E) — 90° 방향 전환
- * - branchT   : T 분기 (3way)
- * - branchX   : X 분기 (4way)
- * - branchY   : Y 분기 (3way)
- * - cross     : 크로스 분기 (교차 4way)
- * - railGate  : 레일 출입 (단일 개구부)
+ * OHT Rail 모듈 종류 — 실제 현장 레일 기준
+ *
+ * 표준 레일:
+ * - straight      : 직선 레일 (N·S)
+ * - curve90       : 90° 곡선 레일 (N·E)
+ * - branchR       : 분기 오른쪽 / BRANCH-R (N·S·E)
+ * - branchL       : 분기 왼쪽  / BRANCH-L (N·S·W)
+ * - yBypass       : Y-BYPASS (N·E·W)
+ *
+ * 1900mm 대형 레일:
+ * - uBypass       : U-BYPASS 1900 (N·S + U루프)
+ * - doubleUBypass : DOUBLE U-BYPASS 1900 (N·S + 양측 U루프)
+ * - doubleBranchR : DOUBLE BRANCH-1-R 1900 (N·S·E)
+ * - doubleBranchL : DOUBLE BRANCH-1-L 1900 (N·S·W)
+ * - doubleBranch2 : DOUBLE BRANCH-2 1900 (N·E·W)
  */
 export type OhtRailType =
   | 'straight'
-  | 'curve'
-  | 'branchT'
-  | 'branchX'
-  | 'branchY'
-  | 'cross'
-  | 'railGate'
+  | 'curve90'
+  | 'branchR'
+  | 'branchL'
+  | 'yBypass'
+  | 'uBypass'
+  | 'doubleUBypass'
+  | 'doubleBranchR'
+  | 'doubleBranchL'
+  | 'doubleBranch2'
 
 /** 맵 위에 겹쳐지는 OHT 레일 1칸 (별도 레이어 — 컨베이어 units[]와 독립) */
 export interface OhtRailUnit {

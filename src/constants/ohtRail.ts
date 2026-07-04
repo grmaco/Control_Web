@@ -1,46 +1,68 @@
 import type { OhtDir, OhtRailType } from '../types/oht'
 import type { Rotation } from '../types/conveyor'
 
-/** 팔레트 노출 순서 (GPT 목업 기준) */
-export const OHT_RAIL_TYPES: OhtRailType[] = [
+/** 표준 레일 (팔레트 상단 섹션) */
+export const OHT_STANDARD_RAIL_TYPES: OhtRailType[] = [
   'straight',
-  'curve',
-  'branchT',
-  'branchX',
-  'branchY',
-  'cross',
-  'railGate',
+  'curve90',
+  'branchR',
+  'branchL',
+  'yBypass',
+]
+
+/** 1900mm 대형 레일 (팔레트 하단 섹션) */
+export const OHT_LARGE_RAIL_TYPES: OhtRailType[] = [
+  'uBypass',
+  'doubleUBypass',
+  'doubleBranchR',
+  'doubleBranchL',
+  'doubleBranch2',
+]
+
+/** 전체 레일 목록 (순서 = 팔레트 순서) */
+export const OHT_RAIL_TYPES: OhtRailType[] = [
+  ...OHT_STANDARD_RAIL_TYPES,
+  ...OHT_LARGE_RAIL_TYPES,
 ]
 
 const RAIL_LABELS: Record<OhtRailType, string> = {
-  straight: '직선 레일',
-  curve: '45° 곡선 레일',
-  branchT: 'T 분기 (3way)',
-  branchX: 'X 분기 (4way)',
-  branchY: 'Y 분기 (3way)',
-  cross: '크로스 분기',
-  railGate: '레일 출입',
+  straight:      '직선 레일',
+  curve90:       '90° 곡선 레일',
+  branchR:       '분기 오른쪽',
+  branchL:       '분기 왼쪽',
+  yBypass:       'Y-BYPASS',
+  uBypass:       'U-BYPASS',
+  doubleUBypass: 'DOUBLE U-BYPASS',
+  doubleBranchR: 'DBL 분기 오른쪽',
+  doubleBranchL: 'DBL 분기 왼쪽',
+  doubleBranch2: 'DBL 분기-2',
 }
 
 const RAIL_DESCRIPTIONS: Record<OhtRailType, string> = {
-  straight: '직선 구간 · 양방향 개구부',
-  curve: '90° 방향 전환 곡선',
-  branchT: '3방향 T 분기',
-  branchX: '4방향 X 분기',
-  branchY: '3방향 Y 분기',
-  cross: '4방향 교차 분기',
-  railGate: '레일 진입·진출 게이트 (단일)',
+  straight:      '직선 구간 · 양방향 개구부',
+  curve90:       '90° 방향 전환 곡선',
+  branchR:       'BRANCH-R · 직선 + 오른쪽 분기',
+  branchL:       'BRANCH-L · 직선 + 왼쪽 분기',
+  yBypass:       'Y-BYPASS · 위쪽 양방향 분기',
+  uBypass:       'U-BYPASS 1900 · 측면 U루프 사이딩',
+  doubleUBypass: 'DOUBLE U-BYPASS 1900 · 양측 U루프',
+  doubleBranchR: 'DBL BRANCH-1-R 1900 · 광폭 오른쪽 분기',
+  doubleBranchL: 'DBL BRANCH-1-L 1900 · 광폭 왼쪽 분기',
+  doubleBranch2: 'DBL BRANCH-2 1900 · 광폭 양방향 분기',
 }
 
 /** 회전 0° 기준 기본 개구부 방향 */
 const BASE_OPENINGS: Record<OhtRailType, OhtDir[]> = {
-  straight: ['N', 'S'],
-  curve: ['N', 'E'],
-  branchT: ['E', 'W', 'S'],
-  branchX: ['N', 'E', 'S', 'W'],
-  branchY: ['N', 'E', 'W'],
-  cross: ['N', 'E', 'S', 'W'],
-  railGate: ['S'],
+  straight:      ['N', 'S'],
+  curve90:       ['N', 'E'],
+  branchR:       ['N', 'S', 'E'],
+  branchL:       ['N', 'S', 'W'],
+  yBypass:       ['N', 'E', 'W'],
+  uBypass:       ['N', 'S'],
+  doubleUBypass: ['N', 'S'],
+  doubleBranchR: ['N', 'S', 'E'],
+  doubleBranchL: ['N', 'S', 'W'],
+  doubleBranch2: ['N', 'E', 'W'],
 }
 
 const DIR_ORDER: OhtDir[] = ['N', 'E', 'S', 'W']
@@ -53,6 +75,10 @@ export function ohtRailDescription(type: OhtRailType): string {
   return RAIL_DESCRIPTIONS[type]
 }
 
+export function ohtRailIsLarge(type: OhtRailType): boolean {
+  return (OHT_LARGE_RAIL_TYPES as OhtRailType[]).includes(type)
+}
+
 /** 방향을 시계방향 rotation 만큼 회전 */
 export function rotateOhtDir(dir: OhtDir, rotation: Rotation): OhtDir {
   const steps = (rotation / 90) % 4
@@ -62,7 +88,7 @@ export function rotateOhtDir(dir: OhtDir, rotation: Rotation): OhtDir {
 
 /** 회전이 적용된 실제 개구부 방향 집합 */
 export function ohtRailOpenings(type: OhtRailType, rotation: Rotation): OhtDir[] {
-  return BASE_OPENINGS[type].map((dir) => rotateOhtDir(dir, rotation))
+  return (BASE_OPENINGS[type] ?? []).map((dir) => rotateOhtDir(dir, rotation))
 }
 
 /** 방향 → 인접 셀 오프셋 */

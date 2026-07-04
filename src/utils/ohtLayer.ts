@@ -7,10 +7,28 @@ import {
   ohtRailOpenings,
 } from '../constants/ohtRail'
 
+// ── 구 타입 → 신 타입 마이그레이션 ───────────────────────────────────────────
+
+const LEGACY_TYPE_MAP: Record<string, OhtRailType> = {
+  curve:    'curve90',
+  branchT:  'branchR',
+  branchX:  'branchR',
+  branchY:  'yBypass',
+  cross:    'doubleBranch2',
+  railGate: 'straight',
+}
+
+function migrateRailType(type: string): OhtRailType {
+  return (LEGACY_TYPE_MAP[type] ?? type) as OhtRailType
+}
+
 // ── 읽기 헬퍼 ─────────────────────────────────────────────────────────────────
 
 export function getOhtRails(line: ConveyorLine): OhtRailUnit[] {
-  return line.ohtRails ?? []
+  return (line.ohtRails ?? []).map((rail) => ({
+    ...rail,
+    type: migrateRailType(rail.type as string),
+  }))
 }
 
 export function getOhtUnits(line: ConveyorLine): OhtUnit[] {

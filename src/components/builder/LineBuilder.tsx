@@ -41,7 +41,7 @@ import {
   type PaletteDragData,
 } from './dnd'
 import type { OhtSelection } from '../../types/oht'
-import { OHT_RAIL_TYPES, ohtRailLabel } from '../../constants/ohtRail'
+import { OHT_LARGE_RAIL_TYPES, OHT_STANDARD_RAIL_TYPES, ohtRailLabel } from '../../constants/ohtRail'
 import {
   addOhtRailToLine,
   addOhtUnitToLine,
@@ -632,9 +632,17 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
             </>
           ) : (
             <>
-              <ul className="space-y-2">
-                {OHT_RAIL_TYPES.map((railType) => (
+              <ul className="grid grid-cols-2 gap-2 lg:block lg:space-y-2">
+                {OHT_STANDARD_RAIL_TYPES.map((railType) => (
                   <OhtRailPaletteItem key={railType} railType={railType} />
+                ))}
+                <li className="col-span-2 flex items-center gap-2 pt-1 lg:pt-2">
+                  <span className="h-px flex-1 bg-slate-700" />
+                  <span className="text-[10px] font-semibold tracking-wider text-orange-400/70">1900mm</span>
+                  <span className="h-px flex-1 bg-slate-700" />
+                </li>
+                {OHT_LARGE_RAIL_TYPES.map((railType) => (
+                  <OhtRailPaletteItem key={railType} railType={railType} isLarge />
                 ))}
                 <OhtUnitPaletteItem />
               </ul>

@@ -6,13 +6,19 @@ import { OhtRailGlyph } from '../monitor/OhtRailGlyph'
 
 interface OhtRailPaletteItemProps {
   railType: OhtRailType
+  isLarge?: boolean
 }
 
-export function OhtRailPaletteItem({ railType }: OhtRailPaletteItemProps) {
+export function OhtRailPaletteItem({ railType, isLarge = false }: OhtRailPaletteItemProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: ohtPaletteId('rail', railType),
     data: { source: 'oht-palette', kind: 'rail', railType } satisfies OhtPaletteDragData,
   })
+
+  const borderClass = isLarge
+    ? 'border-orange-700/50 hover:border-orange-500'
+    : 'border-cyan-700/60 hover:border-cyan-500'
+  const labelClass = isLarge ? 'text-orange-100' : 'text-cyan-100'
 
   return (
     <li
@@ -20,15 +26,19 @@ export function OhtRailPaletteItem({ railType }: OhtRailPaletteItemProps) {
       {...listeners}
       {...attributes}
       style={{ touchAction: 'none' }}
-      className={`flex min-h-[52px] cursor-grab items-center gap-2 rounded border border-dashed border-cyan-700/60 bg-slate-800/80 px-2 py-2.5 text-left active:cursor-grabbing lg:px-3 ${
-        isDragging ? 'opacity-40' : 'hover:border-cyan-500 hover:bg-slate-800'
+      className={`flex min-h-[52px] cursor-grab items-center gap-2 rounded border border-dashed ${borderClass} bg-slate-800/80 px-2 py-2.5 text-left active:cursor-grabbing lg:px-3 ${
+        isDragging ? 'opacity-40' : 'hover:bg-slate-800'
       }`}
     >
       <span className="shrink-0 rounded bg-slate-950/60 p-0.5">
-        <OhtRailGlyph type={railType} size={28} />
+        <OhtRailGlyph
+          type={railType}
+          size={28}
+          color={isLarge ? '#fb923c' : '#22d3ee'}
+        />
       </span>
       <span className="min-w-0">
-        <span className="block text-sm font-medium text-cyan-100">
+        <span className={`block text-sm font-medium ${labelClass}`}>
           {ohtRailLabel(railType)}
         </span>
         <span className="mt-0.5 hidden text-[11px] text-slate-500 lg:block">

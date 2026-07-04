@@ -45,6 +45,29 @@ function curveArcPath(openings: OhtDir[], size: number): string | null {
 }
 
 /**
+ * U-BYPASS 전용 path.
+ * 메인 직선 N-S + 우측 반원 루프 (오른쪽 사이딩).
+ * doubleU=true 이면 좌측 루프도 추가.
+ */
+function uBypassPaths(size: number, doubleU: boolean): string[] {
+  const cx = 0.5 * size
+  const r = 0.28 * size   // 루프 반지름
+  const y1 = (0.5 - 0.28) * size  // 루프 상단 접점
+  const y2 = (0.5 + 0.28) * size  // 루프 하단 접점
+
+  const rightArc = `M ${cx},${y1} A ${r},${r} 0 0 1 ${cx},${y2}`
+  const paths = [
+    `M ${cx},0 L ${cx},${size}`,  // 메인 직선
+    rightArc,
+  ]
+  if (doubleU) {
+    const leftArc = `M ${cx},${y1} A ${r},${r} 0 0 0 ${cx},${y2}`
+    paths.push(leftArc)
+  }
+  return paths
+}
+
+/**
  * OHT 레일 1칸 글리프. 개구부(openings)에서 중심까지 선을 그어 레일을 표현.
  * 홀로그램 점선(기본) / 불투명 실선(강조) 두 가지 모드.
  */
@@ -61,8 +84,15 @@ export function OhtRailGlyph({
   const cy = 0.5 * size
   const stroke = emphasized ? 2.2 : 1.6
   const baseOpacity = emphasized ? 0.95 : 0.5
+  const dashArray = emphasized ? undefined : '3 3'
 
-  const arcPath = type === 'curve' ? curveArcPath(openings, size) : null
+  const isCurve = type === 'curve90'
+  const isUBypass = type === 'uBypass' || type === 'doubleUBypass'
+
+  const arcPath = isCurve ? curveArcPath(openings, size) : null
+
+  // 대형 레일(1900) 시각 표시 — 배경 강조
+  const isLarge = type === 'doubleUBypass' || type === 'doubleBranchR' || type === 'doubleBranchL' || type === 'doubleBranch2'
 
   return (
     <svg
@@ -72,6 +102,19 @@ export function OhtRailGlyph({
       className="pointer-events-none"
       aria-hidden
     >
+      {/* 1900 대형 레일 배경 표시 */}
+      {isLarge && (
+        <rect
+          x={1} y={1} width={size - 2} height={size - 2}
+          rx={3}
+          fill="none"
+          stroke="#f97316"
+          strokeWidth={0.8}
+          strokeOpacity={0.3}
+          strokeDasharray="2 3"
+        />
+      )}
+
       {/* 곡선 레일 — 부드러운 1/4 원호 */}
       {arcPath ? (
         <path
@@ -81,12 +124,28 @@ export function OhtRailGlyph({
           strokeWidth={stroke}
           strokeLinecap="round"
           strokeOpacity={baseOpacity + 0.05}
-          strokeDasharray={emphasized ? undefined : '3 3'}
+          strokeDasharray={dashArray}
         />
       ) : null}
 
-      {/* 개구부 → 중심 레일 선 (곡선은 원호로 대체) */}
-      {!arcPath && openings.map((dir) => {
+      {/* U-BYPASS 전용 렌더 */}
+      {isUBypass
+        ? uBypassPaths(size, type === 'doubleUBypass').map((d, i) => (
+            <path
+              key={i}
+              d={d}
+              fill="none"
+              stroke={color}
+              strokeWidth={i === 0 ? stroke : stroke * 0.85}
+              strokeLinecap="round"
+              strokeOpacity={baseOpacity + (i === 0 ? 0.05 : -0.05)}
+              strokeDasharray={dashArray}
+            />
+          ))
+        : null}
+
+      {/* 개구부 → 중심 레일 선 (곡선·U 제외) */}
+      {!arcPath && !isUBypass && openings.map((dir) => {
         const p = DIR_POINT[dir]
         const connected = connectedDirs?.has(dir) ?? false
         return (
@@ -104,8 +163,9 @@ export function OhtRailGlyph({
           />
         )
       })}
-      {/* 중심 노드 (곡선은 원호가 지나므로 생략) */}
-      {arcPath ? null : (
+
+      {/* 중심 노드 */}
+      {!arcPath && !isUBypass && (
         <circle
           cx={cx}
           cy={cy}
