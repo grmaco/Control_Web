@@ -526,8 +526,18 @@ export function computeCalloutForUnit(
       panelHeight,
       unitRects,
       spreadSeed,
-    )
-  if (!placement) return null
+    ) ??
+    // 대형 유닛(창고 등) 주변이 꽉 찬 경우 — 오버랩 무시 강제 배치
+    {
+      lineStart: { x: bounds.cx, y: bounds.cy },
+      lineEnd: { x: bounds.right + 4, y: bounds.cy },
+      panel: {
+        left: bounds.right + 4,
+        top: bounds.cy - panelHeight / 2,
+        right: bounds.right + 4 + panelWidth,
+        bottom: bounds.cy + panelHeight / 2,
+      },
+    }
 
   const tags = collectCalloutTags(unit, flow)
   return {

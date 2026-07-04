@@ -802,7 +802,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                   <button
                     type="button"
                     onClick={() => setMobileToolbarOpen((open) => !open)}
-                    className="flex min-h-[40px] flex-1 items-center gap-2 rounded-md border border-slate-700 bg-slate-800/80 px-3 py-2 text-sm text-slate-200"
+                    className="flex min-h-[40px] min-w-0 flex-1 items-center gap-2 rounded-md border border-slate-700 bg-slate-800/80 px-3 py-2 text-sm text-slate-200"
                   >
                     <span className="shrink-0 font-medium">배치 도구</span>
                     <span className="min-w-0 flex-1 truncate text-xs text-slate-400">

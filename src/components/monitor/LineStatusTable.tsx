@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   DndContext,
   KeyboardSensor,
@@ -57,6 +58,8 @@ export function LineStatusTable({
   const lineRuntime = useSemiCnvStore((s) => s.lineRuntime)
   const reorderLines = useConveyorStore((s) => s.reorderLines)
   const logApplication = useConveyorStore((s) => s.logApplication)
+  const [showExtraCols, setShowExtraCols] = useState(false)
+  const extraCellClass = showExtraCols ? 'table-cell' : 'hidden sm:table-cell'
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -80,78 +83,93 @@ export function LineStatusTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded border border-slate-700 bg-slate-900/80">
-      <table className="w-full min-w-[720px] text-left text-xs">
-        <thead className="border-b border-slate-700 bg-slate-950/80 text-slate-400">
-          <tr>
-            {columns.map((col, index) => (
-              <th
-                key={col || 'drag'}
-                className={`whitespace-nowrap px-3 py-2.5 font-semibold ${
-                  index === 0 ? 'w-8 px-2' : ''
-                }`}
-              >
-                {col}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {lines.length === 0 ? (
+    <div>
+      <div className="mb-1 flex justify-end sm:hidden">
+        <button
+          type="button"
+          onClick={() => setShowExtraCols((v) => !v)}
+          className="app-btn app-btn-secondary app-btn-sm text-xs"
+        >
+          {showExtraCols ? '열 접기 ▲' : '열 펼치기 ▼'}
+        </button>
+      </div>
+      <div className="overflow-x-auto rounded border border-slate-700 bg-slate-900/80">
+        <table className="w-full text-left text-xs sm:min-w-[720px]">
+          <thead className="border-b border-slate-700 bg-slate-950/80 text-slate-400">
             <tr>
-              <td colSpan={columns.length} className="px-3 py-6 text-center text-slate-500">
-                등록된 라인이 없습니다.
-              </td>
+              {columns.map((col, index) => {
+                const isExtra = col === '최종수신' || col === '물류명' || col === '연결' || col === '작동 모드'
+                return (
+                  <th
+                    key={col || 'drag'}
+                    className={`whitespace-nowrap px-3 py-2.5 font-semibold ${
+                      index === 0 ? 'w-8 px-2' : ''
+                    } ${isExtra ? extraCellClass : ''}`}
+                  >
+                    {col}
+                  </th>
+                )
+              })}
             </tr>
-          ) : (
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={handleDragEnd}
-            >
-              <SortableContext
-                items={lines.map((line) => line.id)}
-                strategy={verticalListSortingStrategy}
+          </thead>
+          <tbody>
+            {lines.length === 0 ? (
+              <tr>
+                <td colSpan={columns.length} className="px-3 py-6 text-center text-slate-500">
+                  등록된 라인이 없습니다.
+                </td>
+              </tr>
+            ) : (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
               >
-                {lines.map((line) => {
-                  const stats = statsByLineId[line.id] ?? {
-                    totalUnits: 0,
-                    autoUnits: 0,
-                    idleUnits: 0,
-                    manualUnits: 0,
-                    errorUnits: 0,
-                    onCstUnits: 0,
-                    linkedUnits: 0,
-                    bufferUtilization: 0,
-                  }
-                  const rt = lineRuntime[line.id]
-                  const powerOn = rt
-                    ? rt.operationStatus === 'Auto' || rt.runningConveyors > 0
-                    : (powerOnByLineId[line.id] ?? false)
-                  const autoRun = rt
-                    ? rt.keyStatus === 'Auto' && rt.operationStatus === 'Auto'
-                    : (autoRunByLineId[line.id] ?? false)
-                  const selected = line.id === selectedLineId
-                  const comm = commByLineId[line.id]
+                <SortableContext
+                  items={lines.map((line) => line.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  {lines.map((line) => {
+                    const stats = statsByLineId[line.id] ?? {
+                      totalUnits: 0,
+                      autoUnits: 0,
+                      idleUnits: 0,
+                      manualUnits: 0,
+                      errorUnits: 0,
+                      onCstUnits: 0,
+                      linkedUnits: 0,
+                      bufferUtilization: 0,
+                    }
+                    const rt = lineRuntime[line.id]
+                    const powerOn = rt
+                      ? rt.operationStatus === 'Auto' || rt.runningConveyors > 0
+                      : (powerOnByLineId[line.id] ?? false)
+                    const autoRun = rt
+                      ? rt.keyStatus === 'Auto' && rt.operationStatus === 'Auto'
+                      : (autoRunByLineId[line.id] ?? false)
+                    const selected = line.id === selectedLineId
+                    const comm = commByLineId[line.id]
 
-                  return (
-                    <SortableLineRow
-                      key={line.id}
-                      line={line}
-                      selected={selected}
-                      comm={comm}
-                      rt={rt}
-                      stats={stats}
-                      autoRun={autoRun}
-                      powerOn={powerOn}
-                    />
-                  )
-                })}
-              </SortableContext>
-            </DndContext>
-          )}
-        </tbody>
-      </table>
+                    return (
+                      <SortableLineRow
+                        key={line.id}
+                        line={line}
+                        selected={selected}
+                        comm={comm}
+                        rt={rt}
+                        stats={stats}
+                        autoRun={autoRun}
+                        powerOn={powerOn}
+                        extraCellClass={extraCellClass}
+                      />
+                    )
+                  })}
+                </SortableContext>
+              </DndContext>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -164,6 +182,7 @@ interface SortableLineRowProps {
   stats: LineMonitorStats
   autoRun: boolean
   powerOn: boolean
+  extraCellClass: string
 }
 
 function SortableLineRow({
@@ -174,6 +193,7 @@ function SortableLineRow({
   stats,
   autoRun,
   powerOn,
+  extraCellClass,
 }: SortableLineRowProps) {
   const {
     attributes,
@@ -210,18 +230,18 @@ function SortableLineRow({
           <GripIcon />
         </button>
       </td>
-      <td className="px-3 py-2.5 font-medium text-slate-200">{line.name}</td>
+      <td className="whitespace-nowrap px-3 py-2.5 font-medium text-slate-200">{line.name}</td>
       <td className="px-3 py-2.5">
         {comm ? <LineCommIndicator comm={comm} compact /> : '-'}
       </td>
-      <td className="whitespace-nowrap px-3 py-2.5 text-slate-400">
+      <td className={`whitespace-nowrap px-3 py-2.5 text-slate-400 ${extraCellClass}`}>
         {formatLastReceived(comm?.lastMessageAt ?? null)}
       </td>
-      <td className="px-3 py-2.5 text-slate-400">
+      <td className={`px-3 py-2.5 text-slate-400 ${extraCellClass}`}>
         {rt?.lineName ?? comm?.siteName ?? comm?.siteId ?? line.semiCnvSiteId ?? '-'}
       </td>
-      <td className="px-3 py-2.5 text-slate-300">{flowModeLabel(autoRun, powerOn)}</td>
-      <td className="px-3 py-2.5 text-slate-300">{stats.linkedUnits}EA</td>
+      <td className={`px-3 py-2.5 text-slate-300 ${extraCellClass}`}>{flowModeLabel(autoRun, powerOn)}</td>
+      <td className={`px-3 py-2.5 text-slate-300 ${extraCellClass}`}>{stats.linkedUnits}EA</td>
       <td
         className={`px-3 py-2.5 ${
           stats.onCstUnits > 0 ? 'font-semibold text-cyan-300' : 'text-slate-300'

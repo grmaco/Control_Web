@@ -320,6 +320,25 @@ export function LineStatusGrid({
     [],
   )
 
+  const handleCalloutHide = useCallback(
+    (unitId: string) => {
+      if (pinnedUnitIds.has(unitId)) {
+        setPinnedUnitIds((current) => {
+          const next = new Set(current)
+          next.delete(unitId)
+          return next
+        })
+      } else {
+        setHiddenCalloutIds((current) => {
+          const next = new Set(current)
+          next.add(unitId)
+          return next
+        })
+      }
+    },
+    [pinnedUnitIds],
+  )
+
   const peekUnitIds = useMemo(() => [...pinnedUnitIds], [pinnedUnitIds])
 
   const visibleCallouts = useMemo(() => {
@@ -743,6 +762,7 @@ export function LineStatusGrid({
           dischargeIntervalSec={simulationDischargeIntervalSec}
           continuousInputActive={continuousInputActive}
           portSimStates={portSimStates}
+          onHideCallout={handleCalloutHide}
         />
       ) : null}
     </div>

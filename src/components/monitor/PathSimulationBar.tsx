@@ -292,8 +292,8 @@ export function PathSimulationBar({
         <SimPanel
           title="시뮬레이션 설정"
           contentAlign="start"
-          collapsible={touchLayout}
-          defaultOpen={false}
+          collapsible
+          defaultOpen={true}
           summary={timingSummary}
         >
           <div className="w-full space-y-2.5">
@@ -338,8 +338,8 @@ export function PathSimulationBar({
         <SimPanel
           title="방향 · 투입점"
           contentAlign="start"
-          collapsible={touchLayout}
-          defaultOpen={false}
+          collapsible
+          defaultOpen={true}
           summary={`${directionSummary} · ${sourceSummary}`}
         >
           <div className="w-full space-y-2.5">
@@ -448,8 +448,8 @@ export function PathSimulationBar({
         <SimPanel
           title="Tack Time"
           contentAlign="start"
-          collapsible={touchLayout}
-          defaultOpen={false}
+          collapsible
+          defaultOpen={true}
           summary={tackSummary}
         >
           {tackTimeSummaries.length > 0 ? (
@@ -483,8 +483,8 @@ export function PathSimulationBar({
           <SimPanel
             title="맵 제어"
             contentAlign="start"
-            collapsible={touchLayout}
-            defaultOpen={false}
+            collapsible
+            defaultOpen={true}
             summary={mapControlSummary ?? '줌 · 맞춤'}
           >
             {mapControls}

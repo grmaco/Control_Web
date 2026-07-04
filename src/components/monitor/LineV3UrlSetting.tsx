@@ -66,7 +66,7 @@ export function LineV3UrlSetting({ line }: Props) {
               {line.name} · V3 연결 설정
             </p>
             <p className="mb-3 text-xs text-slate-500">
-              이 라인 전용 V3 WebSocket URL (비우면 전역 URL 사용)
+              이 라인 전용 V3 URL (비우면 전역 URL 사용)
             </p>
 
             <label className="mb-1 block text-xs text-slate-400">V3 PC WebSocket URL</label>

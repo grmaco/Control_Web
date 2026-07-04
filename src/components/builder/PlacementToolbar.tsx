@@ -71,6 +71,14 @@ export function PlacementToolbar({
         </button>
         <button
           type="button"
+          disabled={!canComplete}
+          onClick={onComplete}
+          className="min-h-[44px] rounded-md bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40 sm:col-auto"
+        >
+          배치 완료
+        </button>
+        <button
+          type="button"
           disabled={!canSetFlowRole}
           onClick={() =>
             selectedUnit &&
@@ -79,7 +87,7 @@ export function PlacementToolbar({
               selectedUnit.flowRole === 'entry' ? null : 'entry',
             )
           }
-          className="min-h-[44px] rounded-md border border-amber-800/60 px-3 py-2.5 text-sm text-amber-200 hover:bg-amber-950/40 disabled:cursor-not-allowed disabled:opacity-40"
+          className="col-span-2 min-h-[44px] rounded-md border border-amber-800/60 px-3 py-2.5 text-sm text-amber-200 hover:bg-amber-950/40 disabled:cursor-not-allowed disabled:opacity-40 sm:col-auto"
         >
           {selectedUnit?.flowRole === 'entry' ? '투입 해제' : '투입 지정'}
         </button>
@@ -96,14 +104,6 @@ export function PlacementToolbar({
           className="col-span-2 min-h-[44px] rounded-md border border-emerald-800/60 px-3 py-2.5 text-sm text-emerald-200 hover:bg-emerald-950/40 disabled:cursor-not-allowed disabled:opacity-40 sm:col-auto"
         >
           {selectedUnit?.flowRole === 'exit' ? '출고 해제' : '출고 지정'}
-        </button>
-        <button
-          type="button"
-          disabled={!canComplete}
-          onClick={onComplete}
-          className="col-span-2 min-h-[44px] rounded-md bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40 sm:col-auto"
-        >
-          배치 완료
         </button>
       </div>
 

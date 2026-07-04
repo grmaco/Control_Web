@@ -47,6 +47,8 @@ interface FlowCalloutOverlayProps {
   continuousInputActive?: boolean
   /** 포트/창고 핸드쉐이크 시뮬 — READY/BUSY 콜아웃 오버라이드 */
   portSimStates?: Record<string, import('../hooks/usePortStorageSimulation').PortSimState>
+  /** 콜아웃 패널 더블클릭 → 해당 유닛 콜아웃 닫기 */
+  onHideCallout?: (unitId: string) => void
 }
 
 export function FlowCalloutOverlay({
@@ -72,6 +74,7 @@ export function FlowCalloutOverlay({
   dischargeIntervalSec,
   continuousInputActive = false,
   portSimStates,
+  onHideCallout,
 }: FlowCalloutOverlayProps) {
   const unitAlarms = useSemiCnvStore((s) => s.unitAlarms)
   const [positions, setPositions] = useState<Record<string, FlowCalloutPosition>>(() =>
@@ -90,9 +93,20 @@ export function FlowCalloutOverlay({
 
   useEffect(() => {
     if (draggingUnitIdRef.current) return
-    const next = buildCalloutPositions(callouts, savedPositions)
-    setPositions(next)
-    positionsRef.current = next
+    setPositions((current) => {
+      // 이미 표시 중인 콜아웃은 현재 메모리 위치를 유지하고,
+      // 새로 추가된 콜아웃만 저장된 위치 또는 기본 위치를 사용한다.
+      // (초기화 버튼으로 calloutKey가 바뀌어도 드래그한 위치가 유지됨)
+      const next: Record<string, FlowCalloutPosition> = {}
+      for (const callout of callouts) {
+        next[callout.unitId] =
+          current[callout.unitId] ??
+          savedPositions?.[callout.unitId] ??
+          { panelX: callout.panelX, panelY: callout.panelY }
+      }
+      positionsRef.current = next
+      return next
+    })
     setPanelSizes({})
     setSelectedId((current) =>
       current && callouts.some((c) => c.unitId === current) ? current : null,
@@ -284,6 +298,7 @@ export function FlowCalloutOverlay({
             onPointerSessionStart={() => handleDragStart(callout.unitId)}
             onPointerSessionEnd={handleDragSessionEnd}
             onDeselect={() => setSelectedId(null)}
+            onHide={onHideCallout ? () => onHideCallout(callout.unitId) : undefined}
             onPanLockChange={onPanLockChange}
             onSizeChange={
               display?.alarm
@@ -339,6 +354,7 @@ function SelectableFlowCalloutTable({
   onPointerSessionStart,
   onPointerSessionEnd,
   onDeselect,
+  onHide,
   onPanLockChange,
   onSizeChange,
 }: {
@@ -356,6 +372,7 @@ function SelectableFlowCalloutTable({
   onPointerSessionStart: () => void
   onPointerSessionEnd: () => void
   onDeselect: () => void
+  onHide?: () => void
   onPanLockChange?: (locked: boolean) => void
   onSizeChange?: (width: number, height: number) => void
 }) {
@@ -589,8 +606,8 @@ function SelectableFlowCalloutTable({
       style={{
         left: panelX + offset,
         top: panelY + offset,
-        width: hasAlarm ? 'fit-content' : callout.panelWidth,
-        minWidth: hasAlarm ? callout.panelWidth : undefined,
+        width: 'fit-content',
+        minWidth: callout.panelWidth,
         minHeight: callout.panelHeight,
         zIndex: dragging ? 4 : selected ? 3 : 2,
         position: 'absolute',
@@ -603,7 +620,8 @@ function SelectableFlowCalloutTable({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
-      title={selected ? '드래그 후 선택 해제 · 다시 클릭해도 해제' : '클릭하여 선택'}
+      onDoubleClick={(e) => { e.stopPropagation(); onHide?.() }}
+      title={selected ? '드래그 후 선택 해제 · 다시 클릭해도 해제 · 더블클릭으로 닫기' : '클릭하여 선택 · 더블클릭으로 닫기'}
     >
       {/* 코너 브래킷 */}
       <CornerBracket pos="tl" color={accentColor} />
@@ -634,7 +652,7 @@ function SelectableFlowCalloutTable({
       {/* 데이터 테이블 */}
       <table
         style={{
-          width: hasAlarm ? 'max-content' : '100%',
+          width: 'max-content',
           borderCollapse: 'collapse',
           fontSize: '7px',
           lineHeight: '1.35',
@@ -727,7 +745,7 @@ function SelectableFlowCalloutTable({
             <th style={{ padding: '2px 4px', fontWeight: 600, color: labelColor, textAlign: 'left', letterSpacing: '0.04em' }}>
               ID
             </th>
-            <td style={{ padding: '2px 4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#e2e8f0' }}>
+            <td style={{ padding: '2px 4px', whiteSpace: 'nowrap', color: '#e2e8f0' }}>
               {display?.productId ?? '—'}
             </td>
           </tr>
@@ -774,6 +792,8 @@ function transferStatusDotColor(status: CalloutTransferStatus | undefined): stri
       return '#fbbf24'
     case 'BUSY':
       return '#34d399'
+    case 'READY':
+      return '#a78bfa'
     default:
       return undefined
   }
@@ -787,6 +807,8 @@ function transferStatusTextColor(status: CalloutTransferStatus | undefined): str
       return '#fde68a'
     case 'BUSY':
       return '#6ee7b7'
+    case 'READY':
+      return '#c4b5fd'
     default:
       return undefined
   }

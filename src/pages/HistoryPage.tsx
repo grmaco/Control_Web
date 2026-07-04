@@ -147,39 +147,59 @@ export function HistoryPage() {
       {logs.length === 0 ? (
         <EmptyPanel message="조건에 맞는 로그가 없습니다." />
       ) : (
-        <div className="app-card-muted overflow-x-auto p-0">
-          <div className="max-h-[560px] overflow-y-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="sticky top-0 z-10 bg-slate-800 text-slate-300">
-                <tr>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold">
-                    GenerateTime
-                  </th>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold">Log Type</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold">Log Level</th>
-                  <th className="whitespace-nowrap px-4 py-3 font-semibold">Log Title</th>
-                  <th className="px-4 py-3 font-semibold">Log Comment</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/80 bg-slate-950/60">
-                {logs.map((log) => (
-                  <tr key={log.id} className="text-slate-200 hover:bg-slate-900/60">
-                    <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-400">
-                      {log.generateTime}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-2.5">{log.logType}</td>
-                    <td className={`whitespace-nowrap px-4 py-2.5 font-medium ${logLevelClass(log.logLevel)}`}>
-                      {log.logLevel}
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-2.5">{log.logTitle}</td>
-                    <td className="px-4 py-2.5 text-slate-300">{log.logComment}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <LogTable logs={logs} />
       )}
+    </div>
+  )
+}
+
+// ── LogTable ──────────────────────────────────────────────────────────────────
+
+function LogTable({ logs }: { logs: ReturnType<typeof mapHistoryToLogs> }) {
+  const [showExtraCols, setShowExtraCols] = useState(false)
+  const extraCellClass = showExtraCols ? 'table-cell' : 'hidden sm:table-cell'
+
+  return (
+    <div className="app-card-muted overflow-x-auto p-0">
+      <div className="flex items-center justify-between px-4 py-2 sm:hidden">
+        <span className="text-xs text-slate-400">{logs.length}건</span>
+        <button
+          type="button"
+          onClick={() => setShowExtraCols((v) => !v)}
+          className="app-btn app-btn-secondary app-btn-sm text-xs"
+        >
+          {showExtraCols ? '열 접기 ▲' : '열 펼치기 ▼'}
+        </button>
+      </div>
+      <div className="max-h-[560px] overflow-y-auto">
+        <table className="w-full text-left text-sm sm:min-w-[760px]">
+          <thead className="sticky top-0 z-10 bg-slate-800 text-slate-300">
+            <tr>
+              <th className="whitespace-nowrap px-4 py-3 font-semibold">GenerateTime</th>
+              <th className={`whitespace-nowrap px-4 py-3 font-semibold ${extraCellClass}`}>Log Type</th>
+              <th className={`whitespace-nowrap px-4 py-3 font-semibold ${extraCellClass}`}>Log Level</th>
+              <th className={`whitespace-nowrap px-4 py-3 font-semibold ${extraCellClass}`}>Log Title</th>
+              <th className="px-4 py-3 font-semibold">Log Comment</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800/80 bg-slate-950/60">
+            {logs.map((log) => (
+              <tr key={log.id} className="text-slate-200 hover:bg-slate-900/60">
+                <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-slate-400">
+                  <span className="block">{log.generateTime.slice(0, 10)}</span>
+                  <span className="block">{log.generateTime.slice(11)}</span>
+                </td>
+                <td className={`whitespace-nowrap px-4 py-2.5 ${extraCellClass}`}>{log.logType}</td>
+                <td className={`whitespace-nowrap px-4 py-2.5 font-medium ${logLevelClass(log.logLevel)} ${extraCellClass}`}>
+                  {log.logLevel}
+                </td>
+                <td className={`whitespace-nowrap px-4 py-2.5 ${extraCellClass}`}>{log.logTitle}</td>
+                <td className="whitespace-nowrap px-4 py-2.5 text-slate-300">{log.logComment}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

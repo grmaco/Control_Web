@@ -97,7 +97,7 @@ export function StorageConveyorCell({
       height={height}
       viewBox={`0 0 ${W} ${H}`}
       xmlns="http://www.w3.org/2000/svg"
-      style={{ display: 'block', position: 'absolute', top: 0, left: 0 }}
+      style={{ display: 'block', position: 'absolute', top: 0, left: 0, pointerEvents: 'none' }}
       aria-hidden
     >
       <defs>

@@ -213,7 +213,7 @@ export function UnitPropertiesPanel({
 
           <div>
             <label className="mb-1 block text-xs text-slate-400">
-              V3 WebSocket URL
+              V3 URL
               <span className="ml-1 text-slate-600">(이 라인 전용)</span>
             </label>
             <input

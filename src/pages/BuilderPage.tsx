@@ -31,9 +31,11 @@ export function BuilderPage() {
 
       <AppCard muted className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <SemiCnvConnectionBar />
-        <span className="header-status-chip shrink-0 self-start rounded-lg px-2.5 py-1 text-xs sm:self-center">
-          {semiCnvEnabled ? 'Semi C/V 연동' : 'Phase 1 · localStorage'}
-        </span>
+        {semiCnvEnabled && (
+          <span className="header-status-chip shrink-0 self-start rounded-lg px-2.5 py-1 text-xs sm:self-center">
+            Semi C/V 연동
+          </span>
+        )}
       </AppCard>
 
       {!selectedLine ? (
