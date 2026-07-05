@@ -47,6 +47,8 @@ interface FlowCalloutOverlayProps {
   continuousInputActive?: boolean
   /** 포트/창고 핸드쉐이크 시뮬 — READY/BUSY 콜아웃 오버라이드 */
   portSimStates?: Record<string, import('../hooks/usePortStorageSimulation').PortSimState>
+  /** 적재창고 시뮬 상태 — STATUS/SLOTS/ROLE 표시용 */
+  storageSimStates?: Record<string, import('../hooks/usePortStorageSimulation').StorageSimState>
   /** 콜아웃 패널 더블클릭 → 해당 유닛 콜아웃 닫기 */
   onHideCallout?: (unitId: string) => void
 }
@@ -74,6 +76,7 @@ export function FlowCalloutOverlay({
   dischargeIntervalSec,
   continuousInputActive = false,
   portSimStates,
+  storageSimStates,
   onHideCallout,
 }: FlowCalloutOverlayProps) {
   const unitAlarms = useSemiCnvStore((s) => s.unitAlarms)
@@ -273,6 +276,7 @@ export function FlowCalloutOverlay({
                   dischargeIntervalSec,
                   continuousInputActive,
                   portSimState: portSimStates?.[callout.unitId],
+                  storageSimState: storageSimStates?.[callout.unitId],
                 },
                 unitAlarms,
               )
@@ -576,6 +580,12 @@ function SelectableFlowCalloutTable({
 
   // 상태 도트 색
   const transferStatus = display?.transferStatus
+  const storageSimStatus = display?.storageSimStatus ?? undefined
+  const dotColor = hasAlarm
+    ? '#ef4444'
+    : storageSimStatus != null
+      ? storageStatusDotColor(storageSimStatus)
+      : (transferStatusDotColor(transferStatus) ?? statusColors.dot ?? '#94a3b8')
   const statusDotStyle: React.CSSProperties = {
     display: 'inline-block',
     width: 5,
@@ -583,19 +593,15 @@ function SelectableFlowCalloutTable({
     borderRadius: '50%',
     marginRight: 3,
     flexShrink: 0,
-    background: hasAlarm
-      ? '#ef4444'
-      : transferStatusDotColor(transferStatus) ?? statusColors.dot ?? '#94a3b8',
-    boxShadow: hasAlarm
-      ? '0 0 4px #ef4444'
-      : transferStatus
-        ? `0 0 4px ${transferStatusDotColor(transferStatus)}`
-        : undefined,
+    background: dotColor,
+    boxShadow: hasAlarm ? '0 0 4px #ef4444' : dotColor ? `0 0 4px ${dotColor}` : undefined,
   }
 
   const statusTextColor = hasAlarm
     ? '#fca5a5'
-    : transferStatusTextColor(transferStatus) ?? '#e2e8f0'
+    : storageSimStatus != null
+      ? storageStatusTextColor(storageSimStatus)
+      : (transferStatusTextColor(transferStatus) ?? '#e2e8f0')
 
   return (
     <div
@@ -695,6 +701,18 @@ function SelectableFlowCalloutTable({
             </td>
           </tr>
 
+          {/* 슬롯 (적재창고 시뮬) */}
+          {display?.slots != null && (
+            <tr style={{ borderBottom: `1px solid ${rowDivider}` }}>
+              <th style={{ padding: '2px 4px', fontWeight: 600, color: labelColor, textAlign: 'left', letterSpacing: '0.04em' }}>
+                SLOTS
+              </th>
+              <td style={{ padding: '2px 4px', color: '#93c5fd', whiteSpace: 'nowrap' }}>
+                {display.slots}
+              </td>
+            </tr>
+          )}
+
           {/* 목적지 (투입 시뮬 — 분기·회전·투입점) */}
           {display?.simDestination != null && (
             <tr style={{ borderBottom: `1px solid ${rowDivider}` }}>
@@ -782,6 +800,24 @@ function SelectableFlowCalloutTable({
       </table>
     </div>
   )
+}
+
+function storageStatusDotColor(status: string): string {
+  switch (status) {
+    case 'TR': return '#fbbf24'
+    case 'BUSY': return '#f59e0b'
+    case 'COMPLETE': return '#60a5fa'
+    default: return '#94a3b8' // IDLE
+  }
+}
+
+function storageStatusTextColor(status: string): string {
+  switch (status) {
+    case 'TR': return '#fde68a'
+    case 'BUSY': return '#fcd34d'
+    case 'COMPLETE': return '#93c5fd'
+    default: return '#94a3b8' // IDLE
+  }
 }
 
 function transferStatusDotColor(status: CalloutTransferStatus | undefined): string | undefined {

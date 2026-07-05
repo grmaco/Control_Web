@@ -293,7 +293,7 @@ export function PathSimulationBar({
           title="시뮬레이션 설정"
           contentAlign="start"
           collapsible
-          defaultOpen={true}
+          defaultOpen={false}
           summary={timingSummary}
         >
           <div className="w-full space-y-2.5">
@@ -339,7 +339,7 @@ export function PathSimulationBar({
           title="방향 · 투입점"
           contentAlign="start"
           collapsible
-          defaultOpen={true}
+          defaultOpen={false}
           summary={`${directionSummary} · ${sourceSummary}`}
         >
           <div className="w-full space-y-2.5">

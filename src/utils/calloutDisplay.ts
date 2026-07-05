@@ -10,7 +10,9 @@ import {
   type CalloutTransferStatus,
 } from './calloutTransferStatus'
 import { resolveSimulationUnitTransferStatus } from './pathSimulation'
-import type { PortSimState } from '../hooks/usePortStorageSimulation'
+import type { PortSimState, StorageSimState } from '../hooks/usePortStorageSimulation'
+import { isStorageUnit } from '../constants/conveyorTypes'
+import { warehouseShapeLabel } from '../constants/warehouseUnit'
 
 export interface CalloutDisplayInfo {
   name: string
@@ -27,6 +29,10 @@ export interface CalloutDisplayInfo {
   productId: string
   /** 현재 활성 알람 코드. null이면 알람 없음 */
   alarm: string | null
+  /** 적재창고 슬롯 점유 (예: "12 / 48"). null이면 행 숨김 */
+  slots: string | null
+  /** 적재창고 시뮬 상태 문자열 (IDLE/TR/BUSY/COMPLETE). null이면 transferStatus 색상 사용 */
+  storageSimStatus: string | null
 }
 
 export function formatCalloutLocation(
@@ -69,9 +75,33 @@ export function buildCalloutDisplayInfo(
     continuousInputActive?: boolean
     /** 포트/창고 핸드쉐이크 시뮬 상태 — READY/BUSY 오버라이드용 */
     portSimState?: PortSimState
+    /** 적재창고 시뮬 상태 — STATUS/SLOTS/ROLE 오버라이드 */
+    storageSimState?: StorageSimState
   },
   unitAlarms?: Record<string, string>,
 ): CalloutDisplayInfo {
+  // 적재창고: 시뮬 상태 기반 전용 표시
+  if (isStorageUnit(unit)) {
+    const simState = options?.storageSimState
+    const shape = unit.storageShape ?? 'flat'
+    const hasCstStorage = simState?.hasCst ?? Boolean(unitRuntime[unit.id]?.cstId?.trim())
+    const simStatus = simState?.status ?? null
+    return {
+      name: unit.name,
+      status: simStatus ?? (hasCstStorage ? CALLOUT_TRANSFER_STATUS_LABEL['ULD'] : CALLOUT_TRANSFER_STATUS_LABEL['LD']),
+      transferStatus: hasCstStorage ? 'ULD' : 'LD',
+      role: warehouseShapeLabel(shape),
+      cstOn: hasCstStorage ? 'On' : 'Off',
+      location: null,
+      home: null,
+      simDestination: null,
+      productId: unitRuntime[unit.id]?.cstId?.trim() || '—',
+      alarm: unitAlarms?.[unit.id] ?? null,
+      slots: simState ? `${simState.filledSlots} / 48` : null,
+      storageSimStatus: simStatus,
+    }
+  }
+
   const tags = collectCalloutTags(unit, flow)
   const role = tags.length > 0 ? tags.map((tag) => tag.text).join(' · ') : '—'
   const simulating = options?.simulating ?? false
@@ -139,5 +169,7 @@ export function buildCalloutDisplayInfo(
     simDestination,
     productId: cstId || '—',
     alarm: unitAlarms?.[unit.id] ?? null,
+    slots: null,
+    storageSimStatus: null,
   }
 }

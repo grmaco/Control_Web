@@ -287,6 +287,13 @@ export function usePathSimulation(
 
   useEffect(() => {
     if (mode !== 'inbound') return
+    let savedPrefs: Record<string, string> = {}
+    try {
+      const raw = sessionStorage.getItem(`sim-dest-${line.id}`)
+      if (raw) savedPrefs = JSON.parse(raw) as Record<string, string>
+    } catch {
+      // ignore
+    }
     setInboundDestinationByEntryId((prev) => {
       const next = { ...prev }
       let changed = false
@@ -294,9 +301,12 @@ export function usePathSimulation(
         const destinations = listReachableInboundDestinations(line, entryId)
         const current = next[entryId]
         if (!current || !destinations.some((dest) => dest.id === current)) {
+          const savedId = savedPrefs[entryId]
+          const savedValid = savedId != null && destinations.some((dest) => dest.id === savedId)
           const farthest = destinations[destinations.length - 1]
-          if (farthest) {
-            next[entryId] = farthest.id
+          const target = savedValid ? savedId : farthest?.id
+          if (target) {
+            next[entryId] = target
             changed = true
           }
         }
@@ -310,6 +320,18 @@ export function usePathSimulation(
       return changed ? next : prev
     })
   }, [line, mode, selectedSourceUnitIds])
+
+  useEffect(() => {
+    if (Object.keys(inboundDestinationByEntryId).length === 0) return
+    try {
+      const key = `sim-dest-${line.id}`
+      const raw = sessionStorage.getItem(key)
+      const existing: Record<string, string> = raw ? (JSON.parse(raw) as Record<string, string>) : {}
+      sessionStorage.setItem(key, JSON.stringify({ ...existing, ...inboundDestinationByEntryId }))
+    } catch {
+      // ignore
+    }
+  }, [line.id, inboundDestinationByEntryId])
 
   const setTurn90Sec = useCallback((v: number) => setTurn90SecState(clampSimIntervalSec(v, 1.0)), [])
   const setTurn180Sec = useCallback((v: number) => setTurn180SecState(clampSimIntervalSec(v, 1.6)), [])
@@ -440,7 +462,7 @@ export function usePathSimulation(
     for (const load of loads) {
       if (frozenLoadTackSecRef.current[load.id] != null) continue
       if (
-        isLoadFullyDischarged(load) ||
+        isLoadFullyDischarged(load, unitMapRef.current) ||
         isLoadAtBlockedPortDestination(load, unitMapRef.current)
       ) {
         frozenLoadTackSecRef.current[load.id] = liveSec
@@ -532,7 +554,7 @@ export function usePathSimulation(
       }
       return sessionIds.every((loadId) => {
         const load = nextLoads.find((item) => item.id === loadId)
-        return load != null && isLoadFullyDischarged(load)
+        return load != null && isLoadFullyDischarged(load, unitMapRef.current)
       })
     },
     [],

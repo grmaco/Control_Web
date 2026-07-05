@@ -206,16 +206,6 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
     return [...new Set([...visualCstIds, ...portActiveIds])]
   }, [visualCstIds, portStorageSim.isRunning, portStorageSim.portStates])
   const [selectedStorageId, setSelectedStorageId] = useState<string | null>(null)
-  const [hiddenStorageCalloutIds, setHiddenStorageCalloutIds] = useState<Set<string>>(new Set())
-
-  const handleStorageDoubleClick = useCallback((storageId: string) => {
-    setHiddenStorageCalloutIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(storageId)) next.delete(storageId)
-      else next.add(storageId)
-      return next
-    })
-  }, [])
 
   // 컨베이어 시뮬 시작/종료에 맞춰 포트/창고 시뮬 자동 연동
   const portSimStartedRef = useRef(false)
@@ -592,8 +582,6 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
                 storageSimStates={portStorageSim.storageStates}
                 portSimStates={portStorageSim.isRunning ? portStorageSim.portStates : undefined}
                 onStorageSimClick={portStorageSim.isRunning ? setSelectedStorageId : undefined}
-                onStorageSimDoubleClick={portStorageSim.isRunning ? handleStorageDoubleClick : undefined}
-                hiddenStorageCalloutIds={hiddenStorageCalloutIds}
                 className="select-none"
               />
             </TransformComponent>

@@ -1559,12 +1559,15 @@ export function countIncompleteSimulationLoads(loads: PathSimulationLoad[]): num
 }
 
 /** 자재가 목적지 도착(투입 유지) 또는 출고 완료 */
-export function isLoadFullyDischarged(load: PathSimulationLoad): boolean {
+export function isLoadFullyDischarged(
+  load: PathSimulationLoad,
+  unitMap?: Map<string, ConveyorUnit>,
+): boolean {
   if (load.pathUnitIds.length === 0) return false
   if (load.complete) {
     return load.stepIndex >= load.pathUnitIds.length - 1
   }
-  return shouldRetainMaterialAtDestination(load)
+  return shouldRetainMaterialAtDestination(load, unitMap)
 }
 
 /**
@@ -2069,7 +2072,7 @@ function isSimulationLoadInTransit(
 export function resolveSimulationUnitTransferStatus(
   unitId: string,
   loads: PathSimulationLoad[],
-  _unitMap?: Map<string, ConveyorUnit>,
+  _unitMap: Map<string, ConveyorUnit> | undefined,
   options: {
     staticTestAtOrigin?: boolean
     simulating: boolean

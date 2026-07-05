@@ -509,6 +509,7 @@ export function initGatherProbes(
   for (const [index, entryUnitId] of entryUnitIds.entries()) {
     const unit = unitMap.get(entryUnitId)
     if (!unit) continue
+    if (unit.interfaceUnit != null) continue
     const layout = pickGatherLayout(unit, line, index)
 
     for (let slot = 0; slot < CONTINUOUS_PROBE_COUNT; slot += 1) {
