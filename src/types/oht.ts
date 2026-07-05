@@ -4,6 +4,16 @@ import type { Rotation } from './conveyor'
 export type OhtDir = 'N' | 'E' | 'S' | 'W'
 
 /**
+ * 레일 포트 사양 — 어느 칸(dx,dy)의 어느 방향(dir)에 개구부가 있는지.
+ * 단일셀 레일은 dx=0,dy=0. 멀티셀 레일(U-BYPASS 등)은 여러 칸에 포트를 가짐.
+ */
+export interface OhtPortSpec {
+  dir: OhtDir
+  dx: number
+  dy: number
+}
+
+/**
  * OHT Rail 모듈 종류 — 실제 현장 레일 기준
  *
  * 표준 레일:
@@ -16,8 +26,6 @@ export type OhtDir = 'N' | 'E' | 'S' | 'W'
  * 1900mm 대형 레일:
  * - uBypass       : U-BYPASS 1900 (N·S + U루프)
  * - doubleUBypass : DOUBLE U-BYPASS 1900 (N·S + 양측 U루프)
- * - doubleBranchR : DOUBLE BRANCH-1-R 1900 (N·S·E)
- * - doubleBranchL : DOUBLE BRANCH-1-L 1900 (N·S·W)
  * - doubleBranch2 : DOUBLE BRANCH-2 1900 (N·E·W)
  */
 export type OhtRailType =
@@ -30,7 +38,6 @@ export type OhtRailType =
   | 'doubleUBypass'
   | 'doubleBranchR'
   | 'doubleBranchL'
-  | 'doubleBranch2'
 
 /** 맵 위에 겹쳐지는 OHT 레일 1칸 (별도 레이어 — 컨베이어 units[]와 독립) */
 export interface OhtRailUnit {

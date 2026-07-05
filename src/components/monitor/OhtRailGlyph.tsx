@@ -76,32 +76,198 @@ function findStem(openings: OhtDir[]) {
   return null
 }
 
-/** U-BYPASS 경로 목록 (멀티셀 치수 기준) */
-function uBypassPaths(w: number, h: number, doubleU: boolean): string[] {
-  const isVertical = h >= w
-  if (isVertical) {
-    const cx = 0.5 * w
-    const r = 0.35 * w       // 루프 반지름 ≈ 35% of width
-    const y1 = 0.5 * h - r
-    const y2 = 0.5 * h + r
-    const paths = [
-      `M ${cx},0 L ${cx},${h}`,                            // 메인 직선
-      `M ${cx},${y1} A ${r},${r} 0 0 1 ${cx},${y2}`,      // 오른쪽 반원
+/**
+ * U-BYPASS / DOUBLE U-BYPASS 공용 경로 함수.
+ *
+ * 구조: 닫힌 타원 루프 (stadium/discorectangle 형태)
+ *  - 위 아치 (N-N 우회): N 진입 OHT가 반대 레인 N으로 이동
+ *  - 아래 아치 (S-S 우회): S 진입 OHT가 반대 레인 S로 이동
+ *  - N→S 직통 경로 없음
+ *
+ * U-BYPASS(2cs×1cs): 아치 두 개가 중앙에서 만남 → 눌린 타원
+ * DOUBLE U-BYPASS(2cs×2cs): 아치 두 개 사이 직선 구간이 보임 → 캡슐/경기장 형태
+ */
+function uBypassPaths(w: number, h: number): string[] {
+  // SVG y-down 좌표계: 수평 아치는 sweep=0(CCW)이 아래로, sweep=1(CW)이 위로 향함
+  // 위 아치(y=0) → sweep=0으로 y=+r까지 내려옴 (안쪽)
+  // 아래 아치(y=h) → sweep=1로 y=h-r까지 올라옴 (안쪽)
+
+  if (w === h) {
+    // 팔레트 정방형 미리보기
+    const cs = w / 2
+    const cx1 = 0.5 * cs
+    const cx2 = 1.5 * cs
+    const r = 0.5 * cs
+    return [
+      `M ${cx1},0 L ${cx1},${h}`,
+      `M ${cx2},0 L ${cx2},${h}`,
+      `M ${cx1},0 A ${r},${r} 0 0 0 ${cx2},0`,           // 위 아치만
     ]
-    if (doubleU) paths.push(`M ${cx},${y1} A ${r},${r} 0 0 0 ${cx},${y2}`) // 왼쪽 반원
-    return paths
-  } else {
-    const cy = 0.5 * h
-    const r = 0.35 * h
-    const x1 = 0.5 * w - r
-    const x2 = 0.5 * w + r
-    const paths = [
-      `M 0,${cy} L ${w},${cy}`,
-      `M ${x1},${cy} A ${r},${r} 0 0 1 ${x2},${cy}`,
-    ]
-    if (doubleU) paths.push(`M ${x1},${cy} A ${r},${r} 0 0 0 ${x2},${cy}`)
-    return paths
   }
+
+  const isWide = w > h
+  const cs = isWide ? h : w
+
+  if (isWide) {
+    // 가로 배치 (rotation=0 or 180)
+    const cx1 = 0.5 * cs
+    const cx2 = w - 0.5 * cs
+    const r = 0.5 * cs
+    return [
+      `M ${cx1},0 L ${cx1},${h}`,
+      `M ${cx2},0 L ${cx2},${h}`,
+      `M ${cx1},0 A ${r},${r} 0 0 0 ${cx2},0`,           // 위 아치만
+    ]
+  } else {
+    // 세로 배치 (rotation=90 or 270) — 왼쪽 아치만 유지
+    const cy1 = 0.5 * cs
+    const cy2 = h - 0.5 * cs
+    const r = 0.5 * cs
+    return [
+      `M 0,${cy1} L ${w},${cy1}`,
+      `M 0,${cy2} L ${w},${cy2}`,
+      `M 0,${cy1} A ${r},${r} 0 0 1 0,${cy2}`,           // 왼쪽 아치만
+    ]
+  }
+}
+
+
+/**
+ * DBL BRANCH-R 경로.
+ * rot=0/180: w=2cs, h=cs (가로 배치)
+ * rot=90/270: w=cs, h=2cs (세로 배치)
+ *
+ * rot=0: 왼쪽 N-S 직선 + 오른쪽 W-E 직선 + N↔N 반원 아치
+ * rot=180: 반전 (S쪽 아치)
+ * rot=90: 위 E-W 직선 + 아래 N-S 직선 + 두 개 1/4호 연결
+ * rot=270: 아래 E-W 직선 + 위 N-S 직선 + 왼쪽 반원 아치
+ */
+/**
+ * DBL BRANCH-R: 왼쪽(cell0)=branchR + 오른쪽(cell1)=branchR@270° 복합.
+ *
+ * rot=0 (w=2cs, h=cs):
+ *   cell0: N-S 직선 + S→E 1/4호
+ *   cell1: W-E 직선 + N→E 1/4호
+ *
+ * 팔레트 정방형(w=h): cs = w/2
+ * 실제 가로(w>h): cs = h
+ * 실제 세로(h>w): cs = w  (rot=90/270)
+ */
+function doubleBranchRPaths(w: number, h: number, rotation: number): string[] {
+  if (w >= h) {
+    // 가로 배치 or 팔레트 정방형
+    const cs = w === h ? w / 2 : h
+    const r = cs / 2
+
+    if (rotation === 0 || w === h) {
+      // rot=0 / 팔레트
+      // cell0(좌): N-S 직선 at x=r, S→E 1/4호 (S=(r,h) → internal-E=(cs,r)), sweep=1 CW
+      // cell1(우): W-E 직선 at y=r (from cs to w), N→E 1/4호 (N=(w-r,0) → E=(w,r)), sweep=0 CCW
+      return [
+        `M ${r},0 L ${r},${h}`,
+        `M ${cs},${r} L ${w},${r}`,
+        `M ${r},${h} A ${r},${r} 0 0 1 ${cs},${r}`,
+        `M ${w - r},0 A ${r},${r} 0 0 0 ${w},${r}`,
+      ]
+    } else {
+      // rot=180: cell0(우)=N-S 직선 + N→internal-W 1/4호, cell1(좌)=W-E 직선 + S→W 1/4호
+      return [
+        `M ${w - r},0 L ${w - r},${h}`,
+        `M 0,${r} L ${cs},${r}`,
+        `M ${w - r},0 A ${r},${r} 0 0 0 ${cs},${r}`,
+        `M ${r},${h} A ${r},${r} 0 0 1 0,${r}`,
+      ]
+    }
+  } else {
+    // 세로 배치 (rot=90 or rot=270), w=cs, h=2cs
+    const cs = w
+    const r = cs / 2
+
+    if (rotation === 90) {
+      // rot=90: top cell = E-W 직선 + W→S 1/4호, bottom cell = N-S 직선 + E→S 1/4호
+      return [
+        `M 0,${r} L ${w},${r}`,
+        `M ${r},${cs} L ${r},${h}`,
+        `M 0,${r} A ${r},${r} 0 0 0 ${r},${cs}`,
+        `M ${w},${cs + r} A ${r},${r} 0 0 1 ${r},${h}`,
+      ]
+    } else {
+      // rot=270: bottom cell = E-W 직선 + E→N 1/4호, top cell = N-S 직선 + W→N 1/4호
+      return [
+        `M 0,${h - r} L ${w},${h - r}`,
+        `M ${r},0 L ${r},${cs}`,
+        `M ${w},${h - r} A ${r},${r} 0 0 0 ${r},${cs}`,
+        `M 0,${r} A ${r},${r} 0 0 1 ${r},0`,
+      ]
+    }
+  }
+}
+
+/**
+ * DBL BRANCH-L: doubleBranchR의 좌우 대칭.
+ * cell0(좌)=branchL@270°: W-E 수평 + N→W 1/4호
+ * cell1(우)=branchL: N-S 수직 + S→W 1/4호
+ */
+function doubleBranchLPaths(w: number, h: number, rotation: number): string[] {
+  if (w >= h) {
+    const cs = w === h ? w / 2 : h
+    const r = cs / 2
+
+    if (rotation === 0 || w === h) {
+      // rot=0 / 팔레트: 왼 W-E + 오 N-S + N→W 호 + S→W 호
+      return [
+        `M 0,${r} L ${cs},${r}`,
+        `M ${w - r},0 L ${w - r},${h}`,
+        `M ${r},0 A ${r},${r} 0 0 1 0,${r}`,
+        `M ${w - r},${h} A ${r},${r} 0 0 0 ${cs},${r}`,
+      ]
+    } else {
+      // rot=180: 왼 N-S + 오 W-E + N→E 호 + S→E 호
+      return [
+        `M ${cs},${r} L ${w},${r}`,
+        `M ${r},0 L ${r},${h}`,
+        `M ${w - r},${h} A ${r},${r} 0 0 0 ${w},${r}`,
+        `M ${r},0 A ${r},${r} 0 0 1 ${cs},${r}`,
+      ]
+    }
+  } else {
+    // 세로 배치 (rot=90 or rot=270), w=cs, h=2cs
+    const cs = w
+    const r = cs / 2
+
+    if (rotation === 90) {
+      // top cell: N-S 수직 + E→N 호 / bottom cell: E-W 수평 + W→S 호
+      return [
+        `M ${r},0 L ${r},${cs}`,
+        `M 0,${h - r} L ${w},${h - r}`,
+        `M ${w},${r} A ${r},${r} 0 0 0 ${r},0`,
+        `M 0,${h - r} A ${r},${r} 0 0 1 ${r},${cs}`,
+      ]
+    } else {
+      // rot=270: top cell: E-W 수평 + E→N 호 / bottom cell: N-S 수직 + W→S 호
+      return [
+        `M ${r},0 L ${r},${cs}`,
+        `M 0,${h - r} L ${w},${h - r}`,
+        `M ${w},${r} A ${r},${r} 0 0 1 ${r},0`,
+        `M 0,${h - r} A ${r},${r} 0 0 0 ${r},${cs}`,
+      ]
+    }
+  }
+}
+
+function doubleUBypassPaths(w: number, h: number): string[] {
+  // DOUBLE U-BYPASS는 항상 2×2칸 → cs=w/2로 아치 위치 결정
+  // cx1·cx2가 레인 중심, r=0.5*cs → 팔레트(28×28)에서도 아치가 충분히 깊어 U가 명확히 보임
+  const cs = w / 2
+  const cx1 = 0.5 * cs
+  const cx2 = 1.5 * cs
+  const r = 0.5 * cs
+  return [
+    `M ${cx1},0 L ${cx1},${h}`,
+    `M ${cx2},0 L ${cx2},${h}`,
+    `M ${cx1},0 A ${r},${r} 0 0 0 ${cx2},0`,           // 위 아치 — sweep=0, 아래로
+    `M ${cx1},${h} A ${r},${r} 0 0 1 ${cx2},${h}`,     // 아래 아치 — sweep=1, 위로
+  ]
 }
 
 export function OhtRailGlyph({
@@ -126,14 +292,12 @@ export function OhtRailGlyph({
   const isLarge =
     type === 'doubleUBypass' ||
     type === 'doubleBranchR' ||
-    type === 'doubleBranchL' ||
-    type === 'doubleBranch2'
+    type === 'doubleBranchL'
 
   const isCurve = type === 'curve90'
-  const isUBypass = type === 'uBypass' || type === 'doubleUBypass'
-  const isBranchR = type === 'branchR' || type === 'doubleBranchR'
-  const isBranchL = type === 'branchL' || type === 'doubleBranchL'
-  const isYBypass = type === 'yBypass' || type === 'doubleBranch2'
+  const isBranchR = type === 'branchR'
+  const isBranchL = type === 'branchL'
+  const isYBypass = type === 'yBypass'
 
   // ── 곡선 레일 ─────────────────────────────────────────────────────────────
   if (isCurve) {
@@ -152,27 +316,69 @@ export function OhtRailGlyph({
     )
   }
 
-  // ── U-BYPASS / DOUBLE U-BYPASS ─────────────────────────────────────────────
-  if (isUBypass) {
-    const paths = uBypassPaths(w, h, type === 'doubleUBypass')
+  // ── U-BYPASS ───────────────────────────────────────────────────────────────
+  if (type === 'uBypass') {
+    const paths = uBypassPaths(w, h)
     return (
       <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="pointer-events-none" aria-hidden>
-        {isLarge && (
-          <rect x={1} y={1} width={w - 2} height={h - 2} rx={3}
-            fill="none" stroke="#f97316" strokeWidth={0.8} strokeOpacity={0.3} strokeDasharray="2 3" />
-        )}
         {paths.map((d, i) => (
           <path key={i} d={d} fill="none" stroke={color}
-            strokeWidth={i === 0 ? stroke : stroke * 0.85}
-            strokeLinecap="round"
-            strokeOpacity={baseOpacity + (i === 0 ? 0.05 : -0.05)}
-            strokeDasharray={dashArray} />
+            strokeWidth={stroke} strokeLinecap="round"
+            strokeOpacity={baseOpacity} strokeDasharray={dashArray} />
         ))}
       </svg>
     )
   }
 
-  // ── BRANCH-R / BRANCH-L / DBL variants ────────────────────────────────────
+  // ── DBL BRANCH-L ──────────────────────────────────────────────────────────
+  if (type === 'doubleBranchL') {
+    const paths = doubleBranchLPaths(w, h, rotation)
+    return (
+      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="pointer-events-none" aria-hidden>
+        <rect x={1} y={1} width={w - 2} height={h - 2} rx={3}
+          fill="none" stroke="#f97316" strokeWidth={0.8} strokeOpacity={0.3} strokeDasharray="2 3" />
+        {paths.map((d, i) => (
+          <path key={i} d={d} fill="none" stroke={color}
+            strokeWidth={stroke} strokeLinecap="round"
+            strokeOpacity={baseOpacity} strokeDasharray={dashArray} />
+        ))}
+      </svg>
+    )
+  }
+
+  // ── DBL BRANCH-R ──────────────────────────────────────────────────────────
+  if (type === 'doubleBranchR') {
+    const paths = doubleBranchRPaths(w, h, rotation)
+    return (
+      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="pointer-events-none" aria-hidden>
+        <rect x={1} y={1} width={w - 2} height={h - 2} rx={3}
+          fill="none" stroke="#f97316" strokeWidth={0.8} strokeOpacity={0.3} strokeDasharray="2 3" />
+        {paths.map((d, i) => (
+          <path key={i} d={d} fill="none" stroke={color}
+            strokeWidth={stroke} strokeLinecap="round"
+            strokeOpacity={baseOpacity} strokeDasharray={dashArray} />
+        ))}
+      </svg>
+    )
+  }
+
+  // ── DOUBLE U-BYPASS ────────────────────────────────────────────────────────
+  if (type === 'doubleUBypass') {
+    const paths = doubleUBypassPaths(w, h)
+    return (
+      <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="pointer-events-none" aria-hidden>
+        <rect x={1} y={1} width={w - 2} height={h - 2} rx={3}
+          fill="none" stroke="#f97316" strokeWidth={0.8} strokeOpacity={0.3} strokeDasharray="2 3" />
+        {paths.map((d, i) => (
+          <path key={i} d={d} fill="none" stroke={color}
+            strokeWidth={stroke} strokeLinecap="round"
+            strokeOpacity={baseOpacity} strokeDasharray={dashArray} />
+        ))}
+      </svg>
+    )
+  }
+
+  // ── BRANCH-R / BRANCH-L ────────────────────────────────────
   if (isBranchR || isBranchL) {
     const found = findStraightAndBranch(openings)
     if (found) {
@@ -201,19 +407,26 @@ export function OhtRailGlyph({
     }
   }
 
-  // ── Y-BYPASS / DBL BRANCH-2 ────────────────────────────────────────────────
+  // ── Y-BYPASS ───────────────────────────────────────────────────────────────
   if (isYBypass) {
     const found = findStem(openings)
     if (found) {
       const { stem, branches } = found
       const arc1 = arcPath(stem, branches[0], size)
       const arc2 = arcPath(stem, branches[1], size)
+      // 두 분기 사이 직통 직선 (E↔W 또는 회전에 따른 방향)
+      const pb0 = DIR_POINT[branches[0]]
+      const pb1 = DIR_POINT[branches[1]]
+      const thruD = `M ${pb0.x * size},${pb0.y * size} L ${pb1.x * size},${pb1.y * size}`
       return (
         <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="pointer-events-none" aria-hidden>
           {isLarge && (
             <rect x={1} y={1} width={w - 2} height={h - 2} rx={3}
               fill="none" stroke="#f97316" strokeWidth={0.8} strokeOpacity={0.3} strokeDasharray="2 3" />
           )}
+          {/* 분기 간 직통 직선 */}
+          <path d={thruD} fill="none" stroke={color} strokeWidth={stroke}
+            strokeLinecap="round" strokeOpacity={baseOpacity} strokeDasharray={dashArray} />
           {arc1 && (
             <path d={arc1} fill="none" stroke={color} strokeWidth={stroke}
               strokeLinecap="round" strokeOpacity={baseOpacity + 0.05} strokeDasharray={dashArray} />

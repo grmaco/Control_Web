@@ -5,18 +5,19 @@ import {
   OHT_DIR_OFFSET,
   OHT_DIR_OPPOSITE,
   ohtRailFootprint,
-  ohtRailOpenings,
+  ohtRailPorts,
 } from '../constants/ohtRail'
 
 // ── 구 타입 → 신 타입 마이그레이션 ───────────────────────────────────────────
 
 const LEGACY_TYPE_MAP: Record<string, OhtRailType> = {
-  curve:    'curve90',
-  branchT:  'branchR',
-  branchX:  'branchR',
-  branchY:  'yBypass',
-  cross:    'doubleBranch2',
-  railGate: 'straight',
+  curve:          'curve90',
+  branchT:        'branchR',
+  branchX:        'branchR',
+  branchY:        'yBypass',
+  cross:          'straight',
+  railGate:       'straight',
+  doubleBranch2:  'straight',
 }
 
 function migrateRailType(type: string): OhtRailType {
@@ -303,27 +304,31 @@ export function removeOhtUnitFromLine(
 // ── 인접·연결 (개구부 기반) ────────────────────────────────────────────────────
 
 /**
- * 한 레일의 각 개구부 방향에 대해, 그 방향으로 마주보는 개구부를 가진 인접 레일이 있는지.
- * 렌더 연속성(연결선) 및 Phase 2 경로그래프 간선 판정에 사용.
+ * 한 레일의 각 포트에 대해, 마주보는 포트를 가진 인접 레일이 있는지.
+ * 멀티셀 레일도 정확히 처리 (U-BYPASS의 각 칸별 개구부 포함).
+ * 반환값: 연결된 방향 집합 (OhtDir 문자열). 렌더·Phase 2 경로그래프 공용.
  */
 export function ohtRailConnectedDirs(
   rail: OhtRailUnit,
   rails: OhtRailUnit[],
 ): Set<string> {
   const connected = new Set<string>()
-  const openings = ohtRailOpenings(rail.type, rail.rotation)
-  for (const dir of openings) {
-    const offset = OHT_DIR_OFFSET[dir]
-    const neighbor = findOhtRailAt(
-      rails,
-      rail.gridX + offset.dx,
-      rail.gridY + offset.dy,
-    )
+  const ports = ohtRailPorts(rail.type, rail.rotation)
+  for (const port of ports) {
+    const offset = OHT_DIR_OFFSET[port.dir]
+    const neighborX = rail.gridX + port.dx + offset.dx
+    const neighborY = rail.gridY + port.dy + offset.dy
+    const neighbor = findOhtRailAt(rails, neighborX, neighborY)
     if (!neighbor) continue
-    const neighborOpenings = ohtRailOpenings(neighbor.type, neighbor.rotation)
-    if (neighborOpenings.includes(OHT_DIR_OPPOSITE[dir])) {
-      connected.add(dir)
-    }
+    const incomingDir = OHT_DIR_OPPOSITE[port.dir]
+    const neighborPorts = ohtRailPorts(neighbor.type, neighbor.rotation)
+    const isConnected = neighborPorts.some(
+      (np) =>
+        neighbor.gridX + np.dx === neighborX &&
+        neighbor.gridY + np.dy === neighborY &&
+        np.dir === incomingDir,
+    )
+    if (isConnected) connected.add(port.dir)
   }
   return connected
 }
