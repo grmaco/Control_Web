@@ -292,6 +292,36 @@ body {
   filter: drop-shadow(0 0 10px rgba(34, 211, 238, 0.22));
 }
 
+/* ── 헤더 로고 — 빛나는 육각 마크 ── */
+.app-header-logo {
+  animation: app-header-logo-glow 3s ease-in-out infinite;
+}
+
+.app-header-logo-core {
+  transform-origin: 16px 16px;
+  animation: app-header-logo-core-pulse 2s ease-in-out infinite;
+}
+
+@keyframes app-header-logo-glow {
+  0%, 100% {
+    filter: drop-shadow(0 0 4px rgba(34, 211, 238, 0.4));
+  }
+  50% {
+    filter: drop-shadow(0 0 10px rgba(34, 211, 238, 0.85)) drop-shadow(0 0 6px rgba(167, 139, 250, 0.5));
+  }
+}
+
+@keyframes app-header-logo-core-pulse {
+  0%, 100% {
+    opacity: 0.75;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.18);
+  }
+}
+
 .app-header-title-text {
   background: linear-gradient(
     105deg,
@@ -1001,6 +1031,132 @@ body {
   border-spacing: 0;
   font-size: 7px;
   line-height: 1.35;
+}
+
+/* ══════════ AI 어시스턴트 (COVY) ══════════ */
+
+.assistant-avatar {
+  background: radial-gradient(circle at 50% 35%, rgba(8, 51, 68, 0.9), rgba(2, 6, 23, 0.95));
+  border: 1px solid rgba(34, 211, 238, 0.45);
+  box-shadow:
+    0 0 14px rgba(34, 211, 238, 0.35),
+    inset 0 0 12px rgba(34, 211, 238, 0.12);
+  transition: box-shadow 0.25s ease, transform 0.15s ease;
+}
+
+.assistant-avatar:hover {
+  box-shadow:
+    0 0 22px rgba(34, 211, 238, 0.55),
+    inset 0 0 14px rgba(34, 211, 238, 0.2);
+}
+
+.assistant-avatar-active {
+  border-color: rgba(240, 171, 252, 0.6);
+  box-shadow:
+    0 0 22px rgba(240, 171, 252, 0.45),
+    inset 0 0 14px rgba(240, 171, 252, 0.15);
+}
+
+/* 부유 애니메이션 */
+@keyframes assistant-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2.5px); }
+}
+.assistant-float {
+  animation: assistant-float 2.8s ease-in-out infinite;
+  transform-origin: center;
+}
+
+/* 그림자 — 부유에 맞춰 수축 */
+@keyframes assistant-shadow {
+  0%, 100% { transform: scaleX(1); opacity: 0.6; }
+  50% { transform: scaleX(0.75); opacity: 0.35; }
+}
+.assistant-shadow {
+  animation: assistant-shadow 2.8s ease-in-out infinite;
+  transform-origin: 24px 45px;
+}
+
+/* 눈 깜빡임 */
+@keyframes assistant-blink {
+  0%, 91%, 100% { transform: scaleY(1); }
+  94%, 97% { transform: scaleY(0.12); }
+}
+.assistant-eyes {
+  animation: assistant-blink 4.2s ease-in-out infinite;
+  transform-origin: 24px 15.5px;
+}
+
+/* 오른팔 인사 */
+@keyframes assistant-wave {
+  0%, 78%, 100% { transform: rotate(0deg); }
+  84% { transform: rotate(-38deg); }
+  90% { transform: rotate(-12deg); }
+  95% { transform: rotate(-38deg); }
+}
+.assistant-arm-wave {
+  animation: assistant-wave 7s ease-in-out infinite;
+  transform-origin: 35px 26px;
+}
+
+/* 안테나 펄스 */
+@keyframes assistant-antenna {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+.assistant-antenna {
+  animation: assistant-antenna 2s ease-in-out infinite;
+}
+.assistant-antenna-busy {
+  animation: assistant-antenna 0.45s ease-in-out infinite;
+}
+
+/* 가슴 코어 점멸 */
+@keyframes assistant-core {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.assistant-core-dot {
+  animation: assistant-core 1.6s ease-in-out infinite;
+}
+
+/* busy 회전 링 */
+@keyframes assistant-busy-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.assistant-busy-ring {
+  border-top-color: transparent !important;
+  border-left-color: transparent !important;
+  animation: assistant-busy-spin 1s linear infinite;
+  pointer-events: none;
+}
+
+/* 채팅 패널 등장 */
+@keyframes assistant-panel-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.assistant-panel {
+  animation: assistant-panel-in 0.22s ease-out;
+}
+
+/* 말풍선 등장 */
+@keyframes assistant-bubble-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.assistant-bubble-in {
+  animation: assistant-bubble-in 0.2s ease-out;
+}
+
+/* 스트리밍 커서 */
+@keyframes assistant-cursor {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+.assistant-cursor {
+  animation: assistant-cursor 0.9s step-end infinite;
 }
 
 .app-content .flow-callout-panel th {

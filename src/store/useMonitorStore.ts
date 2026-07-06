@@ -18,6 +18,8 @@ export interface MonitorViewTransform {
   lineUpdatedAt?: string
   /** 모니터 콜아웃 표 위치 (unitId → 그리드 px) */
   calloutPositions?: Record<string, { panelX: number; panelY: number }>
+  /** 더블클릭으로 숨긴 콜아웃 unitId 목록 */
+  hiddenCalloutIds?: string[]
 }
 
 interface PersistedMonitorState {
@@ -48,6 +50,11 @@ interface MonitorState {
     lineId: string,
     layoutSignature: string,
     positions: Record<string, { panelX: number; panelY: number }>,
+  ) => void
+  saveHiddenCalloutIds: (
+    lineId: string,
+    layoutSignature: string,
+    hiddenIds: string[],
   ) => void
   toggleHideModuleNames: () => void
   toggleEtherCat: () => void
@@ -192,6 +199,17 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
       positionY: existing?.positionY ?? 0,
       layoutSignature,
       calloutPositions: positions,
+    })
+  },
+
+  saveHiddenCalloutIds: (lineId, layoutSignature, hiddenIds) => {
+    const existing = get().lineViews[lineId]
+    get().saveLineView(lineId, {
+      scale: existing?.scale ?? 1,
+      positionX: existing?.positionX ?? 0,
+      positionY: existing?.positionY ?? 0,
+      layoutSignature,
+      hiddenCalloutIds: hiddenIds,
     })
   },
 

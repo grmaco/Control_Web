@@ -275,17 +275,44 @@ export function LineStatusGrid({
     () => new Map(flowCallouts.map((callout) => [callout.unitId, callout])),
     [flowCallouts],
   )
+  const lineView = useMonitorStore((s) => s.lineViews[line.id] ?? null)
+  const saveCalloutPositions = useMonitorStore((s) => s.saveCalloutPositions)
+  const saveHiddenCalloutIds = useMonitorStore((s) => s.saveHiddenCalloutIds)
+
   const [pinnedUnitIds, setPinnedUnitIds] = useState<ReadonlySet<string>>(new Set())
-  /** 더블클릭으로 숨긴 초기 콜아웃 ID 집합 */
+  /** 더블클릭으로 숨긴 콜아웃 ID 집합 — 라인·레이아웃별로 영속화됨 */
   const [hiddenCalloutIds, setHiddenCalloutIds] = useState<ReadonlySet<string>>(new Set())
   const touchLayout = useTouchLayout()
 
+  // 스토어 하이드레이션이 첫 렌더 이후 완료되어도 저장된 숨김 상태를 1회 반영
+  const hiddenSyncedRef = useRef(false)
+  useEffect(() => {
+    if (hiddenSyncedRef.current) return
+    if (lineView?.layoutSignature !== layoutSignature) return
+    hiddenSyncedRef.current = true
+    if (lineView.hiddenCalloutIds && lineView.hiddenCalloutIds.length > 0) {
+      setHiddenCalloutIds(new Set(lineView.hiddenCalloutIds))
+    }
+  }, [lineView, layoutSignature])
+
+  const updateHiddenCalloutIds = useCallback(
+    (updater: (current: ReadonlySet<string>) => ReadonlySet<string>) => {
+      setHiddenCalloutIds((current) => {
+        const next = updater(current)
+        saveHiddenCalloutIds(line.id, layoutSignature, [...next])
+        return next
+      })
+    },
+    [layoutSignature, line.id, saveHiddenCalloutIds],
+  )
+
   useEffect(() => {
     if (calloutDeselectToken > 0) {
+      hiddenSyncedRef.current = true
       setPinnedUnitIds(new Set())
-      setHiddenCalloutIds(new Set())
+      updateHiddenCalloutIds(() => new Set())
     }
-  }, [calloutDeselectToken])
+  }, [calloutDeselectToken, updateHiddenCalloutIds])
 
   const handleUnitPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>, unitId: string) => {
@@ -303,14 +330,14 @@ export function LineStatusGrid({
   const handleUnitDoubleClick = useCallback(
     (event: React.MouseEvent<HTMLDivElement>, unitId: string) => {
       event.stopPropagation()
-      setHiddenCalloutIds((current) => {
+      updateHiddenCalloutIds((current) => {
         const next = new Set(current)
         if (next.has(unitId)) next.delete(unitId)
         else next.add(unitId)
         return next
       })
     },
-    [],
+    [updateHiddenCalloutIds],
   )
 
   const handleCalloutHide = useCallback(
@@ -322,14 +349,14 @@ export function LineStatusGrid({
           return next
         })
       } else {
-        setHiddenCalloutIds((current) => {
+        updateHiddenCalloutIds((current) => {
           const next = new Set(current)
           next.add(unitId)
           return next
         })
       }
     },
-    [pinnedUnitIds],
+    [pinnedUnitIds, updateHiddenCalloutIds],
   )
 
   const peekUnitIds = useMemo(() => [...pinnedUnitIds], [pinnedUnitIds])
@@ -403,8 +430,6 @@ export function LineStatusGrid({
     viewportBounds,
   ])
 
-  const lineView = useMonitorStore((s) => s.lineViews[line.id] ?? null)
-  const saveCalloutPositions = useMonitorStore((s) => s.saveCalloutPositions)
   const savedCalloutPositions = useMemo(() => {
     if (lineView?.layoutSignature !== layoutSignature) return undefined
     return lineView.calloutPositions

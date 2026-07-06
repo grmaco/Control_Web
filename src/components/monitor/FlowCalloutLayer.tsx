@@ -90,6 +90,8 @@ export function FlowCalloutOverlay({
   const positionsRef = useRef(positions)
   positionsRef.current = positions
   const draggingUnitIdRef = useRef<string | null>(null)
+  /** 사용자가 이번 세션에서 직접 드래그한 unitId — 이후 저장 위치 재적용으로부터 보호 */
+  const userMovedIdsRef = useRef<Set<string>>(new Set())
 
   const calloutKey = callouts.map((c) => c.unitId).join('|')
   const savedKey = savedPositions ? JSON.stringify(savedPositions) : ''
@@ -97,14 +99,17 @@ export function FlowCalloutOverlay({
   useEffect(() => {
     if (draggingUnitIdRef.current) return
     setPositions((current) => {
-      // 이미 표시 중인 콜아웃은 현재 메모리 위치를 유지하고,
-      // 새로 추가된 콜아웃만 저장된 위치 또는 기본 위치를 사용한다.
+      // 사용자가 직접 옮긴 콜아웃은 현재 메모리 위치를 유지한다.
+      // 그 외에는 저장된 위치를 우선 적용 — 스토어 하이드레이션이 첫 렌더 이후
+      // 늦게 완료되어도(초기값이 이미 기본 위치로 계산된 경우) 저장 위치로 갱신되도록 한다.
       // (초기화 버튼으로 calloutKey가 바뀌어도 드래그한 위치가 유지됨)
       const next: Record<string, FlowCalloutPosition> = {}
       for (const callout of callouts) {
+        const userMoved = userMovedIdsRef.current.has(callout.unitId)
         next[callout.unitId] =
-          current[callout.unitId] ??
+          (userMoved ? current[callout.unitId] : undefined) ??
           savedPositions?.[callout.unitId] ??
+          current[callout.unitId] ??
           { panelX: callout.panelX, panelY: callout.panelY }
       }
       positionsRef.current = next
@@ -123,6 +128,7 @@ export function FlowCalloutOverlay({
   }, [deselectToken])
 
   const updatePosition = useCallback((unitId: string, panelX: number, panelY: number) => {
+    userMovedIdsRef.current.add(unitId)
     setPositions((current) => {
       const next = { ...current, [unitId]: { panelX, panelY } }
       positionsRef.current = next
@@ -443,7 +449,11 @@ function SelectableFlowCalloutTable({
       if (!drag || drag.pointerId !== event.pointerId) return
 
       detachWindowListeners()
-      panelRef.current?.releasePointerCapture(event.pointerId)
+      try {
+        panelRef.current?.releasePointerCapture(event.pointerId)
+      } catch {
+        /* 캡처 실패해도 커밋은 계속 진행 */
+      }
       dragRef.current = null
       setDragging(false)
       onPanLockChangeRef.current?.(false)
@@ -473,7 +483,11 @@ function SelectableFlowCalloutTable({
       wasSelectedBeforeDown,
       scale,
     }
-    panelRef.current?.setPointerCapture(event.pointerId)
+    try {
+      panelRef.current?.setPointerCapture(event.pointerId)
+    } catch {
+      /* 캡처 실패해도 로컬 핸들러로 드래그 계속 진행 */
+    }
 
     const onWindowMove = (moveEvent: PointerEvent) => {
       const activeDrag = dragRef.current

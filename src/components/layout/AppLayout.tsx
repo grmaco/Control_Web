@@ -7,11 +7,39 @@ import { useConveyorStore } from '../../store/useConveyorStore'
 import { useMonitorStore } from '../../store/useMonitorStore'
 import type { UserRole } from '../../types/auth'
 import { Navigation, MobileNavigation } from './Navigation'
+import { HumanoidAssistant } from '../assistant/HumanoidAssistant'
 
 const ROLE_BADGE_CLASS: Record<UserRole, string> = {
   operator: 'header-role-badge--operator',
   engineer: 'header-role-badge--engineer',
   developer: 'header-role-badge--developer',
+}
+
+/** 헤더 타이틀 앞 반짝이는 육각 로고 — 모바일·데스크톱 공통 표시 */
+function HeaderLogo() {
+  return (
+    <svg viewBox="0 0 32 32" width="26" height="26" className="app-header-logo shrink-0" aria-hidden>
+      <defs>
+        <linearGradient id="header-logo-grad" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#22d3ee" />
+          <stop offset="100%" stopColor="#a78bfa" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M16 2 L27.5 9 V23 L16 30 L4.5 23 V9 Z"
+        fill="none"
+        stroke="url(#header-logo-grad)"
+        strokeWidth="1.6"
+      />
+      <circle className="app-header-logo-core" cx="16" cy="16" r="4" fill="url(#header-logo-grad)" />
+      <circle cx="16" cy="2" r="1.4" fill="#67e8f9" />
+      <circle cx="27.5" cy="9" r="1.4" fill="#67e8f9" />
+      <circle cx="27.5" cy="23" r="1.4" fill="#a78bfa" />
+      <circle cx="16" cy="30" r="1.4" fill="#a78bfa" />
+      <circle cx="4.5" cy="23" r="1.4" fill="#a78bfa" />
+      <circle cx="4.5" cy="9" r="1.4" fill="#67e8f9" />
+    </svg>
+  )
 }
 
 export function AppLayout() {
@@ -53,10 +81,7 @@ export function AppLayout() {
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
           <div className="flex flex-shrink-0 items-center gap-3 md:gap-6">
             <div className="flex items-center gap-2.5">
-              <span
-                className="hidden h-7 w-0.5 shrink-0 rounded-full bg-gradient-to-b from-cyan-400 via-slate-200 to-violet-500 sm:block"
-                aria-hidden
-              />
+              <HeaderLogo />
               <h1 className="app-header-title whitespace-nowrap text-base sm:text-lg">
                 <span className="app-header-title-text font-semibold tracking-wide">
                   PC제어 관제시스템
@@ -98,6 +123,7 @@ export function AppLayout() {
       <main className="app-content mx-auto w-full max-w-7xl flex-1 px-3 py-4 sm:px-4">
         <Outlet />
       </main>
+      <HumanoidAssistant />
     </div>
   )
 }
