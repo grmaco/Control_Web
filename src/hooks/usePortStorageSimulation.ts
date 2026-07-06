@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
 import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
 import { resolveAdjacentPortsForStk } from '../utils/unitPropertyHelpers'
+import { usePioStore } from '../store/usePioStore'
 
 export type PortSimStatus = 'LD' | 'ULD' | 'BUSY' | 'READY'
 export type StorageSimStatus = 'IDLE' | 'TR' | 'BUSY' | 'COMPLETE'
@@ -23,6 +24,8 @@ interface TransferSession {
   storageId: string
   portId: string
   phase: number
+  /** PIO 타임차트 트랜잭션 ID — 핸드셰이크 신호 기록용 */
+  pioTxId?: string
 }
 
 /**
@@ -61,6 +64,13 @@ export function usePortStorageSimulation(
   // tick의 deps:[] 클로저에서도 최신 콜백 참조
   const onPortDischargeRef = useRef(onPortDischarge)
   onPortDischargeRef.current = onPortDischarge
+  // tick·startTransfer의 deps:[] 클로저에서 유닛 이름 조회용
+  const lineRef = useRef(line)
+  lineRef.current = line
+
+  const unitName = useCallback((unitId: string) => {
+    return lineRef.current.units.find((u) => u.id === unitId)?.name ?? unitId
+  }, [])
 
   const buildInitial = useCallback(() => {
     const ports: Record<string, PortSimState> = {}
@@ -92,6 +102,9 @@ export function usePortStorageSimulation(
   }, [init])
 
   const stop = useCallback(() => {
+    // 진행 중이던 핸드셰이크의 PIO 트랜잭션 정리
+    const txId = sessionRef.current?.pioTxId
+    if (txId) usePioStore.getState().completeTransaction(txId, 'error')
     setIsRunning(false)
     init()
   }, [init])
@@ -160,16 +173,32 @@ export function usePortStorageSimulation(
     storageRef.current = ns
     setStorageStates(ns)
 
-    const s: TransferSession = { storageId, portId, phase: 0 }
+    // PIO 타임차트: 핸드셰이크 시작 — STK(Active)가 포트(Passive)에서 자재 반출
+    const pio = usePioStore.getState()
+    const pioTxId = pio.beginTransaction({
+      pairKind: 'PORT_STK',
+      operation: 'UNLOAD',
+      activeName: unitName(storageId),
+      passiveName: unitName(portId),
+      source: 'sim-port',
+    })
+    pio.addEdgesNow(pioTxId, [
+      { signal: 'ES', value: 1 },
+      { signal: 'HO_AVBL', value: 1 },
+      { signal: 'VALID', value: 1 },
+      { signal: 'CS_0', value: 1 },
+    ])
+
+    const s: TransferSession = { storageId, portId, phase: 0, pioTxId }
     sessionRef.current = s
     setSession(s)
-  }, [])
+  }, [unitName])
 
   const tick = useCallback(() => {
     const s = sessionRef.current
     if (!s) return
 
-    const { storageId, portId, phase } = s
+    const { storageId, portId, phase, pioTxId } = s
     const storage = storageRef.current[storageId]
     const port = portRef.current[portId]
     if (!storage || !port) return
@@ -177,6 +206,7 @@ export function usePortStorageSimulation(
     let np = { ...portRef.current }
     let ns = { ...storageRef.current }
     let nextPhase = phase + 1
+    const pio = usePioStore.getState()
 
     /** 핸드쉐이크 중단 — 포트/스토커 원상 복귀 */
     const abort = () => {
@@ -185,18 +215,36 @@ export function usePortStorageSimulation(
       nextPhase = -1
       sessionRef.current = null
       setSession(null)
+      if (pioTxId) {
+        pio.addEdgesNow(pioTxId, [
+          { signal: 'ES', value: 0 },
+          { signal: 'HO_AVBL', value: 0 },
+        ])
+        pio.completeTransaction(
+          pioTxId,
+          'error',
+          phase === 0 ? 'T1_VALID_REQ' : 'T5_BUSY_CARRIER',
+        )
+      }
     }
 
     switch (phase) {
       case 0: // Storage=TR → 포트 자재 재확인 후 READY 신호
         if (!port.hasCst) { abort(); break }
         np[portId] = { ...port, status: 'READY' }
+        if (pioTxId) pio.addEdgesNow(pioTxId, [{ signal: 'U_REQ', value: 1 }])
         break
       case 1: // Port=READY → Storage: BUSY
         ns[storageId] = { ...storage, status: 'BUSY' }
+        if (pioTxId)
+          pio.addEdgesNow(pioTxId, [
+            { signal: 'TR_REQ', value: 1 },
+            { signal: 'READY', value: 1 },
+          ])
         break
       case 2: // Storage=BUSY → Port: BUSY
         np[portId] = { ...port, status: 'BUSY' }
+        if (pioTxId) pio.addEdgesNow(pioTxId, [{ signal: 'BUSY', value: 1 }])
         break
       case 3: // 자재 이동 — 포트 자재 최종 확인
         if (!port.hasCst) { abort(); break }
@@ -209,12 +257,28 @@ export function usePortStorageSimulation(
         }
         // 경로 시뮬에서 포트 자재 로드 제거
         onPortDischargeRef.current?.(portId)
+        if (pioTxId)
+          pio.addEdgesNow(pioTxId, [
+            { signal: 'U_REQ', value: 0 },
+            { signal: 'BUSY', value: 0 },
+            { signal: 'COMPT', value: 1 },
+          ])
         break
       case 4: // Storage=COMPLETE → IDLE, 완료
         ns[storageId] = { ...storage, status: 'IDLE', hasCst: false }
         nextPhase = -1
         sessionRef.current = null
         setSession(null)
+        if (pioTxId) {
+          pio.addEdgesNow(pioTxId, [
+            { signal: 'READY', value: 0 },
+            { signal: 'COMPT', value: 0 },
+            { signal: 'TR_REQ', value: 0 },
+            { signal: 'VALID', value: 0 },
+            { signal: 'CS_0', value: 0 },
+          ])
+          pio.completeTransaction(pioTxId, 'complete')
+        }
         break
     }
 

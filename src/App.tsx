@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { RequireAuth } from './components/auth/RequireAuth'
 import { AppLayout } from './components/layout/AppLayout'
 import { BuilderPage } from './pages/BuilderPage'
+import { ChartPage } from './pages/ChartPage'
 import { CvStatusPage } from './pages/CvStatusPage'
 import { HistoryPage } from './pages/HistoryPage'
 import { HomePage } from './pages/HomePage'
@@ -22,6 +23,7 @@ export default function App() {
             <Route path="cv-status" element={<CvStatusPage />} />
             <Route path="builder" element={<BuilderPage />} />
             <Route path="history" element={<HistoryPage />} />
+            <Route path="charts" element={<ChartPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Route>

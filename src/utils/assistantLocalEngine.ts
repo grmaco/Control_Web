@@ -1,7 +1,10 @@
 import { useConveyorStore } from '../store/useConveyorStore'
 import { useSemiCnvStore } from '../store/useSemiCnvStore'
+import { usePioStore } from '../store/usePioStore'
 import { unitTitle } from '../constants/conveyorTypes'
 import { STATUS_COLORS } from '../constants/statusColors'
+import { PIO_STEP_CAUSES } from '../constants/pioSignals'
+import { computePioMeasures, pioTransactionDuration } from './pioMeasure'
 import type { ConveyorStatus, ConveyorUnit } from '../types/conveyor'
 
 /**
@@ -9,10 +12,12 @@ import type { ConveyorStatus, ConveyorUnit } from '../types/conveyor'
  * 고정 문구가 아니라 호출 시점의 스토어 실데이터(알람·로그·상태)를 분석해 생성한다.
  */
 
-type Topic = 'alarm' | 'log' | 'simulation' | 'status' | 'usage' | 'unknown'
+type Topic = 'pio' | 'alarm' | 'log' | 'simulation' | 'status' | 'usage' | 'unknown'
 
 function classify(question: string): Topic {
   const q = question.toLowerCase()
+  if (/pio|핸드셰이크|핸드쉐이크|handshake|타임\s?차트|time\s?chart|e84|기준.*(초과|비교)|베이스라인|baseline/.test(q))
+    return 'pio'
   if (/알람|alarm|경보|오류.*원인|왜.*(발생|났)/.test(q)) return 'alarm'
   if (/로그|log|이력|기록|이상.*징후/.test(q)) return 'log'
   if (/시뮬|simul|투입|출고|반송|경로/.test(q)) return 'simulation'
@@ -178,6 +183,54 @@ function summarizeStatus(): string {
   return lines.join('\n')
 }
 
+// ── PIO 핸드셰이크 분석 ───────────────────────────────────
+function analyzePio(): string {
+  const pio = usePioStore.getState()
+  if (pio.transactions.length === 0) {
+    return 'PIO 핸드셰이크 기록이 없습니다. 차트 메뉴에서 데모를 생성하거나 라인 현황에서 시뮬레이션(경로·OHT·포트반송)을 실행해보세요.'
+  }
+
+  const recent = pio.transactions.slice(0, 15)
+  const errors = recent.filter((t) => t.status === 'error')
+  const lines: string[] = [
+    `📈 PIO 핸드셰이크 ${recent.length}건 분석 (오류 ${errors.length}건)`,
+    '',
+  ]
+
+  let anomalyFound = false
+  for (const tx of recent) {
+    if (tx.status === 'running') continue
+    const baseline = pio.baselines[tx.pairKind]
+    const overs = computePioMeasures(tx, baseline).filter((m) => m.status === 'over')
+    if (tx.status === 'error') {
+      anomalyFound = true
+      lines.push(
+        `■ ${tx.activeName}→${tx.passiveName} (${tx.operation}) — ❌ 오류 중단${tx.errorStep ? ` @${tx.errorStep}` : ''} (ES/HO_AVBL 강하)`,
+      )
+      if (tx.errorStep) lines.push(`  ↳ 점검: ${PIO_STEP_CAUSES[tx.errorStep]}`)
+    } else if (overs.length > 0) {
+      anomalyFound = true
+      lines.push(
+        `■ ${tx.activeName}→${tx.passiveName} (${tx.operation}, 총 ${Math.round(pioTransactionDuration(tx))}ms) — 기준 초과 ${overs.length}구간`,
+      )
+      for (const m of overs) {
+        lines.push(`  · ${m.label}: 측정 ${m.durationMs}ms / 기준 ${m.baselineMs}ms (+${m.deviationMs}ms)`)
+        lines.push(`    ↳ 점검: ${PIO_STEP_CAUSES[m.step]}`)
+      }
+    }
+  }
+
+  if (!anomalyFound) {
+    lines.push('✅ 모든 핸드셰이크가 골든 베이스라인 허용 범위 내에 있습니다.')
+  } else {
+    lines.push('')
+    lines.push(
+      '개선 제안: 반복 초과 구간이 특정 단계에 집중되면 해당 설비의 PLC 스캔타임·센서 응답을 우선 점검하고, 차트 메뉴에서 정상 트랜잭션을 "기준으로 설정"해 현장 기준을 재정렬하세요.',
+    )
+  }
+  return lines.join('\n')
+}
+
 // ── 사용법 안내 ───────────────────────────────────────────
 function usageGuide(): string {
   return [
@@ -195,6 +248,7 @@ export function localAssistantAnswer(question: string): string {
   const topic = classify(question)
   const body = (() => {
     switch (topic) {
+      case 'pio': return analyzePio()
       case 'alarm': return analyzeAlarms()
       case 'log': return analyzeLogs()
       case 'simulation': return analyzeSimulation()

@@ -1,6 +1,8 @@
 import { useConveyorStore } from '../store/useConveyorStore'
 import { useSemiCnvStore } from '../store/useSemiCnvStore'
+import { usePioStore } from '../store/usePioStore'
 import { unitTitle } from '../constants/conveyorTypes'
+import { computePioMeasures, pioTransactionDuration } from './pioMeasure'
 
 const MAX_V3_LOGS = 30
 const MAX_HISTORY = 20
@@ -104,11 +106,31 @@ export function buildAssistantSystemPrompt(): string {
     sections.push(`## 어플리케이션 이력 (최근 ${Math.min(conveyor.history.length, MAX_HISTORY)}건)\n${lines.join('\n')}`)
   }
 
+  // ── PIO 핸드셰이크 (타임차트)
+  const pio = usePioStore.getState()
+  if (pio.transactions.length > 0) {
+    const lines = pio.transactions.slice(0, 8).map((tx) => {
+      const baseline = pio.baselines[tx.pairKind]
+      const overs =
+        tx.status !== 'running'
+          ? computePioMeasures(tx, baseline)
+              .filter((m) => m.status === 'over')
+              .map((m) => `${m.label} +${m.deviationMs}ms`)
+          : []
+      const overText = overs.length > 0 ? ` · 기준초과: ${overs.join(', ')}` : ''
+      return `- [${tx.pairKind}] ${tx.operation} ${tx.activeName}→${tx.passiveName} 총 ${Math.round(pioTransactionDuration(tx))}ms 상태:${tx.status}${overText}`
+    })
+    sections.push(
+      `## 최근 PIO 핸드셰이크 (SEMI E84 타임차트, 최근 ${Math.min(pio.transactions.length, 8)}건)\n${lines.join('\n')}`,
+    )
+  }
+
   // ── 어플리케이션 기능 안내 (사용법 질문 대응)
   sections.push(
     [
       '## 어플리케이션 기능 요약',
       '- 라인 현황(모니터링): 실시간 유닛 상태, 콜아웃(STATUS/ROLE/CST/SLOTS), 경로 시뮬레이션(투입/출고, Tack Time, 연속 투입), 포트·창고 핸드쉐이크 시뮬, OHT 모드(레일·대차 시뮬), 2.5D 뷰',
+      '- 차트: PIO Time Chart (SEMI E84 핸드셰이크 파형, Golden Baseline 오버레이, 단계별 응답시간 측정, 이상 구간 하이라이트, PIO Replay), V3 이벤트 타임라인',
       '- 라인 빌더: 유닛 드래그 배치(직선·회전·분기·리프트·포트·적재창고), OHT 레일 배치, 속성 편집',
       '- 설비 상태 / CV 현황 / V3 이력 탭: 상세 상태 표, V3 로그 조회',
       '- 알람: 유닛 알람 코드 실시간 표시(콜아웃 빨간 강조), 알람 이력 저장',

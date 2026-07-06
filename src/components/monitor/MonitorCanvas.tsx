@@ -31,6 +31,7 @@ import { PathSimulationBar, PathSimulationPlaybackControls } from './PathSimulat
 import { FLOW_CALLOUT_PANEL_CLASS, FLOW_UNIT_PEEK_HIT_CLASS } from './FlowCalloutLayer'
 import { OhtSimulationBar } from './OhtSimulationBar'
 import { useOhtSimulation } from '../../hooks/useOhtSimulation'
+import { usePioPathSimBridge } from '../../hooks/usePioPathSimBridge'
 import { usePortStorageSimulation } from '../../hooks/usePortStorageSimulation'
 import { PortSelectModal } from './PortStorageSimOverlay'
 import { isStorageUnit } from '../../constants/conveyorTypes'
@@ -186,6 +187,14 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
     simulation.status,
     simulation.dischargeLoadAtPort,
   )
+
+  // PIO 타임차트: 컨베이어 자재 홉 → CNV↔CNV / CNV↔PORT 핸드셰이크 기록
+  usePioPathSimBridge({
+    enabled: simulation.status !== 'idle',
+    loads: simulation.loads,
+    line,
+    transitIntervalSec: simulation.transitIntervalSec,
+  })
 
   // 시뮬 완료 후에도 자재가 있던 셀을 시각적으로 유지 (glow 지속)
   const visualCstIds = useMemo(() => {

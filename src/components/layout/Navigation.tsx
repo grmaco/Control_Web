@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useConveyorStore } from '../../store/useConveyorStore'
 
-type NavAccent = 'cyan' | 'teal' | 'amber' | 'violet' | 'sky'
-type NavIconName = 'home' | 'status' | 'alarm' | 'builder' | 'history'
+type NavAccent = 'cyan' | 'teal' | 'amber' | 'violet' | 'sky' | 'rose'
+type NavIconName = 'home' | 'status' | 'alarm' | 'builder' | 'history' | 'chart'
 
 const navItems: {
   to: string
@@ -17,6 +17,7 @@ const navItems: {
   { to: '/v3-alarms', label: '알람 리스트', accent: 'amber', icon: 'alarm' },
   { to: '/builder', label: '라인 빌더', accent: 'violet', icon: 'builder' },
   { to: '/history', label: '이력', accent: 'sky', icon: 'history' },
+  { to: '/charts', label: '차트', accent: 'rose', icon: 'chart' },
 ]
 
 function NavIcon({ name, className }: { name: NavIconName; className?: string }) {
@@ -63,6 +64,16 @@ function NavIcon({ name, className }: { name: NavIconName; className?: string })
       return (
         <svg className={cn} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden>
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+      )
+    case 'chart':
+      return (
+        <svg className={cn} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M3 16h3l2-8 4 12 3-8 1.5 4H21M3 4v16"
+          />
         </svg>
       )
   }
