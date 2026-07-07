@@ -5,34 +5,30 @@ import type {
   PioEdge,
   PioOperation,
   PioPairKind,
+  PioSide,
   PioSource,
   PioStepId,
   PioTransaction,
   PioTransactionStatus,
 } from '../types/pio'
-import {
-  DEFAULT_PIO_BASELINE,
-  PIO_STEP_ORDER,
-  scalePioSteps,
-} from '../constants/pioSignals'
+import { buildDefaultBaseline } from '../constants/pioSignals'
 import { computePioMeasures } from '../utils/pioMeasure'
 
 const MAX_TRANSACTIONS = 150
 const BASELINE_STORAGE_KEY = 'conveyor.pio.baselines'
 
-/** 쌍 유형별 기본 베이스라인 — 각 시뮬레이션의 실제 핸드셰이크 총 시간에 맞춤 */
+/**
+ * 쌍 유형별 기본 베이스라인 — 각 시뮬레이션의 실제 핸드셰이크 총 시간에 맞춤.
+ * 단계별 ms 값은 표준 수치가 아닌 임의 설정 — "이 측정을 기준으로 설정"으로
+ * 실측 트랜잭션을 캡처해 현장 실제 값으로 교체할 것을 전제로 한다.
+ */
 function defaultBaselines(): Record<PioPairKind, PioBaseline> {
-  const make = (totalMs: number, label: string): PioBaseline => ({
-    ...DEFAULT_PIO_BASELINE,
-    steps: scalePioSteps(DEFAULT_PIO_BASELINE.steps, totalMs),
-    source: `기본값 (${label})`,
-  })
   return {
-    CNV_CNV: make(1000, 'CV↔CV 1.0s'),
-    CNV_PORT: make(1000, 'CV↔PORT 1.0s'),
-    PORT_STK: make(4000, 'PORT↔STK 4.0s'),
-    MODULE_OHT: make(1400, 'MODULE↔OHT 1.4s'),
-    MODULE_AGV: make(1400, 'MODULE↔AGV 1.4s'),
+    CNV_CNV: buildDefaultBaseline('CNV_CNV', 1000, 'CV↔CV 1.0s'),
+    CNV_PORT: buildDefaultBaseline('CNV_PORT', 1000, 'CV↔PORT 1.0s'),
+    PORT_STK: buildDefaultBaseline('PORT_STK', 4000, 'PORT↔STK 4.0s'),
+    MODULE_OHT: buildDefaultBaseline('MODULE_OHT', 1400, 'MODULE↔OHT 1.4s'),
+    MODULE_AGV: buildDefaultBaseline('MODULE_AGV', 1400, 'MODULE↔AGV 1.4s'),
   }
 }
 
@@ -44,7 +40,12 @@ function loadBaselines(): Record<PioPairKind, PioBaseline> {
     const parsed = JSON.parse(raw) as Partial<Record<PioPairKind, PioBaseline>>
     for (const kind of Object.keys(defaults) as PioPairKind[]) {
       const saved = parsed[kind]
-      if (saved && PIO_STEP_ORDER.every((s) => typeof saved.steps?.[s] === 'number')) {
+      // 프로토콜·단계 구성이 현재 정의와 일치할 때만 저장값 사용 (스키마 변경 시 자동 폐기)
+      if (
+        saved &&
+        saved.protocol === defaults[kind].protocol &&
+        defaults[kind].stepOrder.every((s) => typeof saved.steps?.[s] === 'number')
+      ) {
         defaults[kind] = saved
       }
     }
@@ -66,7 +67,11 @@ export interface BeginPioInput {
   pairKind: PioPairKind
   operation: PioOperation
   activeName: string
+  /** Active 설비 모듈 타입 라벨 (예: 직선, 회전, 적재창고, OHT) */
+  activeType?: string
   passiveName: string
+  /** Passive 설비 모듈 타입 라벨 (예: 포트, 직선, 회전) */
+  passiveType?: string
   source: PioSource
 }
 
@@ -78,7 +83,10 @@ interface PioState {
   /** 상대 시각이 명시된 엣지 추가 (시퀀서 — 스케줄 기준) */
   addEdges: (id: string, edges: PioEdge[]) => void
   /** 현재 시각으로 엣지 추가 (실측 — 시뮬 tick·V3 수신 시점) */
-  addEdgesNow: (id: string, signals: Array<{ signal: string; value: 0 | 1 }>) => void
+  addEdgesNow: (
+    id: string,
+    signals: Array<{ signal: string; side: PioSide; value: 0 | 1 }>,
+  ) => void
   completeTransaction: (
     id: string,
     status: Exclude<PioTransactionStatus, 'running'>,
@@ -128,7 +136,7 @@ export const usePioStore = create<PioState>((set, get) => ({
     const t = Date.now() - tx.startedAt
     get().addEdges(
       id,
-      signals.map(({ signal, value }) => ({ signal, value, t })),
+      signals.map(({ signal, side, value }) => ({ signal, side, value, t })),
     )
   },
 

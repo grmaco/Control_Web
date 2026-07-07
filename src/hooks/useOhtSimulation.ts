@@ -12,6 +12,7 @@ import {
   type OhtVehicleState,
 } from '../utils/ohtSimulation'
 import { runPioSequence } from '../utils/pioSequence'
+import { typeLabel } from '../constants/conveyorTypes'
 
 /**
  * OHT 인터페이스 시작 감지 → PIO 핸드셰이크 트랜잭션 발행.
@@ -32,7 +33,9 @@ function emitPioForOhtTransitions(
       pairKind: 'MODULE_OHT',
       operation: p.carrying ? 'LOAD' : 'UNLOAD',
       activeName: v.name,
+      activeType: 'OHT',
       passiveName: targetUnit?.name ?? v.targetUnitId ?? '모듈',
+      passiveType: targetUnit ? typeLabel(targetUnit.type) : undefined,
       source: 'sim-oht',
       scaleToTotalMs: OHT_INTERFACE_MS,
     })

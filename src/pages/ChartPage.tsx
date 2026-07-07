@@ -3,15 +3,58 @@ import { AppCard, PageHeader } from '../components/common/PageUi'
 import { PioTimeChart } from '../components/pio/PioTimeChart'
 import { PioStepTable } from '../components/pio/PioStepTable'
 import { PioTransactionList } from '../components/pio/PioTransactionList'
-import { PIO_PAIR_LABELS } from '../constants/pioSignals'
+import { PIO_PAIR_LABELS, pioProtocolForPair } from '../constants/pioSignals'
 import { V3EventTimeline } from '../components/pio/V3EventTimeline'
 import { usePioStore } from '../store/usePioStore'
 import { useAssistantStore } from '../store/useAssistantStore'
 import { useAssistantChat } from '../hooks/useAssistantChat'
 import { runPioSequence } from '../utils/pioSequence'
 import { computePioMeasures, pioTransactionDuration } from '../utils/pioMeasure'
+import type { PioPairKind } from '../types/pio'
 
 const REPLAY_SPEEDS = [0.5, 1, 2, 4]
+
+const DEMO_PAIR_KINDS: PioPairKind[] = [
+  'CNV_CNV',
+  'CNV_PORT',
+  'PORT_STK',
+  'MODULE_OHT',
+  'MODULE_AGV',
+]
+
+/** 쌍 유형별 지연/오류 데모를 주입할 대표 단계 — 각 프로토콜의 실제 stepOrder에 맞춤 */
+function demoAnomalyStep(kind: PioPairKind, kindOf: 'delay' | 'error'): string {
+  if (pioProtocolForPair(kind) === 'E84') {
+    return kindOf === 'delay' ? 'T3_TRREQ_READY' : 'T5_BUSY_CARRIER'
+  }
+  if (kind === 'PORT_STK') return kindOf === 'delay' ? 'S1_WAIT' : 'S2_TRANSFER'
+  return 'S1_TRANSFER'
+}
+
+/**
+ * 쌍 유형별 데모 Active/Passive 이름·모듈 타입 — 실제 시뮬레이션의 역할 배정과 일치시킴.
+ * PORT_STK는 쌍 라벨(PORT↔STK) 순서와 달리 실제로는 창고(STK)가 Active, 포트가 Passive
+ * (usePortStorageSimulation.ts) — 라벨을 그대로 나열하면 역할이 뒤바뀌므로 별도 지정.
+ */
+function demoParticipants(kind: PioPairKind): {
+  activeName: string
+  activeType: string
+  passiveName: string
+  passiveType: string
+} {
+  switch (kind) {
+    case 'CNV_CNV':
+      return { activeName: 'DEMO-CV', activeType: '직선', passiveName: 'DEMO-CV', passiveType: '직선' }
+    case 'CNV_PORT':
+      return { activeName: 'DEMO-CV', activeType: '직선', passiveName: 'DEMO-PORT', passiveType: '포트' }
+    case 'PORT_STK':
+      return { activeName: 'DEMO-STK', activeType: '적재창고', passiveName: 'DEMO-PORT', passiveType: '포트' }
+    case 'MODULE_OHT':
+      return { activeName: 'DEMO-OHT', activeType: 'OHT', passiveName: 'DEMO-MODULE', passiveType: '포트' }
+    case 'MODULE_AGV':
+      return { activeName: 'DEMO-AGV', activeType: 'AGV', passiveName: 'DEMO-MODULE', passiveType: '포트' }
+  }
+}
 
 export function ChartPage() {
   const transactions = usePioStore((s) => s.transactions)
@@ -26,6 +69,7 @@ export function ChartPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [replay, setReplay] = useState({ playing: false, ms: 0, speed: 1 })
   const [liveNowMs, setLiveNowMs] = useState(0)
+  const [demoPair, setDemoPair] = useState<PioPairKind>('CNV_CNV')
 
   const tx = useMemo(() => {
     if (selectedId) {
@@ -85,31 +129,38 @@ export function ChartPage() {
 
   const runDemo = (kind: 'normal' | 'delay' | 'error') => {
     setSelectedId(null) // 최신 추적으로 전환 → 라이브 애니메이션 표시
+    const { activeName, activeType, passiveName, passiveType } = demoParticipants(demoPair)
     if (kind === 'normal') {
       runPioSequence({
-        pairKind: 'MODULE_OHT',
+        pairKind: demoPair,
         operation: 'LOAD',
-        activeName: 'OHT-01',
-        passiveName: 'DEMO-PORT',
+        activeName,
+        activeType,
+        passiveName,
+        passiveType,
         source: 'demo',
       })
     } else if (kind === 'delay') {
       runPioSequence({
-        pairKind: 'MODULE_OHT',
+        pairKind: demoPair,
         operation: 'LOAD',
-        activeName: 'OHT-01',
-        passiveName: 'DEMO-PORT',
+        activeName,
+        activeType,
+        passiveName,
+        passiveType,
         source: 'demo',
-        anomaly: { type: 'delay', step: 'T3_TRREQ_READY', extraMs: 700 },
+        anomaly: { type: 'delay', step: demoAnomalyStep(demoPair, 'delay'), extraMs: 700 },
       })
     } else {
       runPioSequence({
-        pairKind: 'MODULE_OHT',
+        pairKind: demoPair,
         operation: 'UNLOAD',
-        activeName: 'OHT-01',
-        passiveName: 'DEMO-PORT',
+        activeName,
+        activeType,
+        passiveName,
+        passiveType,
         source: 'demo',
-        anomaly: { type: 'error', atStep: 'T5_BUSY_CARRIER' },
+        anomaly: { type: 'error', atStep: demoAnomalyStep(demoPair, 'error') },
       })
     }
   }
@@ -132,7 +183,9 @@ export function ChartPage() {
       )
     }
     if (tx.status === 'error') {
-      lines.push(`오류 발생 단계: ${tx.errorStep ?? '알 수 없음'} (ES/HO_AVBL 신호 강하 감지)`)
+      const haltDesc =
+        pioProtocolForPair(tx.pairKind) === 'E84' ? 'ES/HO_AVBL 신호 강하 감지' : '정지/미완료'
+      lines.push(`오류 발생 단계: ${tx.errorStep ?? '알 수 없음'} (${haltDesc})`)
     }
     lines.push('원인 분석과 개선 제안을 해줘.')
     setAssistantOpen(true)
@@ -151,7 +204,7 @@ export function ChartPage() {
     <div className="space-y-4">
       <PageHeader
         title="차트"
-        subtitle="PIO Time Chart — Active ↔ Passive 핸드셰이크 관제 (SEMI E84 · IN 8점 / OUT 8점)"
+        subtitle="PIO Time Chart — Active ↔ Passive 핸드셰이크 관제 (MODULE↔OHT/AGV: SEMI E84 · 그 외(CV↔CV/CV↔PORT/PORT↔STK): 실제 시뮬 상태값 LD/ULD/BUSY)"
       />
 
       {/* ── V3 이벤트 차트 ── */}
@@ -177,6 +230,18 @@ export function ChartPage() {
             )}
           </h3>
           <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            <select
+              value={demoPair}
+              onChange={(e) => setDemoPair(e.target.value as PioPairKind)}
+              className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-[11px] text-slate-300"
+              title="데모 대상 쌍 유형"
+            >
+              {DEMO_PAIR_KINDS.map((k) => (
+                <option key={k} value={k}>
+                  {PIO_PAIR_LABELS[k]} ({pioProtocolForPair(k)})
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               onClick={() => runDemo('normal')}

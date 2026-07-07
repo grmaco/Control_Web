@@ -3,7 +3,7 @@ import { useSemiCnvStore } from '../store/useSemiCnvStore'
 import { usePioStore } from '../store/usePioStore'
 import { unitTitle } from '../constants/conveyorTypes'
 import { STATUS_COLORS } from '../constants/statusColors'
-import { PIO_STEP_CAUSES } from '../constants/pioSignals'
+import { pioProtocolForPair } from '../constants/pioSignals'
 import { computePioMeasures, pioTransactionDuration } from './pioMeasure'
 import type { ConveyorStatus, ConveyorUnit } from '../types/conveyor'
 
@@ -204,10 +204,13 @@ function analyzePio(): string {
     const overs = computePioMeasures(tx, baseline).filter((m) => m.status === 'over')
     if (tx.status === 'error') {
       anomalyFound = true
+      const isE84 = pioProtocolForPair(tx.pairKind) === 'E84'
+      const haltDesc = isE84 ? '(ES/HO_AVBL 강하)' : '(정지/미완료)'
       lines.push(
-        `■ ${tx.activeName}→${tx.passiveName} (${tx.operation}) — ❌ 오류 중단${tx.errorStep ? ` @${tx.errorStep}` : ''} (ES/HO_AVBL 강하)`,
+        `■ ${tx.activeName}→${tx.passiveName} (${tx.operation}) — ❌ 오류 중단${tx.errorStep ? ` @${tx.errorStep}` : ''} ${haltDesc}`,
       )
-      if (tx.errorStep) lines.push(`  ↳ 점검: ${PIO_STEP_CAUSES[tx.errorStep]}`)
+      const errorDef = tx.errorStep ? baseline.stepDefs[tx.errorStep] : undefined
+      if (errorDef) lines.push(`  ↳ 점검: ${errorDef.cause}`)
     } else if (overs.length > 0) {
       anomalyFound = true
       lines.push(
@@ -215,7 +218,7 @@ function analyzePio(): string {
       )
       for (const m of overs) {
         lines.push(`  · ${m.label}: 측정 ${m.durationMs}ms / 기준 ${m.baselineMs}ms (+${m.deviationMs}ms)`)
-        lines.push(`    ↳ 점검: ${PIO_STEP_CAUSES[m.step]}`)
+        lines.push(`    ↳ 점검: ${m.cause}`)
       }
     }
   }

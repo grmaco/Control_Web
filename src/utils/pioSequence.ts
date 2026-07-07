@@ -1,9 +1,8 @@
 import type { PioEdge, PioStepId } from '../types/pio'
 import {
-  buildPioSchedule,
+  buildDefaultBaseline,
+  buildScheduleForPair,
   scalePioSteps,
-  DEFAULT_PIO_BASELINE,
-  PIO_STEP_ORDER,
 } from '../constants/pioSignals'
 import { usePioStore, type BeginPioInput } from '../store/usePioStore'
 
@@ -21,11 +20,14 @@ export interface RunPioSequenceOptions extends BeginPioInput {
 }
 
 /** 단계별 종료 시각(누적 ms) 계산 — 오류 주입 지점 결정용 */
-function stepEndTimes(steps: Record<PioStepId, number>): Record<PioStepId, number> {
+function stepEndTimes(
+  stepOrder: PioStepId[],
+  steps: Record<PioStepId, number>,
+): Record<PioStepId, number> {
   let t = 0
-  const out = {} as Record<PioStepId, number>
-  for (const id of PIO_STEP_ORDER) {
-    t += steps[id]
+  const out: Record<PioStepId, number> = {}
+  for (const id of stepOrder) {
+    t += steps[id] ?? 0
     out[id] = t
   }
   return out
@@ -42,41 +44,42 @@ export function cancelAllPioSequences(): void {
 }
 
 /**
- * PIO 핸드셰이크 시퀀스 실행.
- * 스케줄에 따라 엣지를 시간차로 기록하고 완료 시 트랜잭션을 닫는다.
+ * PIO 핸드셰이크 시퀀스 실행 (데모·시뮬 브리지 공용).
+ * 쌍 유형의 프로토콜(E84/STATUS)에 맞는 스케줄을 시간차로 기록하고 완료 시 트랜잭션을 닫는다.
  * 반환: 트랜잭션 ID
  */
 export function runPioSequence(options: RunPioSequenceOptions): string {
   const store = usePioStore.getState()
-  const baseSteps =
-    options.steps ?? store.baselines[options.pairKind]?.steps ?? DEFAULT_PIO_BASELINE.steps
+  const baseline = store.baselines[options.pairKind]
+  const stepOrder = baseline?.stepOrder ?? buildDefaultBaseline(options.pairKind, 1000, '').stepOrder
+  const baseSteps = options.steps ?? baseline?.steps ?? {}
 
   let steps = { ...baseSteps }
   if (options.scaleToTotalMs != null) {
-    steps = scalePioSteps(steps, options.scaleToTotalMs)
+    steps = scalePioSteps(stepOrder, steps, options.scaleToTotalMs)
   }
   if (options.anomaly?.type === 'delay') {
-    steps[options.anomaly.step] += options.anomaly.extraMs
+    steps[options.anomaly.step] = (steps[options.anomaly.step] ?? 0) + options.anomaly.extraMs
   }
 
-  let schedule = buildPioSchedule(options.operation, steps)
+  let schedule = buildScheduleForPair(options.pairKind, options.operation, steps)
   let errorAtMs: number | null = null
 
   if (options.anomaly?.type === 'error') {
-    // 해당 단계 종료 직전에 ES↓ HO_AVBL↓ 발생 후 중단
-    const ends = stepEndTimes(steps)
-    const stepEnd = ends[options.anomaly.atStep]
+    // 해당 단계 종료 직전에 시퀀스 중단 (설비 정지 상황 모사)
+    const ends = stepEndTimes(stepOrder, steps)
+    const stepEnd = ends[options.anomaly.atStep] ?? 0
     errorAtMs = Math.max(10, stepEnd - 20)
     schedule = schedule.filter((e) => e.t < errorAtMs!)
-    schedule.push({ signal: 'ES', value: 0, t: errorAtMs })
-    schedule.push({ signal: 'HO_AVBL', value: 0, t: errorAtMs })
   }
 
   const txId = store.beginTransaction({
     pairKind: options.pairKind,
     operation: options.operation,
     activeName: options.activeName,
+    activeType: options.activeType,
     passiveName: options.passiveName,
+    passiveType: options.passiveType,
     source: options.source,
   })
 

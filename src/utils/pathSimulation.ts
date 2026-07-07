@@ -1486,7 +1486,8 @@ function gridDeltaToFlowDir(dx: number, dy: number): 'N' | 'E' | 'S' | 'W' | nul
   return null
 }
 
-function getTurnTraversalAngle(
+/** 회전 유닛 통과 각도(90/180/270) — PIO 브리지 등 외부에서도 실제 회전 소요시간을 조회할 때 재사용 */
+export function getTurnTraversalAngle(
   load: PathSimulationLoad,
   unitMap: Map<string, ConveyorUnit>,
 ): 90 | 180 | 270 | null {

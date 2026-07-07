@@ -189,11 +189,17 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   )
 
   // PIO 타임차트: 컨베이어 자재 홉 → CNV↔CNV / CNV↔PORT 핸드셰이크 기록
+  // 회전 유닛에서 나가는 홉은 회전각별 실제 소요시간(turn90/180/270Sec) 반영
   usePioPathSimBridge({
     enabled: simulation.status !== 'idle',
     loads: simulation.loads,
     line,
     transitIntervalSec: simulation.transitIntervalSec,
+    turnTransitSec: {
+      90: simulation.turn90Sec,
+      180: simulation.turn180Sec,
+      270: simulation.turn270Sec,
+    },
   })
 
   // 시뮬 완료 후에도 자재가 있던 셀을 시각적으로 유지 (glow 지속)

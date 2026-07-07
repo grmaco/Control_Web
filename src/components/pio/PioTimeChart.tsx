@@ -1,11 +1,9 @@
 import { useMemo } from 'react'
-import type { PioBaseline, PioEdge, PioTransaction } from '../../types/pio'
+import type { PioBaseline, PioEdge, PioSide, PioTransaction } from '../../types/pio'
 import {
-  buildPioSchedule,
-  PIO_ACTIVE_SIGNALS,
-  PIO_PASSIVE_SIGNALS,
-  PIO_STEP_ORDER,
+  buildScheduleForPair,
   pioSignalInitial,
+  pioSignalSetForPair,
 } from '../../constants/pioSignals'
 import { computePioMeasures, pioTransactionDuration } from '../../utils/pioMeasure'
 
@@ -14,36 +12,31 @@ const PLOT_X = LABEL_W + 8
 const PLOT_W = 860
 const VIEW_W = PLOT_X + PLOT_W + 8
 const ROW_H = 26
-const GROUP_GAP = 14
+// Active/Passive 헤더가 이름·모듈 타입 2줄이라 그룹 앞 여백을 넉넉히 확보
+const GROUP_GAP = 28
 const AXIS_H = 26
-const TOP_PAD = 20
+const TOP_PAD = 32
 
-const ACTIVE_ROWS = PIO_ACTIVE_SIGNALS.filter((s) => !s.reserved)
-const PASSIVE_ROWS = PIO_PASSIVE_SIGNALS.filter((s) => !s.reserved)
-
-const STEP_SHORT: Record<string, string> = {
-  T1_VALID_REQ: 'T1',
-  T2_REQ_TRREQ: 'T2',
-  T3_TRREQ_READY: 'T3',
-  T4_READY_BUSY: 'T4',
-  T5_BUSY_CARRIER: 'T5',
-  T6_CARRIER_COMPT: 'T6',
-  T7_COMPT_CLOSE: 'T7',
+/** 단계 라벨 앞에 붙일 짧은 태그 (이상 구간 표시용) — 순번 기반 */
+function shortStepTag(index: number): string {
+  return `S${index + 1}`
 }
 
-/** 신호 파형 polyline 포인트 생성 (엣지 → 계단 파형) */
+/** 신호 파형 polyline 포인트 생성 (엣지 → 계단 파형). side로 동명 신호(BUSY 등) 구분 */
 function waveformPoints(
   edges: PioEdge[],
   signal: string,
+  side: PioSide,
+  initial: 0 | 1,
   clipMs: number,
   toX: (t: number) => number,
   yHigh: number,
   yLow: number,
 ): string {
   const own = edges
-    .filter((e) => e.signal === signal && e.t <= clipMs)
+    .filter((e) => e.signal === signal && e.side === side && e.t <= clipMs)
     .sort((a, b) => a.t - b.t)
-  let level: 0 | 1 = pioSignalInitial(signal)
+  let level: 0 | 1 = initial
   let y = level === 1 ? yHigh : yLow
   const pts: string[] = [`${toX(0)},${y}`]
   for (const e of own) {
@@ -77,22 +70,29 @@ export function PioTimeChart({
   cursorMs: number | null
 }) {
   const tx = transaction
+  const { active: activeSignals, passive: passiveSignals } = pioSignalSetForPair(tx.pairKind)
+  const rows = useMemo(
+    () => [
+      ...activeSignals.filter((s) => !s.reserved),
+      ...passiveSignals.filter((s) => !s.reserved),
+    ],
+    [activeSignals, passiveSignals],
+  )
+  const activeRowCount = activeSignals.filter((s) => !s.reserved).length
 
   const baselineSchedule = useMemo(
-    () => buildPioSchedule(tx.operation, baseline.steps),
-    [tx.operation, baseline.steps],
+    () => buildScheduleForPair(tx.pairKind, tx.operation, baseline.steps),
+    [tx.pairKind, tx.operation, baseline.steps],
   )
   const measures = useMemo(() => computePioMeasures(tx, baseline), [tx, baseline])
 
   const txDuration = pioTransactionDuration(tx)
-  const baselineTotal = PIO_STEP_ORDER.reduce((s, id) => s + baseline.steps[id], 0)
+  const baselineTotal = baseline.stepOrder.reduce((s, id) => s + (baseline.steps[id] ?? 0), 0)
   const totalMs = Math.max(txDuration, baselineTotal, cursorMs ?? 0, 100) * 1.06
 
   const toX = (t: number) => PLOT_X + (t / totalMs) * PLOT_W
 
-  const rows = [...ACTIVE_ROWS, ...PASSIVE_ROWS]
-  const rowY = (idx: number) =>
-    TOP_PAD + idx * ROW_H + (idx >= ACTIVE_ROWS.length ? GROUP_GAP : 0)
+  const rowY = (idx: number) => TOP_PAD + idx * ROW_H + (idx >= activeRowCount ? GROUP_GAP : 0)
   const plotH = rowY(rows.length - 1) + ROW_H
   const viewH = plotH + AXIS_H
 
@@ -110,7 +110,7 @@ export function PioTimeChart({
       aria-label="PIO 타임차트"
     >
       {/* ── 이상 구간 하이라이트 (기준 초과 스텝) ── */}
-      {measures.map((m) => {
+      {measures.map((m, idx) => {
         if ((m.status !== 'over' && m.status !== 'warn') || m.fromMs == null || m.toMs == null)
           return null
         const x1 = toX(Math.min(m.fromMs, clipMs))
@@ -137,7 +137,7 @@ export function PioTimeChart({
               fontWeight={700}
               fill={over ? '#f87171' : '#fbbf24'}
             >
-              {STEP_SHORT[m.step]} +{m.deviationMs}ms
+              {shortStepTag(idx)} +{m.deviationMs}ms
             </text>
           </g>
         )
@@ -150,9 +150,10 @@ export function PioTimeChart({
         const yLow = y + ROW_H - 8
         const isActive = sig.side === 'active'
         const color = isActive ? '#22d3ee' : '#a78bfa'
+        const initial = pioSignalInitial(tx.pairKind, sig.name)
 
         return (
-          <g key={sig.name}>
+          <g key={`${sig.side}-${sig.name}`}>
             {/* 행 배경 라인 */}
             <line
               x1={PLOT_X}
@@ -175,7 +176,16 @@ export function PioTimeChart({
             </text>
             {/* 골든 베이스라인 고스트 (점선) */}
             <polyline
-              points={waveformPoints(baselineSchedule, sig.name, totalMs, toX, yHigh, yLow)}
+              points={waveformPoints(
+                baselineSchedule,
+                sig.name,
+                sig.side,
+                initial,
+                totalMs,
+                toX,
+                yHigh,
+                yLow,
+              )}
               fill="none"
               stroke="#fbbf24"
               strokeWidth={1}
@@ -184,7 +194,16 @@ export function PioTimeChart({
             />
             {/* 현재 신호 파형 */}
             <polyline
-              points={waveformPoints(tx.edges, sig.name, clipMs, toX, yHigh, yLow)}
+              points={waveformPoints(
+                tx.edges,
+                sig.name,
+                sig.side,
+                initial,
+                clipMs,
+                toX,
+                yHigh,
+                yLow,
+              )}
               fill="none"
               stroke={color}
               strokeWidth={1.8}
@@ -194,13 +213,18 @@ export function PioTimeChart({
         )
       })}
 
-      {/* ── 그룹 라벨 ── */}
-      <text x={4} y={rowY(0) - 6} fontSize={9} fontWeight={700} fill="#22d3ee" opacity={0.85}>
+      {/* ── 그룹 라벨 (이름 + 모듈 타입 2줄) ── */}
+      <text x={4} y={rowY(0) - 19} fontSize={9} fontWeight={700} fill="#22d3ee" opacity={0.85}>
         ACTIVE ({tx.activeName})
       </text>
+      {tx.activeType && (
+        <text x={4} y={rowY(0) - 8} fontSize={8} fill="#67e8f9" opacity={0.65}>
+          {tx.activeType}
+        </text>
+      )}
       <text
         x={4}
-        y={rowY(ACTIVE_ROWS.length) - 6}
+        y={rowY(activeRowCount) - 19}
         fontSize={9}
         fontWeight={700}
         fill="#a78bfa"
@@ -208,6 +232,11 @@ export function PioTimeChart({
       >
         PASSIVE ({tx.passiveName})
       </text>
+      {tx.passiveType && (
+        <text x={4} y={rowY(activeRowCount) - 8} fontSize={8} fill="#c4b5fd" opacity={0.65}>
+          {tx.passiveType}
+        </text>
+      )}
 
       {/* ── 시간 축 ── */}
       {ticks.map((t) => (

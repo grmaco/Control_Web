@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
-import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
+import { isPortUnit, isStorageUnit, typeLabel } from '../constants/conveyorTypes'
 import { resolveAdjacentPortsForStk } from '../utils/unitPropertyHelpers'
 import { usePioStore } from '../store/usePioStore'
 
@@ -70,6 +70,10 @@ export function usePortStorageSimulation(
 
   const unitName = useCallback((unitId: string) => {
     return lineRef.current.units.find((u) => u.id === unitId)?.name ?? unitId
+  }, [])
+  const unitType = useCallback((unitId: string) => {
+    const unit = lineRef.current.units.find((u) => u.id === unitId)
+    return unit ? typeLabel(unit.type) : undefined
   }, [])
 
   const buildInitial = useCallback(() => {
@@ -174,25 +178,26 @@ export function usePortStorageSimulation(
     setStorageStates(ns)
 
     // PIO 타임차트: 핸드셰이크 시작 — STK(Active)가 포트(Passive)에서 자재 반출
+    // STATUS 프로토콜 — 실제 시뮬 상태값(IDLE/TR/BUSY/COMPLETE, LD/ULD/BUSY/READY)만 사용, E84 신호 아님
     const pio = usePioStore.getState()
     const pioTxId = pio.beginTransaction({
       pairKind: 'PORT_STK',
       operation: 'UNLOAD',
       activeName: unitName(storageId),
+      activeType: unitType(storageId),
       passiveName: unitName(portId),
+      passiveType: unitType(portId),
       source: 'sim-port',
     })
     pio.addEdgesNow(pioTxId, [
-      { signal: 'ES', value: 1 },
-      { signal: 'HO_AVBL', value: 1 },
-      { signal: 'VALID', value: 1 },
-      { signal: 'CS_0', value: 1 },
+      { signal: 'IDLE', side: 'active', value: 0 },
+      { signal: 'TR', side: 'active', value: 1 },
     ])
 
     const s: TransferSession = { storageId, portId, phase: 0, pioTxId }
     sessionRef.current = s
     setSession(s)
-  }, [unitName])
+  }, [unitName, unitType])
 
   const tick = useCallback(() => {
     const s = sessionRef.current
@@ -216,14 +221,10 @@ export function usePortStorageSimulation(
       sessionRef.current = null
       setSession(null)
       if (pioTxId) {
-        pio.addEdgesNow(pioTxId, [
-          { signal: 'ES', value: 0 },
-          { signal: 'HO_AVBL', value: 0 },
-        ])
         pio.completeTransaction(
           pioTxId,
           'error',
-          phase === 0 ? 'T1_VALID_REQ' : 'T5_BUSY_CARRIER',
+          phase === 0 ? 'S1_WAIT' : 'S2_TRANSFER',
         )
       }
     }
@@ -232,19 +233,27 @@ export function usePortStorageSimulation(
       case 0: // Storage=TR → 포트 자재 재확인 후 READY 신호
         if (!port.hasCst) { abort(); break }
         np[portId] = { ...port, status: 'READY' }
-        if (pioTxId) pio.addEdgesNow(pioTxId, [{ signal: 'U_REQ', value: 1 }])
+        if (pioTxId)
+          pio.addEdgesNow(pioTxId, [
+            { signal: 'ULD', side: 'passive', value: 0 },
+            { signal: 'READY', side: 'passive', value: 1 },
+          ])
         break
       case 1: // Port=READY → Storage: BUSY
         ns[storageId] = { ...storage, status: 'BUSY' }
         if (pioTxId)
           pio.addEdgesNow(pioTxId, [
-            { signal: 'TR_REQ', value: 1 },
-            { signal: 'READY', value: 1 },
+            { signal: 'TR', side: 'active', value: 0 },
+            { signal: 'BUSY', side: 'active', value: 1 },
           ])
         break
       case 2: // Storage=BUSY → Port: BUSY
         np[portId] = { ...port, status: 'BUSY' }
-        if (pioTxId) pio.addEdgesNow(pioTxId, [{ signal: 'BUSY', value: 1 }])
+        if (pioTxId)
+          pio.addEdgesNow(pioTxId, [
+            { signal: 'READY', side: 'passive', value: 0 },
+            { signal: 'BUSY', side: 'passive', value: 1 },
+          ])
         break
       case 3: // 자재 이동 — 포트 자재 최종 확인
         if (!port.hasCst) { abort(); break }
@@ -259,9 +268,10 @@ export function usePortStorageSimulation(
         onPortDischargeRef.current?.(portId)
         if (pioTxId)
           pio.addEdgesNow(pioTxId, [
-            { signal: 'U_REQ', value: 0 },
-            { signal: 'BUSY', value: 0 },
-            { signal: 'COMPT', value: 1 },
+            { signal: 'BUSY', side: 'active', value: 0 },
+            { signal: 'COMPLETE', side: 'active', value: 1 },
+            { signal: 'BUSY', side: 'passive', value: 0 },
+            { signal: 'LD', side: 'passive', value: 1 },
           ])
         break
       case 4: // Storage=COMPLETE → IDLE, 완료
@@ -271,11 +281,8 @@ export function usePortStorageSimulation(
         setSession(null)
         if (pioTxId) {
           pio.addEdgesNow(pioTxId, [
-            { signal: 'READY', value: 0 },
-            { signal: 'COMPT', value: 0 },
-            { signal: 'TR_REQ', value: 0 },
-            { signal: 'VALID', value: 0 },
-            { signal: 'CS_0', value: 0 },
+            { signal: 'COMPLETE', side: 'active', value: 0 },
+            { signal: 'IDLE', side: 'active', value: 1 },
           ])
           pio.completeTransaction(pioTxId, 'complete')
         }
