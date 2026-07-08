@@ -358,6 +358,8 @@ import type { PortSimState } from '../../hooks/usePortStorageSimulation'
 interface PortSelectModalProps {
   storageUnit: ConveyorUnit
   connectablePorts: Array<{ state: PortSimState; unit: ConveyorUnit }>
+  /** 출고(STK→OUT포트) 가능 여부 판정용 — 창고 적재 슬롯 수 */
+  storageFilledSlots: number
   onSelect: (portId: string) => void
   onDismiss: () => void
 }
@@ -365,6 +367,7 @@ interface PortSelectModalProps {
 export function PortSelectModal({
   storageUnit,
   connectablePorts,
+  storageFilledSlots,
   onSelect,
   onDismiss,
 }: PortSelectModalProps) {
@@ -379,14 +382,30 @@ export function PortSelectModal({
       >
         <p className="mb-1 text-sm font-bold text-blue-300">반송 포트 선택</p>
         <p className="mb-3 text-xs text-slate-400">
-          {storageUnit.name}으로 반송할 포트를 선택하세요.
+          {storageUnit.name} — IN 포트는 회수(포트→창고), OUT 포트는 출고(창고→포트→라인)
         </p>
         {connectablePorts.length === 0 ? (
           <p className="mb-3 text-xs text-slate-500">포트가 없습니다.</p>
         ) : (
           <div className="mb-3 flex flex-col gap-1">
             {connectablePorts.map(({ state, unit }) => {
-              const selectable = state.status === 'LD' || state.status === 'ULD'
+              const isOut = (unit.portDirection ?? 'IN') === 'OUT'
+              const busy = state.status === 'BUSY' || state.status === 'READY'
+              // 회수: 포트에 자재 필요 · 출고: 포트 비어 있고 창고에 자재 필요
+              const selectable = !busy && (isOut
+                ? !state.hasCst && storageFilledSlots > 0
+                : state.hasCst)
+              const reason = busy
+                ? '핸드셰이크 중'
+                : isOut
+                  ? state.hasCst
+                    ? '포트 점유 중'
+                    : storageFilledSlots <= 0
+                      ? '창고 자재 없음'
+                      : null
+                  : state.hasCst
+                    ? null
+                    : '포트 자재 없음'
               return (
                 <button
                   key={unit.id}
@@ -398,14 +417,31 @@ export function PortSelectModal({
                       : 'border-slate-700 bg-slate-800/40 text-slate-500 cursor-not-allowed'
                   }`}
                   onClick={() => selectable && onSelect(unit.id)}
+                  title={reason ?? undefined}
                 >
-                  <span className="font-medium">{unit.name}</span>
-                  <span
-                    className={`ml-2 rounded px-1.5 py-0.5 font-bold ${
-                      PORT_STATUS_STYLE[state.status] ?? 'text-slate-400'
-                    }`}
-                  >
-                    {state.status}
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <span
+                      className={`rounded px-1 py-0.5 text-[9px] font-bold ${
+                        isOut
+                          ? 'bg-violet-900/70 text-violet-300'
+                          : 'bg-sky-900/70 text-sky-300'
+                      }`}
+                    >
+                      {isOut ? 'OUT 출고' : 'IN 회수'}
+                    </span>
+                    {unit.name}
+                  </span>
+                  <span className="ml-2 flex items-center gap-1.5">
+                    {reason ? (
+                      <span className="text-[9px] text-slate-500">{reason}</span>
+                    ) : null}
+                    <span
+                      className={`rounded px-1.5 py-0.5 font-bold ${
+                        PORT_STATUS_STYLE[state.status] ?? 'text-slate-400'
+                      }`}
+                    >
+                      {state.status}
+                    </span>
                   </span>
                 </button>
               )

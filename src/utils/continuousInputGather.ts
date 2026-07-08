@@ -996,14 +996,16 @@ export function advanceGatherProbes(
 
   for (let index = 0; index < entryUnitIds.length; index += 1) {
     const entryUnitId = entryUnitIds[index]!
+    const entryUnit = unitMap.get(entryUnitId)
+    // 연동 속성(OHT 등) 투입점은 외부 반송장치가 자재를 공급 — 프로브 제외 (initGatherProbes와 동일 규칙)
+    if (!entryUnit || entryUnit.interfaceUnit != null) continue
     const destinationUnitId = destinationUnitIdByEntry[entryUnitId] ?? null
 
     for (let slot = 0; slot < CONTINUOUS_PROBE_COUNT; slot += 1) {
       const probeKey = `${entryUnitId}:${slot}`
       let probe = probeByKey.get(probeKey)
       if (!probe) {
-        const unit = unitMap.get(entryUnitId)
-        if (!unit) continue
+        const unit = entryUnit
         const layout = pickGatherLayout(unit, line, index)
         probe = {
           entryUnitId,

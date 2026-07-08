@@ -44,6 +44,7 @@ import {
   roundTackTimeSec,
   simulationCstUnitIds,
   simulationRevealUnitIds,
+  spawnOutboundDischargeLoad,
   staticTestMaterialOriginUnitIds,
   unionSimulationConveyorPathUnitIds,
   type SimulationStepResult,
@@ -1523,6 +1524,34 @@ export function usePathSimulation(
     )
   }, [])
 
+  // STK 출고 반송 — OUT 포트에서 자재를 받은 뒤 앞 CV→종료점까지 이동할 load 투입
+  const outboundSpawnSeqRef = useRef(0)
+  const spawnOutboundLoadAtPort = useCallback(
+    (portUnitId: string): boolean => {
+      outboundSpawnSeqRef.current += 1
+      const load = spawnOutboundDischargeLoad(
+        simulationLine,
+        portUnitId,
+        outboundSpawnSeqRef.current,
+      )
+      if (!load) return false
+      setLoads((prev) => {
+        // 포트에 이미 자재가 있으면 중복 투입 방지
+        const occupied = prev.some((item) => {
+          if (item.complete || item.pathUnitIds.length === 0) return false
+          const step = Math.min(
+            Math.max(0, item.stepIndex),
+            item.pathUnitIds.length - 1,
+          )
+          return item.pathUnitIds[step] === portUnitId
+        })
+        return occupied ? prev : [...prev, load]
+      })
+      return true
+    },
+    [simulationLine],
+  )
+
   return {
     mode,
     changeMode,
@@ -1570,6 +1599,7 @@ export function usePathSimulation(
     turn270Sec,
     setTurn270Sec,
     dischargeLoadAtPort,
+    spawnOutboundLoadAtPort,
     incompleteLoadCount,
     tackTimeSummaries,
     continuousInputActive,

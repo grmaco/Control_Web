@@ -1166,7 +1166,10 @@ function canDischargeLoadAtCurrentStep(
     ) {
       return false
     }
-    if (load.direction === 'outbound') return false
+    if (load.direction === 'outbound') {
+      // STK 출고 반송(포트→종료점) 자재는 종료점 도달 시 출고 완료
+      return load.targetExitId != null && currentId === load.targetExitId
+    }
   }
 
   const isInbound = load.direction === 'inbound' || load.continuousInject === true
@@ -2267,6 +2270,34 @@ export function spawnContinuousInjectLoad(
     exitTicks: 0,
     transitTicks: 0,
   }
+}
+
+/**
+ * STK 출고 반송 — OUT 포트가 창고에서 받은 자재를 앞 컨베이어를 거쳐
+ * 라인 흐름 종료점(flowRole=exit)까지 반송할 load 생성.
+ * 경로 앞의 STK 구간은 제거 — STK→포트 핸드셰이크는 포트/창고 시뮬이 별도 표현.
+ */
+export function spawnOutboundDischargeLoad(
+  line: ConveyorLine,
+  portUnitId: string,
+  seq: number,
+): PathSimulationLoad | null {
+  const plan = planOutboundLoadPath(line, portUnitId)
+  if (plan.pathUnitIds.length === 0) return null
+
+  const pathUnitIds = plan.targetStkId
+    ? plan.pathUnitIds.filter((id) => id !== plan.targetStkId)
+    : plan.pathUnitIds
+  if (pathUnitIds.length === 0 || pathUnitIds[0] !== portUnitId) return null
+
+  const unit = line.units.find((item) => item.id === portUnitId)
+  const load = createSimulationLoad(
+    { ...plan, entryUnitId: portUnitId, pathUnitIds, targetStkId: null },
+    unit,
+    'outbound',
+    { loadIdSuffix: `-stkout-${seq}` },
+  )
+  return { ...load, id: `${load.id}-${portUnitId}-${seq}` }
 }
 
 /** 연속 투입 — 선택 투입점마다 자재 1개 생성 */

@@ -14,7 +14,6 @@ import { isPortUnit, isStorageUnit } from '../../constants/conveyorTypes'
 import { INTERFACE_UNIT_TYPES } from '../../constants/interfaceUnits'
 import {
   computeStkLoadRate,
-  getPortProperties,
   listPortLinkedUnitCandidates,
   mergePortProperties,
   readPortProperties,
@@ -28,8 +27,6 @@ import {
   syncFlowRoleUnitRole,
   canSelectInterfaceUnit,
 } from '../../utils/unitPropertyHelpers'
-import { buildOutputDestinationOptions } from '../../utils/flowEntries'
-import { resolveOutputDestinationId } from '../../utils/unitRefs'
 import { updateUnitInLine } from '../../utils/units'
 import { outboundPathLabelForPort } from '../../utils/outboundFlow'
 
@@ -37,9 +34,6 @@ interface RoleSectionsProps {
   line: ConveyorLine
   unit: ConveyorUnit
   onChange: (line: ConveyorLine) => void
-  pickingOutputDestination?: boolean
-  onStartPickOutputDestination?: () => void
-  onCancelPickOutputDestination?: () => void
 }
 
 function patchProperties(
@@ -261,9 +255,6 @@ export function PortRoleSection({
   line,
   unit,
   onChange,
-  pickingOutputDestination = false,
-  onStartPickOutputDestination,
-  onCancelPickOutputDestination,
 }: RoleSectionsProps) {
   const portUnit = useMemo(
     () => line.units.find((item) => item.id === unit.id) ?? unit,
@@ -273,31 +264,12 @@ export function PortRoleSection({
     () => readPortProperties(line, portUnit),
     [line, portUnit],
   )
-  const staleOutputLabel = useMemo(() => {
-    const stored = getPortProperties(portUnit)?.outputDestination?.trim()
-    if (!stored) return null
-    const valid = resolveOutputDestinationId(line, portUnit.id, stored)
-    return valid ? null : stored
-  }, [line, portUnit])
-  const resolvedOutputDestination = props.outputDestination ?? ''
 
   const isOut = (portUnit.portDirection ?? 'IN') === 'OUT'
   const linkCandidates = useMemo(
     () => listPortLinkedUnitCandidates(line, portUnit),
     [line, portUnit],
   )
-  const outputOptions = useMemo(
-    () =>
-      buildOutputDestinationOptions(
-        line,
-        portUnit.id,
-        resolvedOutputDestination || undefined,
-      ),
-    [line, portUnit.id, resolvedOutputDestination],
-  )
-  const selectedDestination = resolvedOutputDestination
-    ? line.units.find((item) => item.id === resolvedOutputDestination)
-    : null
 
   const selectedLinkedCv = props.linkedUnitId
     ? line.units.find((item) => item.id === props.linkedUnitId)
@@ -359,61 +331,10 @@ export function PortRoleSection({
         ) : null}
       </div>
       {isOut ? (
-        <div>
-          <label className="mb-1 block text-xs text-slate-400">출고구 (목적지 CV)</label>
-          {staleOutputLabel ? (
-            <p className="mb-2 text-xs text-amber-300">
-              저장된 목적지 「{staleOutputLabel}」는 이 라인에 없습니다. 다시 선택하세요.
-            </p>
-          ) : null}
-          {pickingOutputDestination ? (
-            <div className="mb-2 rounded-md border border-emerald-700/60 bg-emerald-950/40 px-2 py-1.5 text-xs text-emerald-200">
-              캔버스에서 목적지 CV를 클릭하세요 · Esc 취소
-            </div>
-          ) : null}
-          <div className="flex gap-1">
-            <select
-              value={resolvedOutputDestination}
-              onChange={(e) => update({ outputDestination: e.target.value })}
-              disabled={pickingOutputDestination}
-              className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm disabled:opacity-50"
-            >
-              <option value="">— 선택 —</option>
-              {outputOptions.map((output) => (
-                <option key={output.id} value={output.id}>
-                  {unitDisplayCode(output)}
-                  {output.id === resolvedOutputDestination ? ' ✓' : ''}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() =>
-                pickingOutputDestination
-                  ? onCancelPickOutputDestination?.()
-                  : onStartPickOutputDestination?.()
-              }
-              className={`shrink-0 rounded-md border px-2 py-1.5 text-xs whitespace-nowrap ${
-                pickingOutputDestination
-                  ? 'border-amber-700 bg-amber-950/50 text-amber-200 hover:bg-amber-950'
-                  : 'border-emerald-700 bg-emerald-950/40 text-emerald-200 hover:bg-emerald-950'
-              }`}
-            >
-              {pickingOutputDestination ? '취소' : '캔버스'}
-            </button>
-          </div>
-          <p className="mt-1 text-xs text-slate-500">
-            포트와 연결된 컨베이어에서 도달 가능한 CV만 표시됩니다. 드롭다운 또는
-            캔버스 클릭으로 지정할 수 있습니다.
-            {selectedDestination ? (
-              <>
-                {' '}
-                · 현재{' '}
-                <span className="text-emerald-300">{unitDisplayCode(selectedDestination)}</span>
-              </>
-            ) : null}
-          </p>
-        </div>
+        <p className="text-xs leading-relaxed text-slate-500">
+          출고 시 STK에서 자재를 받아 UNLOAD UNIT과 핸드셰이크 후 라인 흐름을 따라
+          종료점까지 반송됩니다. (목적지 CV 지정 불필요)
+        </p>
       ) : null}
       {outboundPath ? (
         <p className="text-xs leading-relaxed text-emerald-300">출고 경로: {outboundPath}</p>
@@ -426,9 +347,6 @@ export function RolePropertySections({
   line,
   unit,
   onChange,
-  pickingOutputDestination,
-  onStartPickOutputDestination,
-  onCancelPickOutputDestination,
 }: RoleSectionsProps) {
   return (
     <div className="space-y-3">
@@ -441,14 +359,7 @@ export function RolePropertySections({
         <StkRoleSection line={line} unit={unit} onChange={onChange} />
       ) : null}
       {isPortUnit(unit) ? (
-        <PortRoleSection
-          line={line}
-          unit={unit}
-          onChange={onChange}
-          pickingOutputDestination={pickingOutputDestination}
-          onStartPickOutputDestination={onStartPickOutputDestination}
-          onCancelPickOutputDestination={onCancelPickOutputDestination}
-        />
+        <PortRoleSection line={line} unit={unit} onChange={onChange} />
       ) : null}
     </div>
   )

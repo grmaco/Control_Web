@@ -24,6 +24,8 @@ interface TransferSession {
   storageId: string
   portId: string
   phase: number
+  /** 'in': 포트→STK 회수(기존) · 'out': STK→OUT포트 출고(신규) */
+  direction: 'in' | 'out'
   /** PIO 타임차트 트랜잭션 ID — 핸드셰이크 신호 기록용 */
   pioTxId?: string
 }
@@ -31,13 +33,18 @@ interface TransferSession {
 /**
  * 포트 ↔ 적재창고 전송 시뮬레이션
  *
- * 핸드쉐이크 시퀀스 (1초 간격):
+ * 회수(IN, 포트→STK) 핸드쉐이크 시퀀스 (1초 간격):
  *  startTransfer → Storage→TR
  *  phase 0 tick → Port→READY
  *  phase 1 tick → Storage→BUSY
  *  phase 2 tick → Port→BUSY (1초째)
  *  phase 3 tick → Port→LD(CST 제거) · Storage→COMPLETE+CST (2초째, 자재 이동)
  *  phase 4 tick → Storage→IDLE, 완료
+ *
+ * 출고(OUT, STK→포트)는 같은 시퀀스를 반대 방향으로 수행:
+ *  phase 3에서 Port→ULD(CST 수령)·Storage filledSlots-1, onPortOutbound 호출
+ *  → 경로 시뮬이 포트→앞 CV→종료점 반송 load를 투입 (CNV_PORT 핸드셰이크는
+ *    usePioPathSimBridge가 첫 홉에서 자동 기록)
  *
  * conveyorCstIds: 컨베이어 시뮬에서 자재가 올라간 유닛 ID 목록.
  * 핸드쉐이크 중이 아닌 포트는 이 목록을 기준으로 ULD/LD 상태가 결정됨.
@@ -47,8 +54,10 @@ export function usePortStorageSimulation(
   conveyorCstIds?: string[],
   /** 'complete'이면 CST 동기화를 스킵하여 포트 ULD 상태를 유지한다 */
   simulationStatus?: string,
-  /** Phase 3 완료 시 호출 — 경로 시뮬에서 해당 포트 자재 로드 제거 */
+  /** 회수 Phase 3 완료 시 호출 — 경로 시뮬에서 해당 포트 자재 로드 제거 */
   onPortDischarge?: (portUnitId: string) => void,
+  /** 출고 Phase 3 완료 시 호출 — 경로 시뮬에 포트 출고 반송 load 투입 */
+  onPortOutbound?: (portUnitId: string) => void,
 ) {
   const [portStates, setPortStates] = useState<Record<string, PortSimState>>({})
   const [storageStates, setStorageStates] = useState<Record<string, StorageSimState>>({})
@@ -64,6 +73,8 @@ export function usePortStorageSimulation(
   // tick의 deps:[] 클로저에서도 최신 콜백 참조
   const onPortDischargeRef = useRef(onPortDischarge)
   onPortDischargeRef.current = onPortDischarge
+  const onPortOutboundRef = useRef(onPortOutbound)
+  onPortOutboundRef.current = onPortOutbound
   // tick·startTransfer의 deps:[] 클로저에서 유닛 이름 조회용
   const lineRef = useRef(line)
   lineRef.current = line
@@ -161,14 +172,28 @@ export function usePortStorageSimulation(
     [line],
   )
 
-  /** 반송 명령 시작: 포트 자재 확인 후 Storage→TR, 핸드쉐이크 세션 시작 */
+  /**
+   * 반송 명령 시작 — 포트 방향에 따라 분기:
+   *  IN 포트: 포트→STK 회수 (포트에 자재 필요)
+   *  OUT 포트: STK→포트 출고 (창고 filledSlots>0 · 포트 비어 있어야 함)
+   */
   const startTransfer = useCallback((storageId: string, portId: string) => {
     const storage = storageRef.current[storageId]
     if (!storage || storage.status !== 'IDLE') return
 
-    // 포트에 자재가 없으면(LD) 반송 시작 불가
     const port = portRef.current[portId]
-    if (!port || !port.hasCst) return
+    if (!port) return
+
+    const portUnit = lineRef.current.units.find((u) => u.id === portId)
+    const isOut = (portUnit?.portDirection ?? 'IN') === 'OUT'
+
+    if (isOut) {
+      // 출고: 창고에 자재가 있어야 하고 포트는 비어 있어야 함
+      if (storage.filledSlots <= 0 || port.hasCst) return
+    } else {
+      // 회수: 포트에 자재가 없으면(LD) 반송 시작 불가
+      if (!port.hasCst) return
+    }
 
     const ns = {
       ...storageRef.current,
@@ -177,12 +202,13 @@ export function usePortStorageSimulation(
     storageRef.current = ns
     setStorageStates(ns)
 
-    // PIO 타임차트: 핸드셰이크 시작 — STK(Active)가 포트(Passive)에서 자재 반출
+    // PIO 타임차트: 핸드셰이크 시작 — STK(Active) ↔ 포트(Passive)
+    // 회수=UNLOAD(포트에서 반출) · 출고=LOAD(포트에 적재)
     // STATUS 프로토콜 — 실제 시뮬 상태값(IDLE/TR/BUSY/COMPLETE, LD/ULD/BUSY/READY)만 사용, E84 신호 아님
     const pio = usePioStore.getState()
     const pioTxId = pio.beginTransaction({
       pairKind: 'PORT_STK',
-      operation: 'UNLOAD',
+      operation: isOut ? 'LOAD' : 'UNLOAD',
       activeName: unitName(storageId),
       activeType: unitType(storageId),
       passiveName: unitName(portId),
@@ -194,7 +220,13 @@ export function usePortStorageSimulation(
       { signal: 'TR', side: 'active', value: 1 },
     ])
 
-    const s: TransferSession = { storageId, portId, phase: 0, pioTxId }
+    const s: TransferSession = {
+      storageId,
+      portId,
+      phase: 0,
+      direction: isOut ? 'out' : 'in',
+      pioTxId,
+    }
     sessionRef.current = s
     setSession(s)
   }, [unitName, unitType])
@@ -203,11 +235,12 @@ export function usePortStorageSimulation(
     const s = sessionRef.current
     if (!s) return
 
-    const { storageId, portId, phase, pioTxId } = s
+    const { storageId, portId, phase, direction, pioTxId } = s
     const storage = storageRef.current[storageId]
     const port = portRef.current[portId]
     if (!storage || !port) return
 
+    const isOut = direction === 'out'
     let np = { ...portRef.current }
     let ns = { ...storageRef.current }
     let nextPhase = phase + 1
@@ -230,12 +263,13 @@ export function usePortStorageSimulation(
     }
 
     switch (phase) {
-      case 0: // Storage=TR → 포트 자재 재확인 후 READY 신호
-        if (!port.hasCst) { abort(); break }
+      case 0: // Storage=TR → 포트 조건 재확인 후 READY 신호
+        // 회수: 포트 자재 필요 · 출고: 포트가 비어 있어야 함
+        if (isOut ? port.hasCst : !port.hasCst) { abort(); break }
         np[portId] = { ...port, status: 'READY' }
         if (pioTxId)
           pio.addEdgesNow(pioTxId, [
-            { signal: 'ULD', side: 'passive', value: 0 },
+            { signal: isOut ? 'LD' : 'ULD', side: 'passive', value: 0 },
             { signal: 'READY', side: 'passive', value: 1 },
           ])
         break
@@ -255,23 +289,37 @@ export function usePortStorageSimulation(
             { signal: 'BUSY', side: 'passive', value: 1 },
           ])
         break
-      case 3: // 자재 이동 — 포트 자재 최종 확인
-        if (!port.hasCst) { abort(); break }
-        np[portId] = { ...port, status: 'LD', hasCst: false }
-        ns[storageId] = {
-          ...storage,
-          status: 'COMPLETE',
-          hasCst: true,
-          filledSlots: storage.filledSlots + 1,
+      case 3: // 자재 이동 — 최종 확인 후 방향별 반영
+        if (isOut ? port.hasCst : !port.hasCst) { abort(); break }
+        if (isOut) {
+          // 출고: 창고 → 포트로 자재 이동, 슬롯 -1
+          np[portId] = { ...port, status: 'ULD', hasCst: true }
+          ns[storageId] = {
+            ...storage,
+            status: 'COMPLETE',
+            hasCst: false,
+            filledSlots: Math.max(0, storage.filledSlots - 1),
+          }
+          // 경로 시뮬에 포트→앞 CV→종료점 반송 load 투입
+          onPortOutboundRef.current?.(portId)
+        } else {
+          // 회수: 포트 → 창고로 자재 이동, 슬롯 +1
+          np[portId] = { ...port, status: 'LD', hasCst: false }
+          ns[storageId] = {
+            ...storage,
+            status: 'COMPLETE',
+            hasCst: true,
+            filledSlots: storage.filledSlots + 1,
+          }
+          // 경로 시뮬에서 포트 자재 로드 제거
+          onPortDischargeRef.current?.(portId)
         }
-        // 경로 시뮬에서 포트 자재 로드 제거
-        onPortDischargeRef.current?.(portId)
         if (pioTxId)
           pio.addEdgesNow(pioTxId, [
             { signal: 'BUSY', side: 'active', value: 0 },
             { signal: 'COMPLETE', side: 'active', value: 1 },
             { signal: 'BUSY', side: 'passive', value: 0 },
-            { signal: 'LD', side: 'passive', value: 1 },
+            { signal: isOut ? 'ULD' : 'LD', side: 'passive', value: 1 },
           ])
         break
       case 4: // Storage=COMPLETE → IDLE, 완료

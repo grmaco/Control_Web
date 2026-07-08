@@ -35,8 +35,6 @@ export interface PortProperties {
   enabled: boolean
   /** LOAD UNIT(IN) / UNLOAD UNIT(OUT) — 인접 컨베이어 유닛 ID */
   linkedUnitId: string
-  /** 출고구(OUT) — 컨베이어 라인 목적지 CV */
-  outputDestination?: string
   description?: string
 }
 

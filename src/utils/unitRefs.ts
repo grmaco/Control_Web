@@ -1,5 +1,4 @@
 import type { ConveyorUnit } from '../types/conveyor'
-import { isFlowCapableUnit } from './flowEntries'
 
 export type UnitRefLineContext = Pick<{ units: ConveyorUnit[] }, 'units'>
 
@@ -30,15 +29,4 @@ export function resolveUnitRefToId(
   ref: string | null | undefined,
 ): string {
   return findUnitByRef(line, ref)?.id ?? ''
-}
-
-/** 출고 포트 목적지 CV — 라인에 존재하는 flow-capable 유닛만 허용 */
-export function resolveOutputDestinationId(
-  line: UnitRefLineContext,
-  portId: string,
-  ref: string | null | undefined,
-): string {
-  const unit = findUnitByRef(line, ref)
-  if (!unit || unit.id === portId || !isFlowCapableUnit(unit)) return ''
-  return unit.id
 }

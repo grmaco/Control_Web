@@ -55,9 +55,6 @@ interface UnitPropertiesPanelProps {
   onChange: (line: ConveyorLine) => void
   onDelete: (unitId: string) => void
   onRotate: (unitId: string) => void
-  outputDestinationPickPortId?: string | null
-  onStartPickOutputDestination?: (portId: string) => void
-  onCancelPickOutputDestination?: () => void
 }
 
 const STATUSES = Object.entries(STATUS_COLORS).map(([value, colors]) => ({
@@ -72,9 +69,6 @@ export function UnitPropertiesPanel({
   onChange,
   onDelete,
   onRotate,
-  outputDestinationPickPortId = null,
-  onStartPickOutputDestination,
-  onCancelPickOutputDestination,
 }: UnitPropertiesPanelProps) {
   const touchLayout = useTouchLayout()
   const [propertiesOpen, setPropertiesOpen] = useState(false)
@@ -527,22 +521,7 @@ export function UnitPropertiesPanel({
         </div>
       )}
 
-      <RolePropertySections
-        line={line}
-        unit={unit}
-        onChange={onChange}
-        pickingOutputDestination={
-          isPortUnit(unit) &&
-          (unit.portDirection ?? 'IN') === 'OUT' &&
-          outputDestinationPickPortId === unit.id
-        }
-        onStartPickOutputDestination={
-          onStartPickOutputDestination
-            ? () => onStartPickOutputDestination(unit.id)
-            : undefined
-        }
-        onCancelPickOutputDestination={onCancelPickOutputDestination}
-      />
+      <RolePropertySections line={line} unit={unit} onChange={onChange} />
 
       <div className="rounded-md border border-slate-800 bg-slate-950/50 p-3 text-xs text-slate-400">
         <p>위치: ({unit.gridX}, {unit.gridY})</p>

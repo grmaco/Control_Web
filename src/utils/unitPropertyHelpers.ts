@@ -11,7 +11,7 @@ import type {
 import { DEFAULT_STK_CAPACITY } from '../constants/unitRoles'
 import { DEFAULT_GRID_SIZE } from '../constants/grid'
 import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
-import { isFlowCapableUnit, listReachableOutputDestinations } from './flowEntries'
+import { isFlowCapableUnit } from './flowEntries'
 import {
   computeJunctionThroughFlow,
   computeJunctionDivertFlow,
@@ -20,7 +20,7 @@ import {
   isPerpendicularFlow,
   type FlowDir,
 } from './flowDirection'
-import { resolveOutputDestinationId, findUnitByRef } from './unitRefs'
+import { findUnitByRef } from './unitRefs'
 import {
   areGridAdjacent,
   findUnitAtCell,
@@ -157,11 +157,11 @@ function migratePortProperties(raw: UnitRoleProperties | null | undefined): Port
     return null
   }
 
+  // outputDestination(출고구)은 제거된 속성 — 저장된 레거시 값은 버린다
   const legacy = raw as PortProperties & { linkedStkId?: string }
   return {
     enabled: legacy.enabled ?? true,
     linkedUnitId: legacy.linkedUnitId ?? '',
-    outputDestination: legacy.outputDestination ?? '',
     description: legacy.description ?? '',
   }
 }
@@ -173,26 +173,9 @@ function normalizePortPropertyRefs(
 ): PortProperties {
   const linkedUnitId = resolvePortLineCvId(line, port, properties.linkedUnitId)
 
-  let outputDestination = resolveOutputDestinationId(
-    line,
-    port.id,
-    properties.outputDestination ?? '',
-  )
-  if (outputDestination) {
-    const reachable = new Set(
-      listReachableOutputDestinations(line as ConveyorLine, port.id).map(
-        (unit) => unit.id,
-      ),
-    )
-    if (!reachable.has(outputDestination)) {
-      outputDestination = ''
-    }
-  }
-
   return {
     ...properties,
     linkedUnitId,
-    outputDestination,
   }
 }
 
@@ -214,8 +197,6 @@ export function getPortProperties(unit: ConveyorUnit): PortProperties | null {
       enabled: typeof raw.enabled === 'boolean' ? raw.enabled : true,
       linkedUnitId:
         typeof raw.linkedUnitId === 'string' ? raw.linkedUnitId : '',
-      outputDestination:
-        typeof raw.outputDestination === 'string' ? raw.outputDestination : '',
       description: typeof raw.description === 'string' ? raw.description : '',
     })
   }
@@ -799,7 +780,6 @@ export function defaultPortProperties(
   return {
     enabled: true,
     linkedUnitId: preferred?.id ?? '',
-    outputDestination: '',
     description: '',
   }
 }
@@ -964,15 +944,7 @@ export function normalizeUnitRoleFields(
           ...migrated,
         }
       } else {
-        const raw = properties as unknown as Record<string, unknown>
-        const salvagedDestination =
-          typeof raw.outputDestination === 'string' ? raw.outputDestination : ''
-        properties = {
-          ...defaultPortProperties(line, unit),
-          ...(salvagedDestination
-            ? { outputDestination: salvagedDestination }
-            : {}),
-        }
+        properties = defaultPortProperties(line, unit)
       }
     }
     properties = normalizePortPropertyRefs(line, unit, properties)

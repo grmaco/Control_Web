@@ -2,7 +2,7 @@ import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
 import { isPortUnit, isStorageUnit } from '../constants/conveyorTypes'
 import { parseTrailingNumber } from './sequentialNaming'
 import { getPortProperties, resolvePortAdjacentStk } from './unitPropertyHelpers'
-import { resolveOutputDestinationId } from './unitRefs'
+import { getExitUnits } from './flowEntries'
 
 export interface OutboundLink {
   prev: ConveyorUnit | null
@@ -39,19 +39,35 @@ function connectedOutboundConveyors(
   )
 }
 
+/**
+ * 출고 목적지 자동 유도 — 출고구(목적지 CV) 속성은 제거됨.
+ * 포트에서 컨베이어망(STK·타 포트 제외)으로 도달 가능한
+ * 흐름 종료점(flowRole==='exit') 중 가장 가까운 유닛을 목적지로 사용한다.
+ */
 function resolveOutputDestination(
   port: ConveyorUnit,
   line: ConveyorLine,
   unitMap: Map<string, ConveyorUnit>,
 ): ConveyorUnit | null {
-  const props = getPortProperties(port)
-  if (props?.outputDestination) {
-    const destId = resolveOutputDestinationId(line, port.id, props.outputDestination)
-    const dest = destId ? unitMap.get(destId) : null
-    if (dest) return dest
-  }
+  const exits = getExitUnits(line)
+  if (exits.length === 0) return null
 
-  return null
+  const blocked = new Set(
+    line.units
+      .filter((u) => (isStorageUnit(u) || isPortUnit(u)) && u.id !== port.id)
+      .map((u) => u.id),
+  )
+
+  let best: ConveyorUnit | null = null
+  let bestDist = Number.POSITIVE_INFINITY
+  for (const exit of exits) {
+    const dist = bfsDistance(port.id, exit.id, unitMap, blocked)
+    if (dist < bestDist) {
+      bestDist = dist
+      best = exit
+    }
+  }
+  return Number.isFinite(bestDist) ? best : null
 }
 
 function bfsDistance(
@@ -300,7 +316,7 @@ export function buildOutboundSimulationPath(
       pathUnitIds: [],
       stkId: null,
       exitId: null,
-      message: `${port.name} 출고구 미설정`,
+      message: `${port.name} — 도달 가능한 종료점(flowRole=exit) 없음`,
     }
   }
 

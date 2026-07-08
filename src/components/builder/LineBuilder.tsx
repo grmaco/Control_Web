@@ -63,8 +63,8 @@ import { OhtRailLayer } from '../monitor/OhtRailLayer'
 import { OhtBuilderPropertiesPanel } from './OhtBuilderPropertiesPanel'
 import type { LineViewport } from '../../utils/lineViewport'
 import { assignSequentialNamesFromEntries } from '../../utils/sequentialNaming'
-import { hasFlowEntries, isFlowCapableUnit, isOutputDestinationCandidate, getEntryUnits, getExitUnits } from '../../utils/flowEntries'
-import { syncFlowRoleUnitRole, updatePortPropertiesInLine } from '../../utils/unitPropertyHelpers'
+import { hasFlowEntries, isFlowCapableUnit, getEntryUnits, getExitUnits } from '../../utils/flowEntries'
+import { syncFlowRoleUnitRole } from '../../utils/unitPropertyHelpers'
 import { getBuilderViewport } from '../../utils/lineViewport'
 import { computeMinimapFlowMap } from '../../utils/flowDirection'
 import { useConveyorStore } from '../../store/useConveyorStore'
@@ -93,9 +93,6 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   const [overCellId, setOverCellId] = useState<string | null>(null)
   const [frozenViewport, setFrozenViewport] = useState<LineViewport | null>(null)
   const [panLocked, setPanLocked] = useState(false)
-  const [outputDestinationPickPortId, setOutputDestinationPickPortId] = useState<
-    string | null
-  >(null)
   const [mobileToolbarOpen, setMobileToolbarOpen] = useState(false)
   const [paletteMode, setPaletteMode] = useState<'conveyor' | 'oht'>('conveyor')
   const [ohtSelection, setOhtSelection] = useState<OhtSelection | null>(null)
@@ -110,7 +107,6 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     setDraft(line)
     setSelectedUnitIds([])
     setCompletionMessage(null)
-    setOutputDestinationPickPortId(null)
     setOhtSelection(null)
   }, [line.id])
 
@@ -428,40 +424,6 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     setOutputDestinationPickPortId(null)
   }, [])
 
-  const handleStartPickOutputDestination = useCallback((portId: string) => {
-    setOutputDestinationPickPortId(portId)
-    setSelectedUnitIds([portId])
-  }, [])
-
-  const handleCancelPickOutputDestination = useCallback(() => {
-    setOutputDestinationPickPortId(null)
-  }, [])
-
-  const handlePickOutputDestination = useCallback(
-    async (portId: string, destinationUnitId: string) => {
-      const current = draftRef.current
-      const port = current.units.find((item) => item.id === portId)
-      if (!port) return
-      const destination = current.units.find((item) => item.id === destinationUnitId)
-      if (!destination || !isOutputDestinationCandidate(current, destination, portId)) return
-
-      const next = updatePortPropertiesInLine(current, portId, {
-        outputDestination: destinationUnitId,
-      })
-      setDraft(next)
-      await persist(next)
-      setOutputDestinationPickPortId(null)
-      setSelectedUnitIds([portId])
-
-      void logApplication({
-        title: 'Button Click',
-        comment: `Builder: Port Output Destination ${port.name} → ${destination.name}`,
-        lineId: current.id,
-      })
-    },
-    [persist, logApplication],
-  )
-
   const handleSetFlowRole = useCallback(
     async (unitId: string, role: FlowRole | null) => {
       setCompletionMessage(null)
@@ -527,11 +489,6 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) {
         return
       }
-      if (e.key === 'Escape' && outputDestinationPickPortId) {
-        e.preventDefault()
-        setOutputDestinationPickPortId(null)
-        return
-      }
       // OHT 레이어 선택 시 R 회전 · Delete 삭제
       if (ohtSelection) {
         if (e.key.toLowerCase() === 'r' && ohtSelection.kind === 'rail') {
@@ -553,7 +510,6 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [
-    outputDestinationPickPortId,
     selectedCount,
     selectedUnit,
     handleRotate,
@@ -663,12 +619,6 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
           </div>
 
           <div className="flex flex-col gap-3">
-            {outputDestinationPickPortId ? (
-              <p className="order-0 rounded-md border border-emerald-800/60 bg-emerald-950/30 px-3 py-2 text-xs text-emerald-200">
-                출고구 CV 선택 중 — 캔버스에서 CV를 클릭하세요 (Esc 취소)
-              </p>
-            ) : null}
-
             <div
               className={
                 touchLayout
@@ -698,9 +648,6 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                       gridTemplateRows: `repeat(${viewport.rows}, ${BUILDER_CELL_SIZE}px)`,
                     }}
                     onClick={() => {
-                      if (outputDestinationPickPortId) {
-                        setOutputDestinationPickPortId(null)
-                      }
                       setSelectedUnitIds([])
                       setOhtSelection(null)
                     }}
@@ -734,39 +681,11 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                       cellSize={BUILDER_CELL_SIZE}
                       footprint={footprint ?? undefined}
                       flow={unitFlowMap.get(unit.id) ?? null}
-                      pickHighlight={
-                        outputDestinationPickPortId === unit.id
-                          ? 'source'
-                          : outputDestinationPickPortId &&
-                              isOutputDestinationCandidate(
-                                draft,
-                                unit,
-                                outputDestinationPickPortId,
-                              )
-                            ? 'target'
-                            : null
-                      }
                       dragEnabled={
-                        !outputDestinationPickPortId &&
-                        (selectedCount <= 1 || selectedUnitIdsSet.has(unit.id))
+                        selectedCount <= 1 || selectedUnitIdsSet.has(unit.id)
                       }
                       onPanLock={handleUnitPointerDown}
                       onSelect={() => {
-                        if (outputDestinationPickPortId) {
-                          if (
-                            isOutputDestinationCandidate(
-                              draft,
-                              unit,
-                              outputDestinationPickPortId,
-                            )
-                          ) {
-                            void handlePickOutputDestination(
-                              outputDestinationPickPortId,
-                              unit.id,
-                            )
-                          }
-                          return
-                        }
                         setSelectedUnitIds((prev) => {
                           if (prev.length > 1) {
                             if (prev.includes(unit.id)) {
@@ -878,9 +797,6 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
               onChange={persist}
               onDelete={handleDelete}
               onRotate={handleRotate}
-              outputDestinationPickPortId={outputDestinationPickPortId}
-              onStartPickOutputDestination={handleStartPickOutputDestination}
-              onCancelPickOutputDestination={handleCancelPickOutputDestination}
             />
           )}
         </aside>

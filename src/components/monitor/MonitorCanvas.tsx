@@ -200,6 +200,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
     portCstIds,
     simulation.status,
     simulation.dischargeLoadAtPort,
+    simulation.spawnOutboundLoadAtPort,
   )
 
   // PIO 타임차트: 컨베이어 자재 홉 → CNV↔CNV / CNV↔PORT 핸드셰이크 기록
@@ -1108,6 +1109,9 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
           <PortSelectModal
             storageUnit={storageUnit}
             connectablePorts={connectablePorts}
+            storageFilledSlots={
+              portStorageSim.storageStates[selectedStorageId]?.filledSlots ?? 0
+            }
             onSelect={(portId) => {
               portStorageSim.startTransfer(selectedStorageId, portId)
               setSelectedStorageId(null)
