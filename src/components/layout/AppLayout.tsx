@@ -84,7 +84,7 @@ export function AppLayout() {
               <HeaderLogo />
               <h1 className="app-header-title whitespace-nowrap text-base sm:text-lg">
                 <span className="app-header-title-text font-semibold tracking-wide">
-                  Smart Control Platform
+                  PCP AI
                 </span>
               </h1>
             </div>

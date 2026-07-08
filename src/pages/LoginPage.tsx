@@ -271,9 +271,9 @@ export function LoginPage() {
             AI CONTROL GATEWAY
           </p>
           <h1 className="bg-gradient-to-r from-cyan-200 via-white to-violet-200 bg-clip-text text-2xl font-bold tracking-tight text-transparent sm:text-3xl">
-            Smart Control Platform
+            PCP AI
           </h1>
-          <p className="mt-2 text-sm text-slate-400">신분을 선택하고 접속하세요</p>
+          <p className="mt-2 text-sm text-slate-400">PC Control Platform with AI</p>
         </header>
 
         <div className="rounded-2xl border border-white/10 bg-slate-950/70 p-5 shadow-2xl backdrop-blur-xl sm:p-8">
