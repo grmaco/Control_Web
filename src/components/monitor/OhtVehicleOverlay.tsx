@@ -78,6 +78,7 @@ export function OhtVehicleOverlay({
         const railPrev = ohtVehiclePrevCell(v, graph) ?? cur
         const moving = v.phase === 'moving'
         const interfacing = v.phase === 'interfacing'
+        const waiting = v.phase === 'waiting'
 
         // ── OHT 위치 계산 ──────────────────────────────────────────
         let gx: number
@@ -129,7 +130,9 @@ export function OhtVehicleOverlay({
           ? v.interfaceElapsedMs === 0
             ? eased          // 첫 틱: 페이드인
             : 1
-          : 0
+          : waiting
+            ? 1              // 자재 대기: 모듈 앞에서 대기 링 표시
+            : 0
 
         return (
           <div key={v.id} className="contents">
@@ -149,10 +152,14 @@ export function OhtVehicleOverlay({
                   className="absolute left-0 top-0 h-full w-full rounded-full"
                   style={{
                     opacity: ringOpacity,
-                    boxShadow: v.carrying
-                      ? '0 0 0 2px rgba(34,211,238,0.65), 0 0 16px rgba(34,211,238,0.45)'
-                      : '0 0 0 2px rgba(251,191,36,0.7), 0 0 16px rgba(251,191,36,0.45)',
-                    animation: 'oht-interface-pulse 0.85s ease-in-out infinite',
+                    boxShadow: waiting
+                      ? '0 0 0 2px rgba(248,113,113,0.7), 0 0 16px rgba(248,113,113,0.4)'
+                      : v.carrying
+                        ? '0 0 0 2px rgba(34,211,238,0.65), 0 0 16px rgba(34,211,238,0.45)'
+                        : '0 0 0 2px rgba(251,191,36,0.7), 0 0 16px rgba(251,191,36,0.45)',
+                    animation: waiting
+                      ? 'oht-interface-pulse 1.6s ease-in-out infinite'
+                      : 'oht-interface-pulse 0.85s ease-in-out infinite',
                   }}
                 />
               </div>

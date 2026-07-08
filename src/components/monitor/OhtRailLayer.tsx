@@ -1,9 +1,10 @@
 import { useDraggable } from '@dnd-kit/core'
 import { useMemo } from 'react'
 import type { ConveyorLine } from '../../types/conveyor'
-import type { OhtRailUnit, OhtSelection, OhtUnit } from '../../types/oht'
+import type { OhtDir, OhtRailUnit, OhtSelection, OhtUnit } from '../../types/oht'
 import { ohtRailConnectedDirs, getOhtRails, getOhtUnits } from '../../utils/ohtLayer'
 import { ohtRailFootprint } from '../../constants/ohtRail'
+import { buildOhtRailGraph } from '../../utils/ohtSimulation'
 import { ohtGridDragId, type OhtGridDragData } from '../builder/dnd'
 import { OhtRailGlyph } from './OhtRailGlyph'
 import { OhtVehicleGlyph } from '../builder/OhtPaletteItem'
@@ -44,6 +45,12 @@ export function OhtRailLayer({
     return map
   }, [rails])
 
+  // 단방향 흐름 방향 — 시뮬 경로탐색과 동일한 그래프에서 유도 (화살표 표시용)
+  const flowOutDirsByRailId = useMemo(
+    () => buildOhtRailGraph(line).flowOutDirs,
+    [line],
+  )
+
   if (rails.length === 0 && units.length === 0) return null
 
   const width = viewport.cols * cellSize
@@ -61,6 +68,7 @@ export function OhtRailLayer({
           viewport={viewport}
           cellSize={cellSize}
           connectedDirs={connectedByRailId.get(rail.id)}
+          flowOutDirs={flowOutDirsByRailId.get(rail.id)}
           interactive={interactive}
           selected={selection?.kind === 'rail' && selection.id === rail.id}
           onSelect={onSelect}
@@ -122,6 +130,7 @@ function OhtRailCell({
   viewport,
   cellSize,
   connectedDirs,
+  flowOutDirs,
   interactive,
   selected,
   onSelect,
@@ -130,6 +139,7 @@ function OhtRailCell({
   viewport: OhtViewport
   cellSize: number
   connectedDirs?: Set<string>
+  flowOutDirs?: OhtDir[]
   interactive: boolean
   selected: boolean
   onSelect?: (selection: OhtSelection) => void
@@ -174,6 +184,9 @@ function OhtRailCell({
         glyphWidth={glyphW}
         glyphHeight={glyphH}
         connectedDirs={connectedDirs}
+        flowOutDirs={flowOutDirs}
+        flowDotX={(-offsetCols + 0.5) * cellSize}
+        flowDotY={(-offsetRows + 0.5) * cellSize}
         emphasized={selected}
       />
     </div>

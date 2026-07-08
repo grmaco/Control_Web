@@ -84,7 +84,7 @@ export function AppLayout() {
               <HeaderLogo />
               <h1 className="app-header-title whitespace-nowrap text-base sm:text-lg">
                 <span className="app-header-title-text font-semibold tracking-wide">
-                  PC제어 관제시스템
+                  Smart Control Platform
                 </span>
               </h1>
             </div>

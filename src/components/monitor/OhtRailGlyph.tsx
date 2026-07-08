@@ -12,6 +12,57 @@ interface OhtRailGlyphProps {
   connectedDirs?: Set<string>
   emphasized?: boolean
   color?: string
+  /** 단방향 흐름 출구 방향 — 있으면 중심 점을 키우고 화살표 표시 */
+  flowOutDirs?: OhtDir[]
+  /** 흐름 점 위치 (멀티셀 앵커 셀 중심) — 기본값: 글리프 중심 */
+  flowDotX?: number
+  flowDotY?: number
+}
+
+const DIR_ANGLE: Record<OhtDir, number> = { E: 0, S: 90, W: 180, N: 270 }
+
+/** 흐름 방향 점 — 살짝 키운 점 안에 진행 방향 화살표(들) */
+function FlowArrowDot({
+  x,
+  y,
+  dirs,
+  color,
+  cellSize,
+}: {
+  x: number
+  y: number
+  dirs: OhtDir[]
+  color: string
+  cellSize: number
+}) {
+  const r = Math.max(3.4, cellSize * 0.15)
+  const a = r * 0.52
+  return (
+    <g>
+      <circle
+        cx={x}
+        cy={y}
+        r={r}
+        fill="#0b1220"
+        fillOpacity={0.92}
+        stroke={color}
+        strokeWidth={1.1}
+        strokeOpacity={0.85}
+      />
+      {dirs.map((dir) => (
+        <path
+          key={dir}
+          d={`M ${-a * 0.7} ${-a} L ${a} 0 L ${-a * 0.7} ${a}`}
+          transform={`translate(${x} ${y}) rotate(${DIR_ANGLE[dir]})`}
+          fill="none"
+          stroke={color}
+          strokeWidth={1.3}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ))}
+    </g>
+  )
 }
 
 const DIR_POINT: Record<OhtDir, { x: number; y: number }> = {
@@ -279,6 +330,9 @@ export function OhtRailGlyph({
   connectedDirs,
   emphasized = false,
   color = '#22d3ee',
+  flowOutDirs,
+  flowDotX,
+  flowDotY,
 }: OhtRailGlyphProps) {
   const w = glyphWidth ?? size
   const h = glyphHeight ?? size
@@ -288,6 +342,18 @@ export function OhtRailGlyph({
   const stroke = emphasized ? 2.2 : 1.6
   const baseOpacity = emphasized ? 0.95 : 0.5
   const dashArray = emphasized ? undefined : '3 3'
+
+  // 단방향 흐름 화살표 점 — 직선 레일에만 표시 (분기·곡선 위에는 표시 안 함)
+  const flowDot =
+    type === 'straight' && flowOutDirs && flowOutDirs.length > 0 ? (
+      <FlowArrowDot
+        x={flowDotX ?? cx}
+        y={flowDotY ?? cy}
+        dirs={flowOutDirs}
+        color={color}
+        cellSize={size}
+      />
+    ) : null
 
   const isLarge =
     type === 'doubleUBypass' ||
@@ -312,6 +378,7 @@ export function OhtRailGlyph({
       <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="pointer-events-none" aria-hidden>
         <path d={d} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
           strokeOpacity={baseOpacity + 0.05} strokeDasharray={dashArray} />
+        {flowDot}
       </svg>
     )
   }
@@ -326,6 +393,7 @@ export function OhtRailGlyph({
             strokeWidth={stroke} strokeLinecap="round"
             strokeOpacity={baseOpacity} strokeDasharray={dashArray} />
         ))}
+        {flowDot}
       </svg>
     )
   }
@@ -342,6 +410,7 @@ export function OhtRailGlyph({
             strokeWidth={stroke} strokeLinecap="round"
             strokeOpacity={baseOpacity} strokeDasharray={dashArray} />
         ))}
+        {flowDot}
       </svg>
     )
   }
@@ -358,6 +427,7 @@ export function OhtRailGlyph({
             strokeWidth={stroke} strokeLinecap="round"
             strokeOpacity={baseOpacity} strokeDasharray={dashArray} />
         ))}
+        {flowDot}
       </svg>
     )
   }
@@ -374,6 +444,7 @@ export function OhtRailGlyph({
             strokeWidth={stroke} strokeLinecap="round"
             strokeOpacity={baseOpacity} strokeDasharray={dashArray} />
         ))}
+        {flowDot}
       </svg>
     )
   }
@@ -402,6 +473,7 @@ export function OhtRailGlyph({
             <path d={branchArc} fill="none" stroke={color} strokeWidth={stroke}
               strokeLinecap="round" strokeOpacity={baseOpacity + 0.05} strokeDasharray={dashArray} />
           )}
+          {flowDot}
         </svg>
       )
     }
@@ -414,19 +486,12 @@ export function OhtRailGlyph({
       const { stem, branches } = found
       const arc1 = arcPath(stem, branches[0], size)
       const arc2 = arcPath(stem, branches[1], size)
-      // 두 분기 사이 직통 직선 (E↔W 또는 회전에 따른 방향)
-      const pb0 = DIR_POINT[branches[0]]
-      const pb1 = DIR_POINT[branches[1]]
-      const thruD = `M ${pb0.x * size},${pb0.y * size} L ${pb1.x * size},${pb1.y * size}`
       return (
         <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="pointer-events-none" aria-hidden>
           {isLarge && (
             <rect x={1} y={1} width={w - 2} height={h - 2} rx={3}
               fill="none" stroke="#f97316" strokeWidth={0.8} strokeOpacity={0.3} strokeDasharray="2 3" />
           )}
-          {/* 분기 간 직통 직선 */}
-          <path d={thruD} fill="none" stroke={color} strokeWidth={stroke}
-            strokeLinecap="round" strokeOpacity={baseOpacity} strokeDasharray={dashArray} />
           {arc1 && (
             <path d={arc1} fill="none" stroke={color} strokeWidth={stroke}
               strokeLinecap="round" strokeOpacity={baseOpacity + 0.05} strokeDasharray={dashArray} />
@@ -435,6 +500,7 @@ export function OhtRailGlyph({
             <path d={arc2} fill="none" stroke={color} strokeWidth={stroke}
               strokeLinecap="round" strokeOpacity={baseOpacity + 0.05} strokeDasharray={dashArray} />
           )}
+          {flowDot}
         </svg>
       )
     }
@@ -455,8 +521,10 @@ export function OhtRailGlyph({
             strokeDasharray={emphasized || connected ? undefined : '3 3'} />
         )
       })}
-      <circle cx={cx} cy={cy} r={emphasized ? 2.6 : 2}
-        fill={color} fillOpacity={baseOpacity + 0.1} />
+      {flowDot ?? (
+        <circle cx={cx} cy={cy} r={emphasized ? 2.6 : 2}
+          fill={color} fillOpacity={baseOpacity + 0.1} />
+      )}
     </svg>
   )
 }

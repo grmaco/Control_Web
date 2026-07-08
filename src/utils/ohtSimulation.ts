@@ -2,7 +2,7 @@ import type { ConveyorLine, ConveyorUnit } from '../types/conveyor'
 import type { OhtRailUnit, OhtDir } from '../types/oht'
 import { getUnitFootprint } from './unitFootprint'
 import { getOhtRails, getOhtUnits, ohtRailConnectedDirs } from './ohtLayer'
-import { OHT_DIR_OFFSET, ohtRailOpenings } from '../constants/ohtRail'
+import { OHT_DIR_OFFSET, OHT_DIR_OPPOSITE, ohtRailOpenings } from '../constants/ohtRail'
 
 // ── 상수 ──────────────────────────────────────────────────────────────────────
 
@@ -10,6 +10,8 @@ import { OHT_DIR_OFFSET, ohtRailOpenings } from '../constants/ohtRail'
 export const OHT_SIM_STEP_MS = 600
 /** 연동 유닛 도착 후 LD/ULD 인터페이스 대기 */
 export const OHT_INTERFACE_MS = 1400
+/** 자재 없는 모듈 앞 대기 상한 — 초과 시 다른 목적지로 재배정 */
+export const OHT_MATERIAL_WAIT_TIMEOUT_MS = 5000
 
 // ── 레일 그래프 ───────────────────────────────────────────────────────────────
 
@@ -17,10 +19,136 @@ export interface OhtRailGraph {
   nodes: Map<string, OhtRailUnit>
   adjacency: Map<string, string[]>
   cellIndex: Map<string, string>
+  /** 단방향 흐름 그래프 — 노드 → 흐름 방향 이웃들 (경로탐색·화살표 렌더 공용) */
+  directed: Map<string, string[]>
+  /** 노드별 흐름 출구 방향 (레일 점 화살표 렌더용) */
+  flowOutDirs: Map<string, OhtDir[]>
 }
 
 function cellKey(gridX: number, gridY: number): string {
   return `${gridX},${gridY}`
+}
+
+/** OHT rotation → 바라보는(진행) 방향 */
+const FACING_BY_ROTATION: Record<0 | 90 | 180 | 270, OhtDir> = {
+  0: 'N',
+  90: 'E',
+  180: 'S',
+  270: 'W',
+}
+
+/** 두 레일 노드 간 지배적 방향 (멀티셀 앵커 간 거리 1 초과 대응) */
+function dirBetween(a: OhtRailUnit, b: OhtRailUnit): OhtDir | null {
+  const dx = b.gridX - a.gridX
+  const dy = b.gridY - a.gridY
+  if (dx === 0 && dy === 0) return null
+  if (Math.abs(dx) >= Math.abs(dy)) return dx > 0 ? 'E' : 'W'
+  return dy > 0 ? 'S' : 'N'
+}
+
+/**
+ * 단방향 흐름 유도 — 배치된 OHT의 초기 방향(rotation)을 씨앗으로,
+ * 유턴 없이 도달 가능한 모든 엣지에 진행 방향을 전파한다.
+ * 이미 반대 방향이 배정된 엣지는 건너뜀(먼저 배정된 방향 우선) → 루프가 한 방향으로 흐름.
+ * OHT가 없으면 첫 레일 노드에서 임의 방향으로 씨앗을 잡는다.
+ */
+function orientRailGraph(
+  line: ConveyorLine,
+  nodes: Map<string, OhtRailUnit>,
+  adjacency: Map<string, string[]>,
+  cellIndex: Map<string, string>,
+): { directed: Map<string, string[]>; flowOutDirs: Map<string, OhtDir[]> } {
+  const oriented = new Set<string>() // 'fromId>toId'
+
+  // 씨앗: OHT 위치 + rotation 방향 (호기명 순으로 우선)
+  const seeds: Array<[string, OhtDir]> = []
+  const units = [...getOhtUnits(line)].sort((a, b) => a.name.localeCompare(b.name))
+  for (const unit of units) {
+    const nodeId =
+      cellIndex.get(cellKey(unit.gridX, unit.gridY)) ??
+      nearestNodeIn(nodes, unit.gridX, unit.gridY)
+    if (nodeId) seeds.push([nodeId, FACING_BY_ROTATION[unit.rotation]])
+  }
+  if (seeds.length === 0) {
+    // OHT 없음 → 이웃 있는 첫 노드에서 한 방향으로 시작
+    for (const [id, neighbors] of adjacency) {
+      const first = neighbors[0]
+      if (!first) continue
+      const d = dirBetween(nodes.get(id)!, nodes.get(first)!)
+      if (d) {
+        seeds.push([id, d])
+        break
+      }
+    }
+  }
+
+  // 걷기(walk) 방식: 한 번에 한 걸음씩 실제로 걸은 엣지만 방향 배정.
+  // BFS 홍수 방식은 분기에서 갈라진 두 흐름이 루프 반대편에서 마주쳐
+  // 서로를 향하는 화살표(흐름 막힘)를 만들 수 있음 — 걷기는 루프를
+  // 한 방향으로 끝까지 돌아 닫으므로 직선 구간 방향이 항상 일관됨.
+  // 분기의 나머지 출구는 대기열에 넣어 메인 루프가 닫힌 뒤 별도로 걸음
+  // → 걷다가 이미 방향이 있는 구간을 만나면 합류(merge)로 종료.
+  const pending: Array<[string, OhtDir]> = [...seeds]
+  const maxSteps = adjacency.size * 4 + 16
+  while (pending.length > 0) {
+    let [id, dir] = pending.shift()!
+    for (let step = 0; step < maxSteps; step += 1) {
+      const rail = nodes.get(id)
+      if (!rail) break
+      const exits: Array<{ nid: string; d: OhtDir }> = []
+      for (const nid of adjacency.get(id) ?? []) {
+        const nRail = nodes.get(nid)
+        if (!nRail) continue
+        const d = dirBetween(rail, nRail)
+        if (!d) continue
+        if (d === OHT_DIR_OPPOSITE[dir]) continue // 유턴 금지
+        if (oriented.has(`${id}>${nid}`) || oriented.has(`${nid}>${id}`)) continue
+        exits.push({ nid, d })
+      }
+      if (exits.length === 0) break // 막힘 또는 기존 흐름에 합류 → 걷기 종료
+      // 직진 우선 — 루프가 자연스럽게 한 방향으로 순환
+      const pick = exits.find((e) => e.d === dir) ?? exits[0]!
+      for (const e of exits) {
+        if (e !== pick) pending.push([id, e.d]) // 분기 가지는 나중에 걸음
+      }
+      oriented.add(`${id}>${pick.nid}`)
+      id = pick.nid
+      dir = pick.d
+    }
+  }
+
+  const directed = new Map<string, string[]>()
+  const flowOutDirs = new Map<string, OhtDir[]>()
+  for (const key of oriented) {
+    const [from, to] = key.split('>') as [string, string]
+    const list = directed.get(from) ?? []
+    list.push(to)
+    directed.set(from, list)
+    const d = dirBetween(nodes.get(from)!, nodes.get(to)!)
+    if (d) {
+      const dirs = flowOutDirs.get(from) ?? []
+      if (!dirs.includes(d)) dirs.push(d)
+      flowOutDirs.set(from, dirs)
+    }
+  }
+  return { directed, flowOutDirs }
+}
+
+function nearestNodeIn(
+  nodes: Map<string, OhtRailUnit>,
+  gridX: number,
+  gridY: number,
+): string | null {
+  let best: string | null = null
+  let bestDist = Infinity
+  for (const rail of nodes.values()) {
+    const dist = Math.abs(rail.gridX - gridX) + Math.abs(rail.gridY - gridY)
+    if (dist < bestDist) {
+      bestDist = dist
+      best = rail.id
+    }
+  }
+  return best
 }
 
 export function buildOhtRailGraph(line: ConveyorLine): OhtRailGraph {
@@ -45,7 +173,9 @@ export function buildOhtRailGraph(line: ConveyorLine): OhtRailGraph {
     }
     adjacency.set(rail.id, neighbors)
   }
-  return { nodes, adjacency, cellIndex }
+
+  const { directed, flowOutDirs } = orientRailGraph(line, nodes, adjacency, cellIndex)
+  return { nodes, adjacency, cellIndex, directed, flowOutDirs }
 }
 
 // ── 연동 유닛(목적지) 해석 ─────────────────────────────────────────────────────
@@ -165,6 +295,35 @@ export function bfsRailPath(
   return null
 }
 
+/** 단방향 흐름 그래프 기반 최단 경로 — 레일이 일방통행이므로 유턴·역주행이 원천 차단됨 */
+export function bfsDirectedRailPath(
+  graph: OhtRailGraph,
+  fromId: string,
+  goalIds: Set<string>,
+): string[] | null {
+  if (goalIds.has(fromId)) return []
+  const queue: string[] = [fromId]
+  const prev = new Map<string, string | null>([[fromId, null]])
+  while (queue.length > 0) {
+    const cur = queue.shift()!
+    for (const next of graph.directed.get(cur) ?? []) {
+      if (prev.has(next)) continue
+      prev.set(next, cur)
+      if (goalIds.has(next)) {
+        const path: string[] = []
+        let node: string | null = next
+        while (node != null && node !== fromId) {
+          path.unshift(node)
+          node = prev.get(node) ?? null
+        }
+        return path
+      }
+      queue.push(next)
+    }
+  }
+  return null
+}
+
 export function nearestRailNode(
   graph: OhtRailGraph,
   gridX: number,
@@ -184,7 +343,7 @@ export function nearestRailNode(
 
 // ── 대차 상태 ──────────────────────────────────────────────────────────────────
 
-export type OhtPhase = 'idle' | 'moving' | 'interfacing'
+export type OhtPhase = 'idle' | 'moving' | 'interfacing' | 'waiting'
 
 export interface OhtVehicleState {
   id: string
@@ -197,6 +356,8 @@ export interface OhtVehicleState {
   path: string[]
   pathIndex: number
   interfaceElapsedMs: number
+  /** 자재 없는 모듈 앞 대기 누적 시간 (phase==='waiting') */
+  waitElapsedMs: number
   targetCursor: number
   targetUnitCenter: { gridX: number; gridY: number } | null
   /**
@@ -261,6 +422,7 @@ export function initOhtVehicles(line: ConveyorLine, graph: OhtRailGraph): OhtVeh
       path: [],
       pathIndex: 0,
       interfaceElapsedMs: 0,
+      waitElapsedMs: 0,
       targetCursor: i,
       targetUnitCenter: null,
       departGrid: null,
@@ -290,19 +452,21 @@ function assignNextTarget(
     const target = targets[cursor]!
     const goalSet = new Set(target.railNodeIds)
 
-    let path: string[] | null = null
-    if (vehicle.entryFromId) {
-      // 이미 한 번 이상 이동 → 이전 노드 기반 역주행 방지
-      path =
-        bfsRailPath(graph, vehicle.nodeId, goalSet, vehicle.entryFromId) ??
-        bfsRailPath(graph, vehicle.nodeId, goalSet)
-    } else if (vehicle.forbidStartDir) {
-      // 초기 상태 (레일 끝 배치 등) → 방향 기반 역주행 방지 (rotation 설정 반영)
-      path =
-        bfsRailPath(graph, vehicle.nodeId, goalSet, undefined, vehicle.forbidStartDir) ??
-        bfsRailPath(graph, vehicle.nodeId, goalSet)
-    } else {
-      path = bfsRailPath(graph, vehicle.nodeId, goalSet)
+    // 단방향 흐름 그래프 우선 — 레일 일방통행 강제
+    let path: string[] | null = bfsDirectedRailPath(graph, vehicle.nodeId, goalSet)
+    if (path == null || path.length === 0) {
+      // 단방향으로 도달 불가(고립 구간 등) → 기존 양방향 폴백
+      if (vehicle.entryFromId) {
+        path =
+          bfsRailPath(graph, vehicle.nodeId, goalSet, vehicle.entryFromId) ??
+          bfsRailPath(graph, vehicle.nodeId, goalSet)
+      } else if (vehicle.forbidStartDir) {
+        path =
+          bfsRailPath(graph, vehicle.nodeId, goalSet, undefined, vehicle.forbidStartDir) ??
+          bfsRailPath(graph, vehicle.nodeId, goalSet)
+      } else {
+        path = bfsRailPath(graph, vehicle.nodeId, goalSet)
+      }
     }
 
     if (path && path.length > 0) {
@@ -321,13 +485,29 @@ function assignNextTarget(
   return { ...vehicle, phase: 'idle', path: [], pathIndex: 0, targetUnitId: null }
 }
 
-/** 한 틱 진행 — 모든 대차 상태 갱신 */
+/** 호기명 숫자 추출 — 분기 진입 등 우선순위 판정 (OHT-01 → 1) */
+function vehicleNumber(name: string): number {
+  const match = /(\d+)/.exec(name)
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER
+}
+
+export interface AdvanceOhtOptions {
+  /**
+   * 연동 모듈에 자재가 있는지 (컨베이어 시뮬 연동).
+   * 미제공 시 자재 체크 없이 기존처럼 즉시 Pick.
+   * carrying=false(픽업)일 때만 검사 — 자재 없으면 waiting으로 모듈 앞 대기.
+   */
+  hasMaterialAtUnit?: (unitId: string) => boolean
+}
+
+/** 한 틱 진행 — 모든 대차 상태 갱신. 노드 점유 예약은 호기명 숫자 오름차순으로 처리 */
 export function advanceOhtVehicles(
   vehicles: OhtVehicleState[],
   graph: OhtRailGraph,
   targets: OhtTarget[],
   stepMs: number = OHT_SIM_STEP_MS,
   interfaceMs: number = OHT_INTERFACE_MS,
+  options?: AdvanceOhtOptions,
 ): OhtVehicleState[] {
   // ── 충돌 방지: 이번 틱에서 각 노드를 점유할 대차를 순서대로 예약 ──────────
   // 초기값: 현재 모든 대차의 위치 (자기 위치 제외는 이동 처리 시 수행)
@@ -336,7 +516,9 @@ export function advanceOhtVehicles(
     if (v.nodeId) claimedNodes.add(v.nodeId)
   }
 
-  return vehicles.map((v) => {
+  const hasMaterialAtUnit = options?.hasMaterialAtUnit
+
+  const stepVehicle = (v: OhtVehicleState): OhtVehicleState => {
     if (v.nodeId == null) return v
 
     // ── idle → 목적지 배정 ────────────────────────────────────────────────
@@ -344,16 +526,60 @@ export function advanceOhtVehicles(
       return assignNextTarget({ ...v, prevNodeId: v.nodeId }, graph, targets)
     }
 
+    // ── waiting: 자재 없는 모듈 앞 대기 ──────────────────────────────────
+    if (v.phase === 'waiting') {
+      const materialReady =
+        v.targetUnitId == null ||
+        hasMaterialAtUnit == null ||
+        hasMaterialAtUnit(v.targetUnitId)
+      if (materialReady) {
+        return {
+          ...v,
+          phase: 'interfacing',
+          interfaceElapsedMs: 0,
+          waitElapsedMs: 0,
+          prevNodeId: v.nodeId,
+        }
+      }
+      const waited = v.waitElapsedMs + stepMs
+      if (waited >= OHT_MATERIAL_WAIT_TIMEOUT_MS) {
+        // 타임아웃 → 다른 목적지로 재배정 (같은 모듈만 나오면 계속 대기)
+        const reassigned = assignNextTarget(
+          { ...v, waitElapsedMs: 0, prevNodeId: v.nodeId },
+          graph,
+          targets,
+        )
+        if (reassigned.phase === 'moving' && reassigned.targetUnitId !== v.targetUnitId) {
+          return reassigned
+        }
+        return { ...v, waitElapsedMs: 0, prevNodeId: v.nodeId }
+      }
+      return { ...v, waitElapsedMs: waited, prevNodeId: v.nodeId }
+    }
+
     // ── moving ───────────────────────────────────────────────────────────
     if (v.phase === 'moving') {
       if (v.pathIndex >= v.path.length) {
-        // 경로 끝 → 다음 틱에 interfacing (마지막 엣지 애니메이션 보장)
+        // 경로 끝 — 픽업인데 모듈에 자재가 없으면 인터페이스하지 않고 대기
+        if (
+          !v.carrying &&
+          v.targetUnitId != null &&
+          hasMaterialAtUnit != null &&
+          !hasMaterialAtUnit(v.targetUnitId)
+        ) {
+          return { ...v, phase: 'waiting', waitElapsedMs: 0, prevNodeId: v.nodeId }
+        }
+        // → 다음 틱에 interfacing (마지막 엣지 애니메이션 보장)
         return { ...v, phase: 'interfacing', interfaceElapsedMs: 0, prevNodeId: v.nodeId }
       }
       const nextNode = v.path[v.pathIndex]!
       // 충돌 방지: 목적지 노드가 다른 대차에 의해 점유 중이면 대기
       if (claimedNodes.has(nextNode)) {
-        // 내 현재 위치는 유지
+        // 제자리 정지 — prevNodeId·departGrid를 현재 노드로 정리하지 않으면
+        // 오버레이가 매 틱 "직전 노드 → 현재 노드" 보간을 재시작해 튕기는 모션이 생김
+        if (v.prevNodeId !== v.nodeId || v.departGrid != null) {
+          return { ...v, prevNodeId: v.nodeId, departGrid: null }
+        }
         return v
       }
       // 이동: 이전 위치 해제 → 새 위치 예약
@@ -416,7 +642,20 @@ export function advanceOhtVehicles(
     }
 
     return v
-  })
+  }
+
+  // 호기명 숫자 오름차순으로 노드 예약 처리
+  // → 분기(합류) 노드에 동시 진입하려는 경우 빠른 호기가 먼저 점유, 나머지는 대기
+  const order = vehicles
+    .map((_, i) => i)
+    .sort((a, b) => {
+      const na = vehicleNumber(vehicles[a]!.name)
+      const nb = vehicleNumber(vehicles[b]!.name)
+      return na !== nb ? na - nb : a - b
+    })
+  const next: OhtVehicleState[] = new Array(vehicles.length)
+  for (const i of order) next[i] = stepVehicle(vehicles[i]!)
+  return next
 }
 
 /** 대차의 현재 셀 좌표 (렌더용) */

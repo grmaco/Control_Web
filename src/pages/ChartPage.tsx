@@ -204,7 +204,7 @@ export function ChartPage() {
     <div className="space-y-4">
       <PageHeader
         title="차트"
-        subtitle="PIO Time Chart — Active ↔ Passive 핸드셰이크 관제 (MODULE↔OHT/AGV: SEMI E84 · 그 외(CV↔CV/CV↔PORT/PORT↔STK): 실제 시뮬 상태값 LD/ULD/BUSY)"
+        subtitle="PIO Time Chart — Active ↔ Passive 관제"
       />
 
       {/* ── V3 이벤트 차트 ── */}

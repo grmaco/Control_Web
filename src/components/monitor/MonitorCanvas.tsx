@@ -172,7 +172,21 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   const [scale, setScale] = useState(initialTransform.scale)
   const [is25DView, setIs25DView] = useState(false)
   const [simMode, setSimMode] = useState<'conveyor' | 'oht'>('conveyor')
-  const oht = useOhtSimulation(line)
+  // 컨베이어 시뮬 동시 실행 중일 때만 자재 유무 검사 — 없으면 OHT는 모듈 앞 대기
+  const conveyorSimRunning =
+    simulation.status !== 'idle' && simulation.status !== 'complete'
+  const ohtHasMaterialAtUnit = useCallback(
+    (unitId: string) =>
+      simulation.loads.some((load) => {
+        if (!load.released || load.complete || load.pathUnitIds.length === 0) return false
+        const step = Math.min(Math.max(0, load.stepIndex), load.pathUnitIds.length - 1)
+        return load.pathUnitIds[step] === unitId
+      }),
+    [simulation.loads],
+  )
+  const oht = useOhtSimulation(line, {
+    hasMaterialAtUnit: conveyorSimRunning ? ohtHasMaterialAtUnit : undefined,
+  })
   const ohtMode = simMode === 'oht'
   const [ohtPoodleMode, setOhtPoodleMode] = useState(false)
   // 포트 ULD 감지용 — complete된 자재도 포함해야 포트 셀에 머문 자재가 ULD로 표시됨

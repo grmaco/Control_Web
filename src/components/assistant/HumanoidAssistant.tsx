@@ -171,7 +171,7 @@ function AssistantChatPanel({
             }`}
             title={provider === 'local' ? '로컬 분석 모드 — ⚙에서 API 키 등록 시 생성형 AI 사용' : undefined}
           >
-            {provider === 'claude' ? 'CLAUDE' : provider === 'gemini' ? 'GEMINI 무료' : 'LOCAL'}
+            {provider === 'claude' ? 'CLAUDE' : provider === 'gemini' ? '장과장 클론' : 'LOCAL'}
           </span>
         </div>
         <div className="flex items-center gap-1">

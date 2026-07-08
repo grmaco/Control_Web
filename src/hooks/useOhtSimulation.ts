@@ -62,7 +62,15 @@ export interface UseOhtSimulation {
   reset: () => void
 }
 
-export function useOhtSimulation(line: ConveyorLine): UseOhtSimulation {
+export interface UseOhtSimulationOptions {
+  /** 연동 모듈 자재 유무 (컨베이어 시뮬 연동) — 미제공 시 자재 체크 없이 Pick */
+  hasMaterialAtUnit?: (unitId: string) => boolean
+}
+
+export function useOhtSimulation(
+  line: ConveyorLine,
+  options?: UseOhtSimulationOptions,
+): UseOhtSimulation {
   const graph = useMemo(() => buildOhtRailGraph(line), [line])
   const targets = useMemo(() => resolveOhtTargets(line, graph), [line, graph])
 
@@ -79,6 +87,8 @@ export function useOhtSimulation(line: ConveyorLine): UseOhtSimulation {
   const vehiclesRef = useRef<OhtVehicleState[]>([])
   const lineRef = useRef(line)
   lineRef.current = line
+  const hasMaterialRef = useRef(options?.hasMaterialAtUnit)
+  hasMaterialRef.current = options?.hasMaterialAtUnit
 
   const hasRails = graph.nodes.size > 0
   const hasVehicles = (line.ohtUnits?.length ?? 0) > 0
@@ -130,7 +140,14 @@ export function useOhtSimulation(line: ConveyorLine): UseOhtSimulation {
     clearTimer()
     timerRef.current = window.setInterval(() => {
       const prev = vehiclesRef.current
-      const next = advanceOhtVehicles(prev, graphRef.current, targetsRef.current)
+      const next = advanceOhtVehicles(
+        prev,
+        graphRef.current,
+        targetsRef.current,
+        OHT_SIM_STEP_MS,
+        OHT_INTERFACE_MS,
+        { hasMaterialAtUnit: hasMaterialRef.current },
+      )
       // 인터페이스 진입 감지 → PIO 타임차트 기록 (인터벌 콜백에서 1회만 실행)
       emitPioForOhtTransitions(prev, next, lineRef.current)
       vehiclesRef.current = next
