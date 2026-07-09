@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useInitializeStore } from '../components/common/LineSelector'
 import { AppCard, EmptyPanel, PageHeader, PageState } from '../components/common/PageUi'
 import { useConveyorStore } from '../store/useConveyorStore'
+import { useHistoryFilterStore } from '../store/useHistoryFilterStore'
 import {
   filterLogEntries,
   LOG_LEVEL_OPTIONS,
@@ -17,11 +18,17 @@ export function HistoryPage() {
   const history = useConveyorStore((s) => s.history)
   const fetchHistory = useConveyorStore((s) => s.fetchHistory)
 
-  const [lineFilter, setLineFilter] = useState('')
-  const [logTypeFilter, setLogTypeFilter] = useState('')
-  const [logLevelFilter, setLogLevelFilter] = useState<LogLevel | ''>('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  // 화면 전환 후 재진입해도 유지되도록 스토어에 보관(컴포넌트 로컬 state 아님)
+  const lineFilter = useHistoryFilterStore((s) => s.lineFilter)
+  const setLineFilter = useHistoryFilterStore((s) => s.setLineFilter)
+  const logTypeFilter = useHistoryFilterStore((s) => s.logTypeFilter)
+  const setLogTypeFilter = useHistoryFilterStore((s) => s.setLogTypeFilter)
+  const logLevelFilter = useHistoryFilterStore((s) => s.logLevelFilter)
+  const setLogLevelFilter = useHistoryFilterStore((s) => s.setLogLevelFilter)
+  const dateFrom = useHistoryFilterStore((s) => s.dateFrom)
+  const dateTo = useHistoryFilterStore((s) => s.dateTo)
+  const setDateRange = useHistoryFilterStore((s) => s.setDateRange)
+  const resetHistoryFilters = useHistoryFilterStore((s) => s.resetFilters)
 
   useEffect(() => {
     fetchHistory({
@@ -49,14 +56,6 @@ export function HistoryPage() {
     () => filterLogEntries(allLogs, filterState),
     [allLogs, filterState],
   )
-
-  const resetFilters = () => {
-    setLineFilter('')
-    setLogTypeFilter('')
-    setLogLevelFilter('')
-    setDateFrom('')
-    setDateTo('')
-  }
 
   if (isLoading) {
     return <PageState message="로그를 불러오는 중..." />
@@ -128,14 +127,14 @@ export function HistoryPage() {
             <DateRangePicker
               dateFrom={dateFrom}
               dateTo={dateTo}
-              onChange={(from, to) => { setDateFrom(from); setDateTo(to) }}
+              onChange={setDateRange}
             />
           </FilterField>
 
           <div className="flex items-end">
             <button
               type="button"
-              onClick={resetFilters}
+              onClick={resetHistoryFilters}
               className="app-btn app-btn-secondary app-btn-md w-full min-h-[44px]"
             >
               필터 초기화
