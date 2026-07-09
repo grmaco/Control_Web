@@ -86,20 +86,39 @@ export function inferUnitRole(
   return 'TRANSFER'
 }
 
-/** 직선 CV — 투입구·출고구일 때만 외부 연동 유닛(OHT/AGV 등) 지정 */
+/**
+ * 직선 CV·포트 — 투입구·출고구일 때만 외부 연동 유닛(OHT/AGV 등) 지정.
+ * 포트는 STK 반대편에 라인 CV 없이(연동 유닛 또는 프로브로 자재 직접 투입)
+ * 단독으로 쓰일 수 있어야 하므로 직선과 동일하게 허용한다.
+ */
 export function canSelectInterfaceUnit(unit: ConveyorUnit): boolean {
-  if (unit.type !== 'straight') return false
+  if (unit.type !== 'straight' && !isPortUnit(unit)) return false
   if (unit.flowRole === 'entry' || unit.role === 'INPUT') return true
   if (unit.flowRole === 'exit' || unit.role === 'OUTPUT') return true
   return false
 }
 
-/** flowRole(투입·출고 지정) ↔ role(투입구·출고구·경유) — CV 유닛만 동기화 */
+/**
+ * flowRole(투입·출고 지정) 동기화.
+ * 일반 CV: role(투입구·출고구·경유)까지 함께 동기화.
+ * 포트: portDirection 기반 role(PORT_IN/PORT_OUT)은 그대로 두고 flowRole만
+ * 설정 — 해제 시 연동 유닛도 함께 해제(직선과 동일한 의미: 투입/출고
+ * 지정이 없으면 외부 연동 유닛 지정도 무의미).
+ */
 export function syncFlowRoleUnitRole(
   unit: ConveyorUnit,
   patch: Partial<Pick<ConveyorUnit, 'flowRole' | 'role'>>,
 ): Partial<Pick<ConveyorUnit, 'flowRole' | 'role' | 'interfaceUnit'>> {
-  if (isPortUnit(unit) || isStorageUnit(unit) || !isFlowCapableUnit(unit)) {
+  if (isPortUnit(unit)) {
+    if (!('flowRole' in patch)) return patch
+    const flowRole = patch.flowRole ?? null
+    if (flowRole == null && unit.interfaceUnit != null) {
+      return { flowRole: null, interfaceUnit: null }
+    }
+    return { flowRole }
+  }
+
+  if (isStorageUnit(unit) || !isFlowCapableUnit(unit)) {
     return patch
   }
 

@@ -167,7 +167,9 @@ export function normalizeUnit(
     return {
       ...unit,
       type,
-      interfaceUnit: null,
+      // 포트도 직선 CV처럼 투입/출고 지정 + 연동 유닛(OHT 등) 지정 가능 —
+      // STK 반대편에 라인 CV 없이 단독 배치될 때 자재 반입/반출 수단이 됨
+      interfaceUnit,
       portDirection: unit.portDirection ?? DEFAULT_PORT_DIRECTION,
       portRecipe: unit.portRecipe ?? DEFAULT_PORT_RECIPE,
       portLinkedUnit: null,
@@ -175,7 +177,7 @@ export function normalizeUnit(
       storageRobotCount: null,
       storageMaintenanceArea: null,
       testMaterial: unit.testMaterial ?? 0,
-      flowRole: null,
+      flowRole: unit.flowRole ?? null,
     }
   }
 

@@ -495,7 +495,10 @@ export function LineStatusGrid({
           isAnchor &&
           !hideModuleNames &&
           !isStorageUnit(unit) &&
-          !(showFlowArrows && isPort && flow) &&
+          // MinimapPortFallback이 flow 유무와 무관하게(단독 포트 포함) 항상
+          // 이름을 자체 표시하므로, 포트는 flow 여부와 상관없이 일반 라벨을 꺼야
+          // 이름이 두 번(작은 라벨 + 포트 오버레이) 겹쳐 보이지 않는다.
+          !showMinimapPortOverlay &&
           !showMinimapStorageLabel
         const label = showUnitLabel
           ? buildUnitLabelLines(

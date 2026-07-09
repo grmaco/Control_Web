@@ -125,8 +125,8 @@ export function StraightInterfaceUnitSection({
       </select>
       <p className="mt-1 text-xs leading-relaxed text-slate-400">
         {isInput
-          ? '투입구 직선 CV와 연결되는 외부 설비(OHT·AGV 등)를 선택하세요.'
-          : '출고구 직선 CV와 연결되는 외부 설비(OHT·AGV 등)를 선택하세요.'}
+          ? '투입구와 연결되는 외부 설비(OHT·AGV 등)를 선택하세요. 지정하면 라인 CV 없이도 이 설비가 자재를 직접 투입합니다.'
+          : '출고구와 연결되는 외부 설비(OHT·AGV 등)를 선택하세요. 지정하면 라인 CV 없이도 이 설비가 자재를 직접 반출합니다.'}
       </p>
     </div>
   )
@@ -324,10 +324,25 @@ export function PortRoleSection({
               : '사용자가 직접 자재를 입고하는 포트로 사용됩니다.'}
         </p>
         {linkCandidates.length === 0 ? (
-          <p className="mt-1 text-xs text-amber-300">
-            인접 {isOut ? 'UNLOAD' : 'LOAD'} UNIT이 없습니다. STK 반대편 라인 CV를
-            포트 옆에 배치하세요.
-          </p>
+          portUnit.interfaceUnit ? (
+            <p className="mt-1 text-xs text-emerald-300">
+              인접 {isOut ? 'UNLOAD' : 'LOAD'} UNIT은 없지만, 연동 유닛(
+              {portUnit.interfaceUnit})이 자재를 직접 {isOut ? '반출' : '투입'}
+              합니다.
+            </p>
+          ) : portUnit.flowRole != null ? (
+            <p className="mt-1 text-xs text-emerald-300">
+              인접 {isOut ? 'UNLOAD' : 'LOAD'} UNIT은 없지만 {isOut ? '출고' : '투입'}
+              점으로 지정돼, {isOut ? '사람이 직접 자재를 반출' : '시뮬레이션 시작 시 프로브가 자재를 직접 투입'}
+              합니다.
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-amber-300">
+              인접 {isOut ? 'UNLOAD' : 'LOAD'} UNIT이 없습니다. STK 반대편에 라인
+              CV/회전/분기/리프트를 배치하거나, 이 포트를 투입·출고점으로
+              지정하거나, 연동 유닛(OHT·AGV 등)을 지정하세요.
+            </p>
+          )
         ) : null}
       </div>
       {isOut ? (

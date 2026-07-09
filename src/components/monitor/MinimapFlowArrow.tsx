@@ -880,9 +880,28 @@ export function MinimapPortFallback({
     )
   }
 
-  if (!showName) return null
-
-  return <PortNameOverlay unitName={unit.name} cellSize={cellSize} />
+  // 방향(flow) 없는 단독 포트(STK 반대편에 라인 CV 없음) — 방향 화살표 대신
+  // 자재 유무를 은은한 펄스 글로우로 표시 (연동 유닛·프로브 직접 투입 구성)
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+      {hasMaterial && (
+        <span
+          className="absolute inset-[8%] rounded-md"
+          style={{
+            boxShadow: '0 0 0 1.5px rgba(34,211,238,0.75), 0 0 14px rgba(34,211,238,0.55)',
+            animation: 'port-standalone-material-pulse 1.4s ease-in-out infinite',
+          }}
+        />
+      )}
+      {showName ? <PortNameOverlay unitName={unit.name} cellSize={cellSize} /> : null}
+      <style>{`
+        @keyframes port-standalone-material-pulse {
+          0%, 100% { opacity: 0.45; }
+          50% { opacity: 0.95; }
+        }
+      `}</style>
+    </div>
+  )
 }
 
 export function MinimapStorageLabel({

@@ -457,7 +457,11 @@ export function updateUnitInLine(
       next = {
         ...next,
         type: 'port',
-        interfaceUnit: null,
+        // 포트도 직선 CV처럼 연동 유닛(OHT 등) 지정 가능 — STK 반대편에 라인 CV
+        // 없이 단독 배치될 때 자재 반입/반출 수단이 됨.
+        // 'interfaceUnit' in patch로 명시적 null(해제)과 미지정을 구분 —
+        // ??를 쓰면 "없음" 선택(null) 이 이전 값으로 되돌아가 해제가 안 됨.
+        interfaceUnit: 'interfaceUnit' in patch ? patch.interfaceUnit ?? null : u.interfaceUnit,
         portDirection: patch.portDirection ?? u.portDirection ?? DEFAULT_PORT_DIRECTION,
         portRecipe: patch.portRecipe ?? u.portRecipe ?? DEFAULT_PORT_RECIPE,
         portLinkedUnit: null,

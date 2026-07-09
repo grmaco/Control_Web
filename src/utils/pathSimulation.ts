@@ -756,6 +756,20 @@ export function planInboundLoadPath(
     }
   }
 
+  // 투입점 자체가 포트 — 라인 CV 없이 STK 반대편에 단독 배치된 구성
+  // (연동 유닛이 자재를 반입하거나, 연동 유닛이 없으면 프로브가 직접 투입).
+  // 흐름 순회 없이 포트 자신에서 종료 — STK 반송 명령으로 회수될 때까지 대기.
+  if (isPortUnit(entry)) {
+    return {
+      entryUnitId,
+      routingUnitId: null,
+      targetStkId: null,
+      targetExitId: entryUnitId,
+      pathUnitIds: [entryUnitId],
+      message: `${unitDisplayCode(entry)} (포트 직접 투입)`,
+    }
+  }
+
   const traversal = planInboundPathFromFlowTraversal(
     line,
     entryUnitId,

@@ -167,9 +167,24 @@ export function computePortFlowDirs(
   if (!lineCv) {
     lineCv = findConnectedNeighbor(port, unitMap, isFlowCapableUnit)
   }
-  if (!lineCv) return null
 
   const direction = port.portDirection ?? 'IN'
+
+  // STK 반대편에 라인 CV가 없는 단독 포트(연동 유닛·프로브 직접 투입 구성) —
+  // 화살표는 항상 STK를 가리키는 방향으로 표시
+  if (!lineCv) {
+    const standaloneStk = resolvePortAdjacentStk(line, port)
+    if (!standaloneStk) return null
+    const towardStk = dirToward(port, standaloneStk)
+    if (!towardStk) return null
+    return {
+      inDir: null,
+      outDir: towardStk,
+      cvNumber: null,
+      role: 'single',
+      portDirection: direction,
+    }
+  }
   const towardCv = dirToward(port, lineCv)
   if (!towardCv) return null
 

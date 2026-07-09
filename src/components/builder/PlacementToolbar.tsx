@@ -38,7 +38,7 @@ export function PlacementToolbar({
   const canSetFlowRole =
     selectedUnit != null &&
     selectedCount === 1 &&
-    ['straight', 'turn', 'junction', 'lift'].includes(selectedUnit.type)
+    ['straight', 'turn', 'junction', 'lift', 'port'].includes(selectedUnit.type)
 
   const entryLabel =
     entryUnits.length > 0

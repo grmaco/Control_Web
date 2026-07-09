@@ -545,6 +545,12 @@ export function UnitPropertiesPanel({
                 )}
               </p>
             ) : null}
+            {canSelectInterfaceUnit(unit) ? (
+              <p>
+                연동 유닛:{' '}
+                {unit.interfaceUnit ? unit.interfaceUnit : '없음'}
+              </p>
+            ) : null}
           </>
         ) : isStorage ? (
           <>

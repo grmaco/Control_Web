@@ -63,7 +63,7 @@ import { OhtRailLayer } from '../monitor/OhtRailLayer'
 import { OhtBuilderPropertiesPanel } from './OhtBuilderPropertiesPanel'
 import type { LineViewport } from '../../utils/lineViewport'
 import { assignSequentialNamesFromEntries } from '../../utils/sequentialNaming'
-import { hasFlowEntries, isFlowCapableUnit, getEntryUnits, getExitUnits } from '../../utils/flowEntries'
+import { hasFlowEntries, isFlowRoleCapableUnit, getEntryUnits, getExitUnits } from '../../utils/flowEntries'
 import { syncFlowRoleUnitRole } from '../../utils/unitPropertyHelpers'
 import { getBuilderViewport } from '../../utils/lineViewport'
 import { computeMinimapFlowMap } from '../../utils/flowDirection'
@@ -428,7 +428,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     async (unitId: string, role: FlowRole | null) => {
       setCompletionMessage(null)
       const unit = draft.units.find((item) => item.id === unitId)
-      if (!unit || !isFlowCapableUnit(unit)) return
+      if (!unit || !isFlowRoleCapableUnit(unit)) return
 
       const next = updateUnitInLine(
         draft,
