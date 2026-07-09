@@ -668,7 +668,13 @@ function buildEntryToExitPath(
   const exitIds = resolveExitTargetIds(line, entryUnitId, unitMap)
 
   for (const exitId of exitIds) {
-    const path = buildInboundTransitPath(line, entryUnitId, exitId, unitMap)
+    // BFS 최단 인접 경로 — DFS 물류순서 슬라이스는 backtrack 순서를 경로로 오인해
+    // 역주행·비인접 점프가 생길 수 있음 (중간 유닛에서 출발하는 테스트 자재에서 발생)
+    const path = bfsPath(entryUnitId, exitId, unitMap, {
+      forSimulationPlan: true,
+      forbidOutPorts: true,
+      conveyorLineOnly: true,
+    })
     if (path && path.length > 1) {
       const exit = unitMap.get(exitId)!
       return {
@@ -820,6 +826,21 @@ export function planInboundLoadPath(
       targetExitId: null,
       pathUnitIds: [],
       message: `${unitDisplayCode(entry)} → ${destLabel} 경로 없음`,
+    }
+  }
+
+  // 흐름 목적지(분기·회전·종료점)가 없는 짧은 라인 폴백 —
+  // 투입점에 연동된 IN 포트가 있으면 포트를 목적지로 사용
+  // (직선 투입 → IN포트 → STK 회수 구성: 자재가 포트에 도착해 반송 대기)
+  const entryLinkedInPort = findLinkedInPortAtExit(line, entryUnitId)
+  if (entryLinkedInPort) {
+    return {
+      entryUnitId,
+      routingUnitId: null,
+      targetStkId: null,
+      targetExitId: entryLinkedInPort.id,
+      pathUnitIds: [entryUnitId, entryLinkedInPort.id],
+      message: `${unitDisplayCode(entry)} → ${unitDisplayCode(entryLinkedInPort)} (IN 포트)`,
     }
   }
 
@@ -1569,6 +1590,9 @@ export function isLoadFullyDischarged(
 ): boolean {
   if (load.pathUnitIds.length === 0) return false
   if (load.complete) {
+    // IN 포트에 남아 STK 회수를 기다리는 완료 자재는 물리적으로 아직 있는 것 —
+    // "출고 완료"로 간주하면 배치 상태가 조기에 complete로 넘어가 네온이 꺼짐
+    if (isCompletedLoadHoldingPort(load, unitMap)) return false
     return load.stepIndex >= load.pathUnitIds.length - 1
   }
   return shouldRetainMaterialAtDestination(load, unitMap)
@@ -1664,9 +1688,28 @@ function tryRerouteInboundLoadPath(
 }
 
 /** 라인에 계획된 모든 자재가 출고 완료됐는지 */
-export function areAllSimulationLoadsFinished(loads: PathSimulationLoad[]): boolean {
+export function areAllSimulationLoadsFinished(
+  loads: PathSimulationLoad[],
+  unitMap?: Map<string, ConveyorUnit>,
+): boolean {
   const active = loads.filter((load) => load.pathUnitIds.length > 0)
-  return active.length > 0 && active.every((load) => isLoadFullyDischarged(load))
+  return active.length > 0 && active.every((load) => isLoadFullyDischarged(load, unitMap))
+}
+
+/**
+ * 완료 자재가 IN 포트에 남아 회수 대기 중인지 — 셀 점유·CST 표시 유지.
+ * 포트 도착 complete 자재는 STK 회수(dischargeLoadAtPort) 전까지 물리적으로
+ * 포트에 존재하므로 후속 자재의 진입을 막아야 하고(겹침 방지), 화살표 네온도
+ * 계속 표시돼야 한다(일반 종료점의 "complete=출고 완료·소멸"과 다른 의미).
+ */
+export function isCompletedLoadHoldingPort(
+  load: PathSimulationLoad,
+  unitMap?: Map<string, ConveyorUnit>,
+): boolean {
+  if (!load.complete || load.pathUnitIds.length === 0) return false
+  const lastId = load.pathUnitIds[load.pathUnitIds.length - 1]
+  const unit = lastId ? unitMap?.get(lastId) : undefined
+  return unit != null && isPortUnit(unit)
 }
 
 /** 한 틱 진행 — 앞(다음) 모듈에 자재 없을 때만 전진, 겹침·비가동 시 대기 */
@@ -1844,7 +1887,9 @@ export function advanceSimulationLoads(
     for (let otherIndex = 0; otherIndex < next.length; otherIndex += 1) {
       if (otherIndex === index) continue
       const other = next[otherIndex]!
-      if (!other.released || other.complete) continue
+      if (!other.released) continue
+      // 완료 자재도 IN 포트에서 회수 대기 중이면 점유 유지 — 후속 자재 겹침 방지
+      if (other.complete && !isCompletedLoadHoldingPort(other, unitMap)) continue
       const otherCurrent = posAt(otherIndex, next[otherIndex]!.stepIndex)
       if (otherCurrent !== to) continue
 
@@ -1988,14 +2033,19 @@ export function activeSimulationUnitIds(loads: PathSimulationLoad[]): string[] {
 /** CST On 표시 — 진행 중 자재 위치 (칸당 1 CST, 대기 자재 우선) */
 export function simulationCstUnitIds(
   loads: PathSimulationLoad[],
-  options?: { includeCompleted?: boolean },
+  options?: { includeCompleted?: boolean; unitMap?: Map<string, ConveyorUnit> },
 ): string[] {
   const includeCompleted = options?.includeCompleted ?? true
+  const unitMap = options?.unitMap
   const bestByUnit = new Map<string, PathSimulationLoad>()
 
   for (const load of dedupeSimulationLoadsById(loads)) {
     if (!load.released || load.pathUnitIds.length === 0) continue
-    if (!includeCompleted && load.complete) continue
+    // 포트에 남아 회수 대기 중인 완료 자재는 includeCompleted와 무관하게 항상 표시
+    // (일반 종료점의 "complete=출고 완료·소멸"과 달리 물리적으로 자재가 남아 있음)
+    if (!includeCompleted && load.complete && !isCompletedLoadHoldingPort(load, unitMap)) {
+      continue
+    }
     const step = Math.min(
       Math.max(0, load.stepIndex),
       load.pathUnitIds.length - 1,

@@ -140,8 +140,14 @@ function buildMultiPathPlan(
       selectedSourceUnitIds,
       { destinationUnitIdByEntry: inboundDestinationByEntryId },
     )
-    if (primary.loads.length === 0) return null
-    return primary
+    // 유닛에 올려둔 테스트 자재도 함께 출발 — 위치→종료점 경로 병합
+    const testMaterials = planMultiTestMaterialLoadPaths(activeLine)
+    const merged =
+      testMaterials.loads.length > 0
+        ? mergeMultiPathSimulationPlans(primary, testMaterials)
+        : primary
+    if (merged.loads.length === 0) return null
+    return merged
   }
 
   if (selectedSourceUnitIds.length === 0) return null
@@ -551,7 +557,7 @@ export function usePathSimulation(
       if (continuousInputActiveRef.current) return false
       const sessionIds = sessionLoadIdsRef.current
       if (sessionIds.length === 0) {
-        return areAllSimulationLoadsFinished(nextLoads)
+        return areAllSimulationLoadsFinished(nextLoads, unitMapRef.current)
       }
       return sessionIds.every((loadId) => {
         const load = nextLoads.find((item) => item.id === loadId)
@@ -1299,20 +1305,23 @@ export function usePathSimulation(
     () => activeSimulationUnitIds(loads),
     [loads],
   )
+  const simulationUnitMap = useMemo(
+    () => new Map(simulationLine.units.map((unit) => [unit.id, unit])),
+    [simulationLine],
+  )
   const cstUnitIds = useMemo(() => {
     if (status === 'complete') return []
     // 경로 점등 애니메이션 중에만 숨김 — 일시정지(paused)에서는 자재 유지
     if (status === 'revealing' && !finalHoldActive) return []
 
     const includeCompleted = status === 'endHold' || endHoldActive
-    const fromCst = simulationCstUnitIds(loads, { includeCompleted })
+    const fromCst = simulationCstUnitIds(loads, {
+      includeCompleted,
+      unitMap: simulationUnitMap,
+    })
     const active = activeSimulationUnitIds(loads)
     return [...new Set([...fromCst, ...active])]
-  }, [endHoldActive, finalHoldActive, loads, status])
-  const simulationUnitMap = useMemo(
-    () => new Map(simulationLine.units.map((unit) => [unit.id, unit])),
-    [simulationLine],
-  )
+  }, [endHoldActive, finalHoldActive, loads, simulationUnitMap, status])
   const revealHighlightUnitIds = useMemo(() => {
     const revealVisualActive =
       finalHoldActive ||

@@ -61,12 +61,13 @@ export function usePortStorageSimulation(
 ) {
   const [portStates, setPortStates] = useState<Record<string, PortSimState>>({})
   const [storageStates, setStorageStates] = useState<Record<string, StorageSimState>>({})
-  const [session, setSession] = useState<TransferSession | null>(null)
+  // 창고별 동시 핸드셰이크 세션 — storageId 키 (스토커 2대 이상 각각 반송 가능)
+  const [sessions, setSessions] = useState<Record<string, TransferSession>>({})
   const [isRunning, setIsRunning] = useState(false)
 
   const portRef = useRef<Record<string, PortSimState>>({})
   const storageRef = useRef<Record<string, StorageSimState>>({})
-  const sessionRef = useRef<TransferSession | null>(null)
+  const sessionsRef = useRef<Record<string, TransferSession>>({})
   // 매 렌더마다 portStates와 동기화 — 맵 표시와 일치하는 상태를 모달에서 읽을 때 사용
   const portStatesRef = useRef<Record<string, PortSimState>>({})
   portStatesRef.current = portStates
@@ -107,8 +108,8 @@ export function usePortStorageSimulation(
     storageRef.current = storages
     setPortStates(ports)
     setStorageStates(storages)
-    sessionRef.current = null
-    setSession(null)
+    sessionsRef.current = {}
+    setSessions({})
   }, [buildInitial])
 
   const start = useCallback(() => {
@@ -117,9 +118,11 @@ export function usePortStorageSimulation(
   }, [init])
 
   const stop = useCallback(() => {
-    // 진행 중이던 핸드셰이크의 PIO 트랜잭션 정리
-    const txId = sessionRef.current?.pioTxId
-    if (txId) usePioStore.getState().completeTransaction(txId, 'error')
+    // 진행 중이던 모든 핸드셰이크의 PIO 트랜잭션 정리
+    const pio = usePioStore.getState()
+    for (const s of Object.values(sessionsRef.current)) {
+      if (s.pioTxId) pio.completeTransaction(s.pioTxId, 'error')
+    }
     setIsRunning(false)
     init()
   }, [init])
@@ -136,13 +139,15 @@ export function usePortStorageSimulation(
     if (simulationStatus === 'complete') return
 
     const cstSet = new Set(conveyorCstIds)
-    const sessionPortId = sessionRef.current?.portId
+    const sessionPortIds = new Set(
+      Object.values(sessionsRef.current).map((s) => s.portId),
+    )
 
     setPortStates((current) => {
       const next = { ...current }
       let changed = false
       for (const portId of Object.keys(current)) {
-        if (portId === sessionPortId) continue // 핸드쉐이크 중인 포트는 건드리지 않음
+        if (sessionPortIds.has(portId)) continue // 핸드쉐이크 중인 포트는 건드리지 않음
         // 포트 셀 자체에 자재가 있을 때만 ULD
         const hasMaterial = cstSet.has(portId)
         const expectedStatus: PortSimStatus = hasMaterial ? 'ULD' : 'LD'
@@ -180,6 +185,10 @@ export function usePortStorageSimulation(
   const startTransfer = useCallback((storageId: string, portId: string) => {
     const storage = storageRef.current[storageId]
     if (!storage || storage.status !== 'IDLE') return
+    // 이 창고가 이미 핸드셰이크 중이면 무시
+    if (sessionsRef.current[storageId]) return
+    // 해당 포트가 다른 창고와 핸드셰이크 중이면 무시
+    if (Object.values(sessionsRef.current).some((s) => s.portId === portId)) return
 
     const port = portRef.current[portId]
     if (!port) return
@@ -227,126 +236,128 @@ export function usePortStorageSimulation(
       direction: isOut ? 'out' : 'in',
       pioTxId,
     }
-    sessionRef.current = s
-    setSession(s)
+    const nextSessions = { ...sessionsRef.current, [storageId]: s }
+    sessionsRef.current = nextSessions
+    setSessions(nextSessions)
   }, [unitName, unitType])
 
   const tick = useCallback(() => {
-    const s = sessionRef.current
-    if (!s) return
+    const activeSessions = Object.values(sessionsRef.current)
+    if (activeSessions.length === 0) return
 
-    const { storageId, portId, phase, direction, pioTxId } = s
-    const storage = storageRef.current[storageId]
-    const port = portRef.current[portId]
-    if (!storage || !port) return
-
-    const isOut = direction === 'out'
-    let np = { ...portRef.current }
-    let ns = { ...storageRef.current }
-    let nextPhase = phase + 1
+    // 모든 세션을 같은 틱에 진행 — 세션끼리는 서로 다른 창고·포트라 충돌 없음
+    const np = { ...portRef.current }
+    const ns = { ...storageRef.current }
+    const nextSessions: Record<string, TransferSession> = {}
     const pio = usePioStore.getState()
 
-    /** 핸드쉐이크 중단 — 포트/스토커 원상 복귀 */
-    const abort = () => {
-      np[portId] = { ...port, status: port.hasCst ? 'ULD' : 'LD' }
-      ns[storageId] = { ...storage, status: 'IDLE' }
-      nextPhase = -1
-      sessionRef.current = null
-      setSession(null)
-      if (pioTxId) {
-        pio.completeTransaction(
-          pioTxId,
-          'error',
-          phase === 0 ? 'S1_WAIT' : 'S2_TRANSFER',
-        )
-      }
-    }
+    for (const s of activeSessions) {
+      const { storageId, portId, phase, direction, pioTxId } = s
+      const storage = ns[storageId]
+      const port = np[portId]
+      if (!storage || !port) continue
 
-    switch (phase) {
-      case 0: // Storage=TR → 포트 조건 재확인 후 READY 신호
-        // 회수: 포트 자재 필요 · 출고: 포트가 비어 있어야 함
-        if (isOut ? port.hasCst : !port.hasCst) { abort(); break }
-        np[portId] = { ...port, status: 'READY' }
-        if (pioTxId)
-          pio.addEdgesNow(pioTxId, [
-            { signal: isOut ? 'LD' : 'ULD', side: 'passive', value: 0 },
-            { signal: 'READY', side: 'passive', value: 1 },
-          ])
-        break
-      case 1: // Port=READY → Storage: BUSY
-        ns[storageId] = { ...storage, status: 'BUSY' }
-        if (pioTxId)
-          pio.addEdgesNow(pioTxId, [
-            { signal: 'TR', side: 'active', value: 0 },
-            { signal: 'BUSY', side: 'active', value: 1 },
-          ])
-        break
-      case 2: // Storage=BUSY → Port: BUSY
-        np[portId] = { ...port, status: 'BUSY' }
-        if (pioTxId)
-          pio.addEdgesNow(pioTxId, [
-            { signal: 'READY', side: 'passive', value: 0 },
-            { signal: 'BUSY', side: 'passive', value: 1 },
-          ])
-        break
-      case 3: // 자재 이동 — 최종 확인 후 방향별 반영
-        if (isOut ? port.hasCst : !port.hasCst) { abort(); break }
-        if (isOut) {
-          // 출고: 창고 → 포트로 자재 이동, 슬롯 -1
-          np[portId] = { ...port, status: 'ULD', hasCst: true }
-          ns[storageId] = {
-            ...storage,
-            status: 'COMPLETE',
-            hasCst: false,
-            filledSlots: Math.max(0, storage.filledSlots - 1),
-          }
-          // 경로 시뮬에 포트→앞 CV→종료점 반송 load 투입
-          onPortOutboundRef.current?.(portId)
-        } else {
-          // 회수: 포트 → 창고로 자재 이동, 슬롯 +1
-          np[portId] = { ...port, status: 'LD', hasCst: false }
-          ns[storageId] = {
-            ...storage,
-            status: 'COMPLETE',
-            hasCst: true,
-            filledSlots: storage.filledSlots + 1,
-          }
-          // 경로 시뮬에서 포트 자재 로드 제거
-          onPortDischargeRef.current?.(portId)
-        }
-        if (pioTxId)
-          pio.addEdgesNow(pioTxId, [
-            { signal: 'BUSY', side: 'active', value: 0 },
-            { signal: 'COMPLETE', side: 'active', value: 1 },
-            { signal: 'BUSY', side: 'passive', value: 0 },
-            { signal: isOut ? 'ULD' : 'LD', side: 'passive', value: 1 },
-          ])
-        break
-      case 4: // Storage=COMPLETE → IDLE, 완료
-        ns[storageId] = { ...storage, status: 'IDLE', hasCst: false }
+      const isOut = direction === 'out'
+      let nextPhase = phase + 1
+
+      /** 핸드쉐이크 중단 — 포트/스토커 원상 복귀 */
+      const abort = () => {
+        np[portId] = { ...port, status: port.hasCst ? 'ULD' : 'LD' }
+        ns[storageId] = { ...storage, status: 'IDLE' }
         nextPhase = -1
-        sessionRef.current = null
-        setSession(null)
         if (pioTxId) {
-          pio.addEdgesNow(pioTxId, [
-            { signal: 'COMPLETE', side: 'active', value: 0 },
-            { signal: 'IDLE', side: 'active', value: 1 },
-          ])
-          pio.completeTransaction(pioTxId, 'complete')
+          pio.completeTransaction(
+            pioTxId,
+            'error',
+            phase === 0 ? 'S1_WAIT' : 'S2_TRANSFER',
+          )
         }
-        break
+      }
+
+      switch (phase) {
+        case 0: // Storage=TR → 포트 조건 재확인 후 READY 신호
+          // 회수: 포트 자재 필요 · 출고: 포트가 비어 있어야 함
+          if (isOut ? port.hasCst : !port.hasCst) { abort(); break }
+          np[portId] = { ...port, status: 'READY' }
+          if (pioTxId)
+            pio.addEdgesNow(pioTxId, [
+              { signal: isOut ? 'LD' : 'ULD', side: 'passive', value: 0 },
+              { signal: 'READY', side: 'passive', value: 1 },
+            ])
+          break
+        case 1: // Port=READY → Storage: BUSY
+          ns[storageId] = { ...storage, status: 'BUSY' }
+          if (pioTxId)
+            pio.addEdgesNow(pioTxId, [
+              { signal: 'TR', side: 'active', value: 0 },
+              { signal: 'BUSY', side: 'active', value: 1 },
+            ])
+          break
+        case 2: // Storage=BUSY → Port: BUSY
+          np[portId] = { ...port, status: 'BUSY' }
+          if (pioTxId)
+            pio.addEdgesNow(pioTxId, [
+              { signal: 'READY', side: 'passive', value: 0 },
+              { signal: 'BUSY', side: 'passive', value: 1 },
+            ])
+          break
+        case 3: // 자재 이동 — 최종 확인 후 방향별 반영
+          if (isOut ? port.hasCst : !port.hasCst) { abort(); break }
+          if (isOut) {
+            // 출고: 창고 → 포트로 자재 이동, 슬롯 -1
+            np[portId] = { ...port, status: 'ULD', hasCst: true }
+            ns[storageId] = {
+              ...storage,
+              status: 'COMPLETE',
+              hasCst: false,
+              filledSlots: Math.max(0, storage.filledSlots - 1),
+            }
+            // 경로 시뮬에 포트→앞 CV→종료점 반송 load 투입
+            onPortOutboundRef.current?.(portId)
+          } else {
+            // 회수: 포트 → 창고로 자재 이동, 슬롯 +1
+            np[portId] = { ...port, status: 'LD', hasCst: false }
+            ns[storageId] = {
+              ...storage,
+              status: 'COMPLETE',
+              hasCst: true,
+              filledSlots: storage.filledSlots + 1,
+            }
+            // 경로 시뮬에서 포트 자재 로드 제거
+            onPortDischargeRef.current?.(portId)
+          }
+          if (pioTxId)
+            pio.addEdgesNow(pioTxId, [
+              { signal: 'BUSY', side: 'active', value: 0 },
+              { signal: 'COMPLETE', side: 'active', value: 1 },
+              { signal: 'BUSY', side: 'passive', value: 0 },
+              { signal: isOut ? 'ULD' : 'LD', side: 'passive', value: 1 },
+            ])
+          break
+        case 4: // Storage=COMPLETE → IDLE, 완료
+          ns[storageId] = { ...storage, status: 'IDLE', hasCst: false }
+          nextPhase = -1
+          if (pioTxId) {
+            pio.addEdgesNow(pioTxId, [
+              { signal: 'COMPLETE', side: 'active', value: 0 },
+              { signal: 'IDLE', side: 'active', value: 1 },
+            ])
+            pio.completeTransaction(pioTxId, 'complete')
+          }
+          break
+      }
+
+      if (nextPhase >= 0) {
+        nextSessions[storageId] = { ...s, phase: nextPhase }
+      }
     }
 
     portRef.current = np
     storageRef.current = ns
     setPortStates(np)
     setStorageStates(ns)
-
-    if (nextPhase >= 0) {
-      const next = { ...s, phase: nextPhase }
-      sessionRef.current = next
-      setSession(next)
-    }
+    sessionsRef.current = nextSessions
+    setSessions(nextSessions)
   }, [])
 
   useEffect(() => {
@@ -358,7 +369,7 @@ export function usePortStorageSimulation(
   return {
     portStates,
     storageStates,
-    session,
+    sessions,
     isRunning,
     start,
     stop,
