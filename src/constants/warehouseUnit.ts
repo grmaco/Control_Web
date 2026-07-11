@@ -6,6 +6,11 @@ import type {
 
 export const WAREHOUSE_FOOTPRINT_SIZE = 3
 
+/** 가로(폭) 칸 수 — 최소값이자 기본값. 세로(깊이)는 항상 WAREHOUSE_FOOTPRINT_SIZE 고정 */
+export const WAREHOUSE_MIN_WIDTH_CELLS = WAREHOUSE_FOOTPRINT_SIZE
+export const WAREHOUSE_MAX_WIDTH_CELLS = 8
+export const DEFAULT_WAREHOUSE_WIDTH_CELLS = WAREHOUSE_FOOTPRINT_SIZE
+
 export const WAREHOUSE_SHAPES: StorageShape[] = ['flat', 'vertical']
 
 export const WAREHOUSE_ROBOT_COUNTS: StorageRobotCount[] = ['01', '02']

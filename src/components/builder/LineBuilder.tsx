@@ -31,7 +31,7 @@ import {
   moveUnitsInLine,
   canMoveUnitsInLine,
   removeUnitFromLine,
-  rotateUnit,
+  rotateUnitInLine,
   showsRotation,
   updateUnitInLine,
 } from '../../utils/units'
@@ -356,11 +356,10 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
 
   const handleRotate = useCallback(
     async (unitId: string) => {
-      const unit = draft.units.find((u) => u.id === unitId)
-      if (!unit) return
-      const rotation = rotateUnit(unit)
-      if (rotation === null) return
-      const next = updateUnitInLine(draft, unitId, { rotation })
+      // 적재창고처럼 가로≠세로 유닛은 회전 후 풋프린트 충돌·경계 검사를 거침
+      // (다른 유닛은 회전해도 풋프린트가 안 바뀌어 사실상 항상 통과)
+      const next = rotateUnitInLine(draft, unitId)
+      if (!next) return
       await persist(next)
     },
     [draft, persist],

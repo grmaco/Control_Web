@@ -13,9 +13,11 @@ import {
 import {
   computeLineStats,
   isAutoEnabled,
+  isLinePoweredLocally,
   isSafetyOk,
   resolveCurrentStatus,
 } from '../../utils/monitorStats'
+import { updateUnitsStatusInLine } from '../../utils/units'
 import { AlarmHistoryPanel } from './AlarmHistoryPanel'
 import { BufferStoragePanel } from './BufferStoragePanel'
 import { LineMinimapPanel } from './LineMinimapPanel'
@@ -40,8 +42,9 @@ export function MonitorDashboard({
 }: MonitorDashboardProps) {
   const etherCatConnected = useMonitorStore((s) => s.etherCatConnected)
   const toggleEtherCat = useMonitorStore((s) => s.toggleEtherCat)
-  const toggleAllPower = useMonitorStore((s) => s.toggleAllPower)
+  const setAllPower = useMonitorStore((s) => s.setAllPower)
   const setAllAutoRun = useMonitorStore((s) => s.setAllAutoRun)
+  const stopAllAutoRun = useMonitorStore((s) => s.stopAllAutoRun)
   const getLineControl = useMonitorStore((s) => s.getLineControl)
   const lineControls = useMonitorStore((s) => s.lineControls)
   const unitRuntimeAll = useSemiCnvStore((s) => s.unitRuntime)
@@ -49,6 +52,7 @@ export function MonitorDashboard({
   const lineRuntimeAll = useSemiCnvStore((s) => s.lineRuntime)
   const ioStatusAll = useSemiCnvStore((s) => s.ioStatus)
   const logApplication = useConveyorStore((s) => s.logApplication)
+  const saveLine = useConveyorStore((s) => s.saveLine)
 
   const lineComm = useLineCommStatus(line)
   const commByLineId = useLineCommStatuses(lines)
@@ -75,8 +79,19 @@ export function MonitorDashboard({
     [line, unitRuntime, lrt],
   )
   const safetyOk = isSafetyOk(etherCatConnected, stats)
-  const autoEnabled = isAutoEnabled(safetyOk, control.powerOn, stats)
-  const currentStatus = resolveCurrentStatus(stats, control.autoRun, control.powerOn)
+
+  // 전체 유닛이 모두 Power On일 때 파란불 — V3 미연결 시 라인 플래그가 아니라 유닛 실제 상태로 판정
+  const allPowerOn = useMemo(() => {
+    if (!lrt) return isLinePoweredLocally(line.units)
+    const rts = line.units
+      .map((u) => unitRuntime[u.id])
+      .filter((rt): rt is NonNullable<typeof rt> => rt != null)
+    if (rts.length === 0) return false
+    return rts.every((rt) => rt.power === 'On')
+  }, [lrt, line.units, unitRuntime])
+
+  const autoEnabled = isAutoEnabled(safetyOk, allPowerOn, stats)
+  const currentStatus = resolveCurrentStatus(stats, control.autoRun, allPowerOn)
 
   const statsByLineId = useMemo(
     () =>
@@ -110,7 +125,7 @@ export function MonitorDashboard({
           const comm = commByLineId[item.id] ?? null
           const lrt2 = getLineRuntimeForLine(item, lineRuntimeAll, comm)
           const scopedRt = filterUnitRuntimeForLine(item, unitRuntimeAll, comm)
-          if (!lrt2) return [item.id, lineControls[item.id]?.powerOn ?? false]
+          if (!lrt2) return [item.id, isLinePoweredLocally(item.units)]
           const rts = item.units
             .map((u) => scopedRt[u.id])
             .filter((rt): rt is NonNullable<typeof rt> => rt != null)
@@ -118,18 +133,8 @@ export function MonitorDashboard({
           return [item.id, rts.every((rt) => rt.power === 'On')]
         }),
       ),
-    [commByLineId, lineControls, lineRuntimeAll, lines, unitRuntimeAll],
+    [commByLineId, lineRuntimeAll, lines, unitRuntimeAll],
   )
-
-  // 전체 유닛이 모두 Power On일 때 파란불
-  const allPowerOn = useMemo(() => {
-    if (!lrt) return control.powerOn
-    const rts = line.units
-      .map((u) => unitRuntime[u.id])
-      .filter((rt): rt is NonNullable<typeof rt> => rt != null)
-    if (rts.length === 0) return false
-    return rts.every((rt) => rt.power === 'On')
-  }, [lrt, control.powerOn, line.units, unitRuntime])
 
   const allCvsAreAuto = useMemo(() => {
     const rts = line.units
@@ -183,8 +188,14 @@ export function MonitorDashboard({
                 lineId: line.id,
               })
             } else {
-              // 로컬 토글 (V3 미연결)
+              // 로컬 토글 (V3 미연결) — 점검 상태 유닛을 가동 상태로 전환
               setAllAutoRun(line.id)
+              const maintenanceIds = line.units
+                .filter((u) => u.status === 'maintenance')
+                .map((u) => u.id)
+              if (maintenanceIds.length > 0) {
+                void saveLine(updateUnitsStatusInLine(line, maintenanceIds, 'running'))
+              }
               void logApplication({
                 title: 'Button Click',
                 comment: 'HOME: All Auto Run (local)',
@@ -210,6 +221,7 @@ export function MonitorDashboard({
           safetyOk={safetyOk}
           autoEnabled={autoEnabled}
           currentStatus={currentStatus}
+          stats={stats}
         />
       )}
 
@@ -293,8 +305,21 @@ export function MonitorDashboard({
                 type="button"
                 onClick={() => {
                   setPowerSelectPopupOpen(false)
-                  useSemiCnvStore.getState().sendCommand('all_power_on')
-                  void logApplication({ title: 'Button Click', comment: 'HOME: All Power ON', lineId: line.id })
+                  const isLive = useSemiCnvStore.getState().isLive
+                  if (isLive) {
+                    useSemiCnvStore.getState().sendCommand('all_power_on')
+                  } else {
+                    setAllPower(line.id, true)
+                    const idleIds = line.units.filter((u) => u.status === 'idle').map((u) => u.id)
+                    if (idleIds.length > 0) {
+                      void saveLine(updateUnitsStatusInLine(line, idleIds, 'maintenance'))
+                    }
+                  }
+                  void logApplication({
+                    title: 'Button Click',
+                    comment: `HOME: All Power ON${isLive ? '' : ' (local)'}`,
+                    lineId: line.id,
+                  })
                 }}
                 className="flex-1 rounded border border-blue-600 bg-blue-700 py-2.5 text-sm font-semibold text-white hover:bg-blue-600"
               >
@@ -304,8 +329,23 @@ export function MonitorDashboard({
                 type="button"
                 onClick={() => {
                   setPowerSelectPopupOpen(false)
-                  useSemiCnvStore.getState().sendCommand('all_power_off')
-                  void logApplication({ title: 'Button Click', comment: 'HOME: All Power OFF', lineId: line.id })
+                  const isLive = useSemiCnvStore.getState().isLive
+                  if (isLive) {
+                    useSemiCnvStore.getState().sendCommand('all_power_off')
+                  } else {
+                    setAllPower(line.id, false)
+                    const maintenanceIds = line.units
+                      .filter((u) => u.status === 'maintenance')
+                      .map((u) => u.id)
+                    if (maintenanceIds.length > 0) {
+                      void saveLine(updateUnitsStatusInLine(line, maintenanceIds, 'idle'))
+                    }
+                  }
+                  void logApplication({
+                    title: 'Button Click',
+                    comment: `HOME: All Power OFF${isLive ? '' : ' (local)'}`,
+                    lineId: line.id,
+                  })
                 }}
                 className="flex-1 rounded border border-slate-500 bg-slate-700 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-600"
               >
@@ -344,9 +384,23 @@ export function MonitorDashboard({
                 type="button"
                 onClick={() => {
                   setAutoStopPopupOpen(false)
-                  useSemiCnvStore.getState().sendCommand('all_auto_stop')
-                  setAllAutoRun(line.id)
-                  void logApplication({ title: 'Button Click', comment: 'HOME: All Auto Stop', lineId: line.id })
+                  const isLive = useSemiCnvStore.getState().isLive
+                  if (isLive) {
+                    useSemiCnvStore.getState().sendCommand('all_auto_stop')
+                  } else {
+                    stopAllAutoRun(line.id)
+                    const runningIds = line.units
+                      .filter((u) => u.status === 'running')
+                      .map((u) => u.id)
+                    if (runningIds.length > 0) {
+                      void saveLine(updateUnitsStatusInLine(line, runningIds, 'maintenance'))
+                    }
+                  }
+                  void logApplication({
+                    title: 'Button Click',
+                    comment: `HOME: All Auto Stop${isLive ? '' : ' (local)'}`,
+                    lineId: line.id,
+                  })
                 }}
                 className="flex-1 rounded border border-red-600/70 bg-red-900/50 py-2.5 text-sm font-semibold text-red-200 hover:bg-red-800/60"
               >

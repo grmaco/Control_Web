@@ -103,6 +103,15 @@ export function isAutoEnabled(
   return safetyOk && powerOn && stats.totalUnits > 0
 }
 
+/**
+ * 로컬 모드(V3 미연결) 전원 판정 — 라인 레벨 플래그가 아니라 유닛 실제 상태 기준.
+ * 유닛이 하나라도 있고 전부 idle이 아니면(빌더에서 수동으로 running 등을 지정한 경우 포함)
+ * Power ON으로 간주한다.
+ */
+export function isLinePoweredLocally(units: ConveyorUnit[]): boolean {
+  return units.length > 0 && units.every((u) => u.status !== 'idle')
+}
+
 export function flowModeLabel(autoRun: boolean, powerOn: boolean): string {
   if (!powerOn) return 'Power Off'
   return autoRun ? 'Auto' : 'Manual'

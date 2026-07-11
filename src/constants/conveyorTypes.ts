@@ -24,6 +24,7 @@ import {
   DEFAULT_WAREHOUSE_MAINTENANCE_AREA,
   DEFAULT_WAREHOUSE_ROBOT_COUNT,
   DEFAULT_WAREHOUSE_SHAPE,
+  DEFAULT_WAREHOUSE_WIDTH_CELLS,
   warehouseMaintenanceAreaLabel,
   warehouseShapeLabel,
 } from './warehouseUnit'
@@ -77,9 +78,9 @@ const TYPE_META: Record<
     description: 'IN/OUT 방향 · 레시피 · 연동 유닛(OHT/STK/AGV)',
   },
   storage: {
-    showsRotation: false,
+    showsRotation: true,
     isDualModule: false,
-    description: '3×3 정사각 · 형상 · ROBOT 수량 · 유지보수 영역',
+    description: '3(세로 고정)×가로 가변(최소 3) · 90° 회전 · 형상 · ROBOT 수량 · 유지보수 영역',
   },
 }
 
@@ -176,6 +177,7 @@ export function normalizeUnit(
       storageShape: null,
       storageRobotCount: null,
       storageMaintenanceArea: null,
+      storageWidthCells: null,
       testMaterial: unit.testMaterial ?? 0,
       flowRole: unit.flowRole ?? null,
     }
@@ -193,6 +195,7 @@ export function normalizeUnit(
       storageRobotCount: unit.storageRobotCount ?? DEFAULT_WAREHOUSE_ROBOT_COUNT,
       storageMaintenanceArea:
         unit.storageMaintenanceArea ?? DEFAULT_WAREHOUSE_MAINTENANCE_AREA,
+      storageWidthCells: unit.storageWidthCells ?? DEFAULT_WAREHOUSE_WIDTH_CELLS,
       testMaterial: unit.testMaterial ?? 0,
       flowRole: null,
     }
@@ -208,6 +211,7 @@ export function normalizeUnit(
     storageShape: null,
     storageRobotCount: null,
     storageMaintenanceArea: null,
+    storageWidthCells: null,
     testMaterial: unit.testMaterial ?? 0,
     flowRole: unit.flowRole ?? null,
   }

@@ -59,7 +59,9 @@ interface MonitorState {
   toggleHideModuleNames: () => void
   toggleEtherCat: () => void
   toggleAllPower: (lineId: string) => void
+  setAllPower: (lineId: string, powerOn: boolean) => void
   setAllAutoRun: (lineId: string) => void
+  stopAllAutoRun: (lineId: string) => void
   getLineControl: (lineId: string) => LineControlState
 }
 
@@ -255,11 +257,37 @@ export const useMonitorStore = create<MonitorState>((set, get) => ({
     })
   },
 
+  setAllPower: (lineId, powerOn) => {
+    const current = get().getLineControl(lineId)
+    const lineControls = {
+      ...get().lineControls,
+      [lineId]: { ...current, powerOn },
+    }
+    set({ lineControls })
+    persist({
+      ...snapshot(get()),
+      lineControls,
+    })
+  },
+
   setAllAutoRun: (lineId) => {
     const current = get().getLineControl(lineId)
     const lineControls = {
       ...get().lineControls,
       [lineId]: { ...current, autoRun: true, powerOn: true },
+    }
+    set({ lineControls })
+    persist({
+      ...snapshot(get()),
+      lineControls,
+    })
+  },
+
+  stopAllAutoRun: (lineId) => {
+    const current = get().getLineControl(lineId)
+    const lineControls = {
+      ...get().lineControls,
+      [lineId]: { ...current, autoRun: false },
     }
     set({ lineControls })
     persist({

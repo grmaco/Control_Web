@@ -17,6 +17,7 @@ import {
 import { getUnitFootprint, footprintBorderClasses, isUnitAnchor } from '../../utils/unitFootprint'
 import { lineLayoutSignature } from '../../utils/lineLayoutSignature'
 import { buildUnitLabelLines, LABEL_LINE_HEIGHT } from '../../utils/monitorLabel'
+import { turnFlowRotationSign, turnRelativeAngleDegrees } from '../../utils/turnArc'
 import { unitShowsMinimapMaterial } from '../../utils/unitMaterial'
 import { MinimapFlowArrow, MinimapPortFallback, MinimapStorageLabel } from './MinimapFlowArrow'
 import { FlowCalloutOverlay, FLOW_CALLOUT_PANEL_CLASS, FLOW_UNIT_PEEK_HIT_CLASS } from './FlowCalloutLayer'
@@ -62,6 +63,8 @@ interface LineStatusGridProps {
   simulationInputIntervalSec?: number
   simulationTransitIntervalSec?: number
   simulationDischargeIntervalSec?: number
+  /** 회전각별 실측 회전 시간(초) — 회전판 애니메이션 속도 동기화 */
+  simulationTurnTransitSec?: { 90: number; 180: number; 270: number }
   /** 경로 시뮬레이션 — 계획 경로 하이라이트 */
   simulationPathUnitIds?: string[]
   /** 콜아웃 드래그 중 맵 패닝 잠금 */
@@ -185,6 +188,7 @@ export function LineStatusGrid({
   simulationInputIntervalSec,
   simulationTransitIntervalSec,
   simulationDischargeIntervalSec,
+  simulationTurnTransitSec,
   simulationPathUnitIds = [],
   onCalloutPanLockChange,
   calloutDeselectToken = 0,
@@ -588,19 +592,45 @@ export function LineStatusGrid({
                 uid={`${unit.id}-${gridX}-${gridY}`}
               />
             )}
-            {useTurnSvg && unit && (
-              <TurnConveyorCell
-                width={spanWidth}
-                height={spanHeight}
-                status={unit.status}
-                rotation={unit.rotation ?? 0}
-                flowInDir={flow?.inDir ?? null}
-                flowOutDir={flow?.outDir ?? null}
-                isRunning={unit.status === 'running'}
-                uid={`${unit.id}-${gridX}-${gridY}`}
-                isJunction={unit.type === 'junction'}
-              />
-            )}
+            {useTurnSvg && unit && (() => {
+              // 시뮬 중 회전판 각도 — 자재 탑승 시 0°→회전각, 배출 후 각도→0° 복귀
+              // (진입 차단 로직 turnReturnDwells와 동일한 회전각별 시간으로 동기화)
+              let simPlateAngleDeg: number | null = null
+              let simPlateDurationSec = simulationTransitIntervalSec ?? 0.5
+              if (
+                unit.type === 'turn' &&
+                simulationInProgress &&
+                flow?.inDir &&
+                flow?.outDir
+              ) {
+                const rel = turnRelativeAngleDegrees(flow.inDir, flow.outDir)
+                if (rel > 0) {
+                  const sign = turnFlowRotationSign(flow.inDir, flow.outDir) ?? 1
+                  simPlateAngleDeg = showSimMaterial ? sign * rel : 0
+                  if (
+                    simulationTurnTransitSec &&
+                    (rel === 90 || rel === 180 || rel === 270)
+                  ) {
+                    simPlateDurationSec = simulationTurnTransitSec[rel]
+                  }
+                }
+              }
+              return (
+                <TurnConveyorCell
+                  width={spanWidth}
+                  height={spanHeight}
+                  status={unit.status}
+                  rotation={unit.rotation ?? 0}
+                  flowInDir={flow?.inDir ?? null}
+                  flowOutDir={flow?.outDir ?? null}
+                  isRunning={unit.status === 'running'}
+                  uid={`${unit.id}-${gridX}-${gridY}`}
+                  isJunction={unit.type === 'junction'}
+                  simPlateAngleDeg={simPlateAngleDeg}
+                  simPlateDurationSec={simPlateDurationSec}
+                />
+              )
+            })()}
             {useTurnSvg && unit && showSimMaterial ? (
               <div
                 className="pointer-events-none absolute inset-1 z-[8] rounded-sm ring-2 ring-cyan-300 shadow-[0_0_10px_rgba(34,211,238,0.75)]"
@@ -624,6 +654,8 @@ export function LineStatusGrid({
                     ? (storageSimStates[unit.id]!.filledSlots)
                     : (warehouseFillCounts[unit.id] ?? 0)
                 }
+                footprintCols={footprint?.cols}
+                footprintRows={footprint?.rows}
               />
             )}
             {/* 창고 시뮬 COMPLETE 파란박스 */}

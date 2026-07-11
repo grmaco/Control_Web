@@ -82,6 +82,11 @@ export interface ConveyorUnit {
   storageShape: StorageShape | null
   storageRobotCount: StorageRobotCount | null
   storageMaintenanceArea: StorageMaintenanceArea | null
+  /**
+   * type === 'storage' 전용 — 가로 칸 수(최소 3, 기본 3). 세로는 항상 3 고정.
+   * null이면 기본값(3) 사용. 90° 회전 시 실제 배치 폭/깊이가 서로 바뀐다.
+   */
+  storageWidthCells: number | null
   /** 테스트용 — HOME 미니맵 자재(CST) 네온 표시 */
   testMaterial: TestMaterialFlag
   createdAt: string

@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import type { ConveyorStatus } from '../../types/conveyor'
 import { oppositeFlowDir, unitTravelDir, type FlowDir } from '../../utils/flowDirection'
 import { isValidTurnThrough, turnFlowRotationSign } from '../../utils/turnArc'
@@ -334,6 +335,14 @@ interface TurnConveyorCellProps {
   isRunning?: boolean
   uid: string
   isJunction?: boolean
+  /**
+   * 시뮬레이션 중 회전판 목표 각도(부호=회전 방향). null이 아니면 무한 롤러
+   * 모션 대신 CSS transition으로 회전판이 실제 물류처럼 동작:
+   * 자재 탑승 시 0°→각도로 회전, 배출 후 각도→0°로 복귀.
+   */
+  simPlateAngleDeg?: number | null
+  /** 회전판 회전·복귀 소요 시간(초) — 시뮬 회전각별 시간과 동일 */
+  simPlateDurationSec?: number
 }
 
 export function TurnConveyorCell({
@@ -346,6 +355,8 @@ export function TurnConveyorCell({
   isRunning = false,
   uid,
   isJunction = false,
+  simPlateAngleDeg = null,
+  simPlateDurationSec,
 }: TurnConveyorCellProps) {
   if (isJunction) {
     return (
@@ -366,6 +377,18 @@ export function TurnConveyorCell({
   const cfg = COLORS[status]
   const motion = resolveTurnMotion(flowInDir, flowOutDir)
   const openingDirs = resolveOpeningDirs(rotation, flowInDir, flowOutDir)
+
+  // 시뮬 회전판 모드 — 무한 롤러 모션 대신 목표 각도로 회전/복귀
+  const simPlateMode = simPlateAngleDeg != null
+  const simPlateStyle: CSSProperties | undefined = simPlateMode
+    ? {
+        transform: `rotate(${simPlateAngleDeg}deg)`,
+        transformOrigin: `${CX}px ${CY}px`,
+        transformBox: 'view-box',
+        transition: `transform ${Math.max(0.2, simPlateDurationSec ?? 1)}s linear`,
+        willChange: 'transform',
+      }
+    : undefined
 
   const rollerThickness = 4.5
   const rollerGap = 4
@@ -432,7 +455,7 @@ export function TurnConveyorCell({
 
       <g clipPath={`url(#${clipId})`}>
         <circle cx={CX} cy={CY} r={R_INNER} fill={cfg.ringInner} />
-        <g>
+        <g style={simPlateStyle}>
           {rollerPositions.map((x, i) => (
             <rect
               key={i}
@@ -445,7 +468,7 @@ export function TurnConveyorCell({
             />
           ))}
 
-          {isRunning && motion.kind === 'arc' && motion.rotateSign != null && (
+          {!simPlateMode && isRunning && motion.kind === 'arc' && motion.rotateSign != null && (
             <animateTransform
               attributeName="transform"
               type="rotate"
@@ -456,7 +479,7 @@ export function TurnConveyorCell({
             />
           )}
 
-          {isRunning && motion.kind === 'linear' && linearAnim && (
+          {!simPlateMode && isRunning && motion.kind === 'linear' && linearAnim && (
             <animateTransform
               attributeName="transform"
               type="translate"
@@ -467,7 +490,7 @@ export function TurnConveyorCell({
             />
           )}
 
-          {isRunning && motion.kind === 'default' && (
+          {!simPlateMode && isRunning && motion.kind === 'default' && (
             <animateTransform
               attributeName="transform"
               type="rotate"

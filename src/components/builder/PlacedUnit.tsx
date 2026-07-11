@@ -149,6 +149,8 @@ export function PlacedUnit({
           height={spanHeight}
           status={unit.status}
           uid={`builder-${unit.id}`}
+          footprintCols={footprint.cols}
+          footprintRows={footprint.rows}
         />
       )}
       {flowRole && showLabels && (

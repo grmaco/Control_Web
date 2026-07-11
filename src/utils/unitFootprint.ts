@@ -12,10 +12,22 @@ export interface GridCellCoord {
   gridY: number
 }
 
+/** 적재창고 가로 칸 수 — 최소·기본 3 (세로는 항상 3 고정) */
+export function storageWidthOf(unit: ConveyorUnit): number {
+  return Math.max(WAREHOUSE_FOOTPRINT_SIZE, unit.storageWidthCells ?? WAREHOUSE_FOOTPRINT_SIZE)
+}
+
 export function getUnitFootprint(unitOrType: ConveyorUnit | ConveyorType): UnitFootprint {
-  const type = typeof unitOrType === 'string' ? unitOrType : unitOrType.type
+  const isUnit = typeof unitOrType !== 'string'
+  const type = isUnit ? unitOrType.type : unitOrType
   if (isStorage(type)) {
-    return { cols: WAREHOUSE_FOOTPRINT_SIZE, rows: WAREHOUSE_FOOTPRINT_SIZE }
+    const width = isUnit ? storageWidthOf(unitOrType) : WAREHOUSE_FOOTPRINT_SIZE
+    const rotation = isUnit ? unitOrType.rotation : 0
+    // 90°/270° 회전 시 가로·세로가 뒤바뀜 — 세로(깊이)는 항상 WAREHOUSE_FOOTPRINT_SIZE 고정
+    const rotated = rotation === 90 || rotation === 270
+    return rotated
+      ? { cols: WAREHOUSE_FOOTPRINT_SIZE, rows: width }
+      : { cols: width, rows: WAREHOUSE_FOOTPRINT_SIZE }
   }
   return { cols: 1, rows: 1 }
 }

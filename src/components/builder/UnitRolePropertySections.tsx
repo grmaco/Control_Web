@@ -27,7 +27,12 @@ import {
   syncFlowRoleUnitRole,
   canSelectInterfaceUnit,
 } from '../../utils/unitPropertyHelpers'
-import { updateUnitInLine } from '../../utils/units'
+import { resizeStorageWidthInLine, updateUnitInLine } from '../../utils/units'
+import { storageWidthOf } from '../../utils/unitFootprint'
+import {
+  WAREHOUSE_FOOTPRINT_SIZE,
+  WAREHOUSE_MAX_WIDTH_CELLS,
+} from '../../constants/warehouseUnit'
 import { outboundPathLabelForPort } from '../../utils/outboundFlow'
 
 interface RoleSectionsProps {
@@ -197,6 +202,12 @@ export function StkRoleSection({ line, unit, onChange }: RoleSectionsProps) {
   }
 
   const loadRate = computeStkLoadRate(unit)
+  const widthCells = storageWidthOf(unit)
+
+  const applyWidth = (value: number) => {
+    const next = resizeStorageWidthInLine(line, unit.id, value)
+    if (next) onChange(next)
+  }
 
   return (
     <div className="space-y-2 rounded-md border border-sky-900/50 bg-sky-950/20 p-3">
@@ -209,6 +220,23 @@ export function StkRoleSection({ line, unit, onChange }: RoleSectionsProps) {
         />
         STK 활성
       </label>
+      <div>
+        <label className="mb-1 block text-xs text-slate-400">
+          가로 칸 수 (세로 {WAREHOUSE_FOOTPRINT_SIZE} 고정)
+        </label>
+        <input
+          type="number"
+          min={WAREHOUSE_FOOTPRINT_SIZE}
+          max={WAREHOUSE_MAX_WIDTH_CELLS}
+          value={widthCells}
+          onChange={(e) => applyWidth(Number(e.target.value) || WAREHOUSE_FOOTPRINT_SIZE)}
+          className="w-full rounded-md border border-slate-700 bg-slate-800 px-2 py-1.5 text-sm"
+        />
+        <p className="mt-1 text-xs text-slate-500">
+          최소 {WAREHOUSE_FOOTPRINT_SIZE}칸 · 늘어날수록 내부 선반도 함께 늘어납니다.
+          공간이 부족하면 적용되지 않습니다.
+        </p>
+      </div>
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="mb-1 block text-xs text-slate-400">capacity</label>

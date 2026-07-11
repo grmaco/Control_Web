@@ -6,10 +6,11 @@ import { LineStatusGrid } from './LineStatusGrid'
 export function LineMinimapPanel({ line }: { line: ConveyorLine }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerSize, setContainerSize] = useState({ width: 0, height: 0 })
-  const [ohtOnly, setOhtOnly] = useState(false)
+  const [ohtOnly, setOhtOnly] = useState(true)
 
   const viewport = useMemo(() => getLineViewport(line), [line])
   const hasOht = (line.ohtRails?.length ?? 0) > 0 || (line.ohtUnits?.length ?? 0) > 0
+  const showOhtView = ohtOnly && hasOht
 
   useEffect(() => {
     const element = containerRef.current
@@ -37,14 +38,14 @@ export function LineMinimapPanel({ line }: { line: ConveyorLine }) {
     <div className="flex min-h-[280px] flex-col rounded border border-slate-700 bg-slate-900/80 px-2 pt-2 pb-1">
       <div className="flex items-center justify-between px-1">
         <h3 className="text-xs font-semibold tracking-wide text-slate-400">
-          {ohtOnly ? 'OHT MINIMAP' : 'LINE MINIMAP'}
+          {showOhtView ? 'OHT MINIMAP' : 'LINE MINIMAP'}
         </h3>
         {hasOht ? (
           <button
             type="button"
             onClick={() => setOhtOnly((v) => !v)}
             className={`rounded px-2 py-0.5 text-[10px] font-medium transition-colors ${
-              ohtOnly
+              showOhtView
                 ? 'bg-cyan-600 text-white'
                 : 'border border-slate-600 text-slate-400 hover:bg-slate-800'
             }`}
@@ -66,8 +67,8 @@ export function LineMinimapPanel({ line }: { line: ConveyorLine }) {
             viewport={viewport}
             cellSize={cellSize}
             showLabels={false}
-            showFlowArrows={!ohtOnly && line.units.length > 0}
-            showOhtRails={ohtOnly}
+            showFlowArrows={!showOhtView && line.units.length > 0}
+            showOhtRails={showOhtView}
           />
         ) : null}
       </div>

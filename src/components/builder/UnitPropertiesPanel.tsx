@@ -28,7 +28,6 @@ import {
   PORT_RECIPES,
 } from '../../constants/port'
 import {
-  WAREHOUSE_FOOTPRINT_SIZE,
   WAREHOUSE_MAINTENANCE_AREAS,
   WAREHOUSE_ROBOT_COUNTS,
   WAREHOUSE_SHAPES,
@@ -36,6 +35,7 @@ import {
   warehouseShapeLabel,
 } from '../../constants/warehouseUnit'
 import { updateUnitInLine, updateUnitsStatusInLine, updateUnitsTestMaterialInLine } from '../../utils/units'
+import { getUnitFootprint } from '../../utils/unitFootprint'
 import { formatFlowRoleLabel } from '../../utils/flowEntries'
 import { getTurnOpenings } from '../../utils/turnArc'
 import { RolePropertySections } from './UnitRolePropertySections'
@@ -470,7 +470,10 @@ export function UnitPropertiesPanel({
           </div>
 
           <div className="rounded-md border border-orange-900/50 bg-orange-950/30 px-3 py-2 text-xs text-orange-200/90">
-            {WAREHOUSE_FOOTPRINT_SIZE}×{WAREHOUSE_FOOTPRINT_SIZE} 정사각형(9칸)을 차지합니다.
+            {(() => {
+              const fp = getUnitFootprint(unit)
+              return `${fp.cols}×${fp.rows} (${fp.cols * fp.rows}칸)을 차지합니다.`
+            })()}
           </div>
         </>
       ) : null}
@@ -555,8 +558,8 @@ export function UnitPropertiesPanel({
         ) : isStorage ? (
           <>
             <p>
-              점유: {WAREHOUSE_FOOTPRINT_SIZE}×{WAREHOUSE_FOOTPRINT_SIZE} (
-              {WAREHOUSE_FOOTPRINT_SIZE * WAREHOUSE_FOOTPRINT_SIZE}칸)
+              점유: {getUnitFootprint(unit).cols}×{getUnitFootprint(unit).rows} (
+              {getUnitFootprint(unit).cols * getUnitFootprint(unit).rows}칸)
             </p>
             <p>
               형상:{' '}

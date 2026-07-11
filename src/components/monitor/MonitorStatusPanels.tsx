@@ -4,6 +4,7 @@ import {
   autoConditionValueClass,
   currentStatusValueClass,
   type CurrentStatusMode,
+  type LineMonitorStats,
   safetyConditionValueClass,
 } from '../../utils/monitorStats'
 
@@ -130,13 +131,15 @@ function StatusPanel({
   title,
   value,
   valueClass,
-  checks,
+  subValue,
+  checks = [],
   icon,
 }: {
   title: string
   value: string
   valueClass: string
-  checks: string[]
+  subValue?: ReactNode
+  checks?: string[]
   icon: ReactNode
 }) {
   return (
@@ -145,15 +148,40 @@ function StatusPanel({
         <div className="min-w-0 flex-1">
           <h3 className="text-xs font-semibold tracking-wide text-slate-400">{title}</h3>
           <p className={`mt-3 text-2xl font-bold ${valueClass}`}>{value}</p>
-          <ul className="mt-3 space-y-1 text-xs text-slate-500">
-            {checks.map((check) => (
-              <li key={check}>{check}</li>
-            ))}
-          </ul>
+          {subValue}
+          {checks.length > 0 && (
+            <ul className="mt-3 space-y-1 text-xs text-slate-500">
+              {checks.map((check) => (
+                <li key={check}>{check}</li>
+              ))}
+            </ul>
+          )}
         </div>
         <div className="mr-8 shrink-0">{icon}</div>
       </div>
     </div>
+  )
+}
+
+/** 가동률(%) — 전체 유닛 대비 running 상태 비율. 100대 규모에서 CURRENT STATUS 단어 하나로
+ * 뭉개지는 정보(몇 %가 실제 가동 중인지)를 보완한다. */
+function utilizationValueClass(pct: number): string {
+  if (pct >= 80) return 'text-blue-400'
+  if (pct >= 40) return 'text-amber-400'
+  return 'text-red-400'
+}
+
+function UtilizationSubValue({ stats }: { stats: LineMonitorStats }) {
+  const pct =
+    stats.totalUnits > 0 ? Math.round((stats.autoUnits / stats.totalUnits) * 100) : 0
+
+  return (
+    <p className="mt-3 text-xs text-slate-400">
+      가동률{' '}
+      <span className={`font-semibold ${utilizationValueClass(pct)}`}>{pct}%</span>
+      {' '}({stats.autoUnits}/{stats.totalUnits}) · 점검 {stats.manualUnits} · 대기{' '}
+      {stats.idleUnits} · 오류 {stats.errorUnits}
+    </p>
   )
 }
 
@@ -164,11 +192,13 @@ export function MonitorStatusPanels({
   safetyOk: safetyOkFallback,
   autoEnabled: autoEnabledFallback,
   currentStatus: currentStatusFallback,
+  stats,
 }: {
   ioStatus?: SemiCnvIOStatus | null
   safetyOk: boolean
   autoEnabled: boolean
   currentStatus: CurrentStatusMode
+  stats: LineMonitorStats
 }) {
   const safetyOk           = ioStatus != null ? ioStatus.safetyOk        : safetyOkFallback
   const autoEnabled        = ioStatus != null ? ioStatus.autoConditionOk : autoEnabledFallback
@@ -194,7 +224,7 @@ export function MonitorStatusPanels({
         title="CURRENT STATUS"
         value={currentStatusLabel}
         valueClass={currentStatusValueClass(currentStatusLabel)}
-        checks={['RUN Check, IN/OUT Mode Check']}
+        subValue={<UtilizationSubValue stats={stats} />}
         icon={<CurrentStatusIcon status={currentStatusLabel} />}
       />
     </div>

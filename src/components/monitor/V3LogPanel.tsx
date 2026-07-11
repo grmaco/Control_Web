@@ -105,7 +105,8 @@ export function V3LogPanel({ logs, fullHeight = false, lineName }: Props) {
               {filtered.map((log) => (
                 <tr key={log.id} className="text-slate-200 hover:bg-slate-900/60">
                   <td className="whitespace-nowrap px-3 py-2 font-mono text-slate-400">
-                    {log.logTime.replace('T', ' ')}
+                    <span className="block">{log.logTime.slice(0, 10)}</span>
+                    <span className="block">{log.logTime.slice(11)}</span>
                   </td>
                   <td className="whitespace-nowrap px-3 py-2">{log.logType}</td>
                   <td className={`whitespace-nowrap px-3 py-2 font-medium ${levelClass(log.logLevel)}`}>

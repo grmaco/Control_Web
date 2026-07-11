@@ -39,6 +39,10 @@ interface StorageConveyorCellProps {
   uid: string
   /** 연속 투입 적재 슬롯 (0–48) */
   filledSlotCount?: number
+  /** 실제 배치 가로·세로 칸 수(회전 반영 후) — viewBox를 실제 렌더 비율과 정확히
+   * 맞춰 찌그러짐 없이 그리고, 가로 칸 수만큼 내부 랙(선반) 수도 비례해 늘어난다. */
+  footprintCols?: number
+  footprintRows?: number
 }
 
 export function StorageConveyorCell({
@@ -47,10 +51,15 @@ export function StorageConveyorCell({
   status,
   uid,
   filledSlotCount = 0,
+  footprintCols = 3,
+  footprintRows = 3,
 }: StorageConveyorCellProps) {
   const cfg = COLORS[status]
-  const W = 300
-  const H = 300
+  // 그리드 칸 1개 = 100 viewBox 유닛 — 실제 렌더 가로/세로 칸 수와 정확히 맞춰
+  // (회전으로 뒤바뀌어도) 찌그러지지 않고, 가로 칸이 늘수록 랙 개수도 늘어난다.
+  const CELL_UNIT = 100
+  const W = CELL_UNIT * Math.max(3, footprintCols)
+  const H = CELL_UNIT * Math.max(3, footprintRows)
 
   // ── 레이아웃 치수 ──────────────────────────────────────────
   const PILLAR = 16      // 기둥 두께
@@ -74,8 +83,8 @@ export function StorageConveyorCell({
   const RACK_BOT_T = AISLE_B + 4
   const RACK_BOT_B = INNER_B - 4
 
-  // 랙 개수 (가로 4개씩)
-  const N_RACKS = 4
+  // 랙 개수 — 가로 칸 수(footprintCols)에 비례해 늘어남 (3칸 기준 4개, 이후 +1칸당 +1개)
+  const N_RACKS = Math.max(3, footprintCols) + 1
   const RACK_GAP = 6
   const RACK_W = (INNER_W - RACK_GAP * (N_RACKS + 1)) / N_RACKS
   const N_SHELVES = 3   // 각 랙 내 선반 줄

@@ -8,6 +8,9 @@ import {
   DEFAULT_WAREHOUSE_MAINTENANCE_AREA,
   DEFAULT_WAREHOUSE_ROBOT_COUNT,
   DEFAULT_WAREHOUSE_SHAPE,
+  DEFAULT_WAREHOUSE_WIDTH_CELLS,
+  WAREHOUSE_FOOTPRINT_SIZE,
+  WAREHOUSE_MAX_WIDTH_CELLS,
 } from '../constants/warehouseUnit'
 import { isPort, isStorage, showsRotation } from '../constants/conveyorTypes'
 import type {
@@ -24,6 +27,7 @@ import {
   findUnitAtCell,
   getUnitFootprint,
   isFootprintAvailable,
+  storageWidthOf,
 } from './unitFootprint'
 
 export {
@@ -130,6 +134,7 @@ export function createUnit(
       storageShape: null,
       storageRobotCount: null,
       storageMaintenanceArea: null,
+      storageWidthCells: null,
     }
   }
 
@@ -144,6 +149,7 @@ export function createUnit(
       storageShape: DEFAULT_WAREHOUSE_SHAPE,
       storageRobotCount: DEFAULT_WAREHOUSE_ROBOT_COUNT,
       storageMaintenanceArea: DEFAULT_WAREHOUSE_MAINTENANCE_AREA,
+      storageWidthCells: DEFAULT_WAREHOUSE_WIDTH_CELLS,
     }
   }
 
@@ -157,6 +163,7 @@ export function createUnit(
     storageShape: null,
     storageRobotCount: null,
     storageMaintenanceArea: null,
+    storageWidthCells: null,
   }
 }
 
@@ -433,6 +440,7 @@ export function updateUnitInLine(
       | 'storageShape'
       | 'storageRobotCount'
       | 'storageMaintenanceArea'
+      | 'storageWidthCells'
       | 'testMaterial'
       | 'flowRole'
       | 'code'
@@ -468,6 +476,7 @@ export function updateUnitInLine(
         storageShape: null,
         storageRobotCount: null,
         storageMaintenanceArea: null,
+        storageWidthCells: null,
       }
     } else if (nextType === 'storage') {
       next = {
@@ -484,6 +493,10 @@ export function updateUnitInLine(
           patch.storageMaintenanceArea ??
           u.storageMaintenanceArea ??
           DEFAULT_WAREHOUSE_MAINTENANCE_AREA,
+        storageWidthCells: Math.max(
+          WAREHOUSE_FOOTPRINT_SIZE,
+          patch.storageWidthCells ?? u.storageWidthCells ?? WAREHOUSE_FOOTPRINT_SIZE,
+        ),
       }
     } else {
       next = {
@@ -494,6 +507,7 @@ export function updateUnitInLine(
         storageShape: null,
         storageRobotCount: null,
         storageMaintenanceArea: null,
+        storageWidthCells: null,
       }
     }
 
@@ -554,6 +568,73 @@ export function updateUnitsTestMaterialInLine(
 export function rotateUnit(unit: ConveyorUnit): Rotation | null {
   if (!showsRotation(unit.type)) return null
   return ((unit.rotation + 90) % 360) as Rotation
+}
+
+/**
+ * 회전 적용 — 적재창고처럼 가로≠세로 유닛은 90° 회전 시 실제 배치 폭/깊이가
+ * 뒤바뀌므로, 회전 후 풋프린트가 그리드 안에 들어오고 다른 유닛과 겹치지
+ * 않는지 확인한 뒤에만 적용한다. 다른 유닛(항상 1×1이거나 정사각)은 회전해도
+ * 풋프린트가 바뀌지 않아 이 검사가 사실상 항상 통과한다.
+ */
+export function rotateUnitInLine(line: ConveyorLine, unitId: string): ConveyorLine | null {
+  const unit = line.units.find((u) => u.id === unitId)
+  if (!unit) return null
+  const rotation = rotateUnit(unit)
+  if (rotation === null) return null
+
+  const rotatedFootprint = getUnitFootprint({ ...unit, rotation })
+  if (
+    !isFootprintAvailable(
+      line.units,
+      unit.gridX,
+      unit.gridY,
+      rotatedFootprint,
+      line.gridSize.cols,
+      line.gridSize.rows,
+      unitId,
+    )
+  ) {
+    return null
+  }
+
+  return updateUnitInLine(line, unitId, { rotation })
+}
+
+/**
+ * 적재창고 가로 칸 수 변경 — 그리드 경계·다른 유닛과의 충돌을 확인한 뒤에만
+ * 적용한다(회전과 동일한 안전장치). 세로(깊이)는 항상 고정이라 검사 대상이
+ * 아니다. 최소 WAREHOUSE_FOOTPRINT_SIZE·최대 WAREHOUSE_MAX_WIDTH_CELLS로 clamp.
+ */
+export function resizeStorageWidthInLine(
+  line: ConveyorLine,
+  unitId: string,
+  widthCells: number,
+): ConveyorLine | null {
+  const unit = line.units.find((u) => u.id === unitId)
+  if (!unit || !isStorage(unit.type)) return null
+
+  const clamped = Math.min(
+    WAREHOUSE_MAX_WIDTH_CELLS,
+    Math.max(WAREHOUSE_FOOTPRINT_SIZE, Math.round(widthCells)),
+  )
+  if (clamped === storageWidthOf(unit)) return line
+
+  const nextFootprint = getUnitFootprint({ ...unit, storageWidthCells: clamped })
+  if (
+    !isFootprintAvailable(
+      line.units,
+      unit.gridX,
+      unit.gridY,
+      nextFootprint,
+      line.gridSize.cols,
+      line.gridSize.rows,
+      unitId,
+    )
+  ) {
+    return null
+  }
+
+  return updateUnitInLine(line, unitId, { storageWidthCells: clamped })
 }
 
 export function isCellOccupied(
