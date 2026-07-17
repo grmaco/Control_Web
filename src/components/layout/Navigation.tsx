@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useConveyorStore } from '../../store/useConveyorStore'
 
-type NavAccent = 'cyan' | 'teal' | 'amber' | 'violet' | 'sky' | 'rose'
-type NavIconName = 'home' | 'status' | 'alarm' | 'builder' | 'history' | 'chart'
+type NavAccent = 'cyan' | 'teal' | 'amber' | 'violet' | 'sky' | 'rose' | 'emerald'
+type NavIconName = 'home' | 'status' | 'alarm' | 'data' | 'builder' | 'history' | 'chart'
 
 const navItems: {
   to: string
@@ -15,6 +15,7 @@ const navItems: {
   { to: '/', label: '주화면', end: true, accent: 'cyan', icon: 'home' },
   { to: '/line-status', label: '라인 현황', accent: 'teal', icon: 'status' },
   { to: '/v3-alarms', label: '알람 리스트', accent: 'amber', icon: 'alarm' },
+  { to: '/protocols', label: '데이터', accent: 'emerald', icon: 'data' },
   { to: '/builder', label: '라인 빌더', accent: 'violet', icon: 'builder' },
   { to: '/history', label: '이력', accent: 'sky', icon: 'history' },
   { to: '/charts', label: '차트', accent: 'rose', icon: 'chart' },
@@ -48,6 +49,14 @@ function NavIcon({ name, className }: { name: NavIconName; className?: string })
             strokeLinejoin="round"
             d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0a3 3 0 11-6 0"
           />
+        </svg>
+      )
+    case 'data':
+      return (
+        <svg className={cn} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden>
+          <ellipse cx="12" cy="5.5" rx="7.5" ry="2.8" />
+          <path strokeLinecap="round" d="M4.5 5.5v6.5c0 1.55 3.36 2.8 7.5 2.8s7.5-1.25 7.5-2.8V5.5" />
+          <path strokeLinecap="round" d="M4.5 12v6.5c0 1.55 3.36 2.8 7.5 2.8s7.5-1.25 7.5-2.8V12" />
         </svg>
       )
     case 'builder':

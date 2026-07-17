@@ -17,11 +17,17 @@ export function V3EventTimeline() {
   const connectionState = useSemiCnvStore((s) => s.connectionState)
   const isLive = useSemiCnvStore((s) => s.isLive)
 
-  const events = useMemo(() => v3Logs.slice(-MAX_EVENTS), [v3Logs])
+  // v3Logs는 최신순(새 로그가 앞) — 앞에서 잘라야 "최근" N건이 된다
+  const events = useMemo(() => v3Logs.slice(0, MAX_EVENTS), [v3Logs])
 
   const range = useMemo(() => {
     if (events.length === 0) return null
-    const times = events.map((e) => new Date(e.receivedAt || e.logTime).getTime())
+    // 이벤트 실제 발생 시각(logTime) 우선 — 접속 직후 백로그가 한꺼번에 수신돼도
+    // receivedAt처럼 같은 초에 뭉치지 않고 실제 시간축에 펼쳐진다
+    const times = events.map((e) => {
+      const t = new Date(e.logTime).getTime()
+      return Number.isNaN(t) ? new Date(e.receivedAt).getTime() : t
+    })
     const min = Math.min(...times)
     const max = Math.max(...times)
     return { min, max: max === min ? min + 1000 : max, times }

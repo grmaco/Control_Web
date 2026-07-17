@@ -1,9 +1,11 @@
 import type { ConveyorLine } from '../types/conveyor'
 import type {
+  SemiCnvCstJourney,
   SemiCnvLineCommStatus,
   SemiCnvLineRuntime,
   SemiCnvLogEntry,
   SemiCnvIOStatus,
+  SemiCnvTrafficEntry,
   SemiCnvUnitRuntime,
 } from '../types/semicnv'
 import type { AlarmEntry } from './alarms'
@@ -78,6 +80,50 @@ export function filterV3LogsForLine(
   if (!siteId) return []
 
   return logs.filter((log) => log.siteId === siteId)
+}
+
+/** 선택 라인에 귀속된 V3 현장(Site) ID — 통신 기록 우선, 없으면 명시 매핑 */
+export function lineV3SiteId(
+  line: ConveyorLine,
+  comm: SemiCnvLineCommStatus | null,
+): string | null {
+  return comm?.siteId ?? line.semiCnvSiteId ?? null
+}
+
+/**
+ * 선택 라인 소속 CST 반송 이력만.
+ * 라인에 귀속된 site가 없으면(한 번도 V3에 연결된 적 없는 라인) 빈 목록 —
+ * 다른 라인의 V3 데이터가 미연결 라인에 표시되는 것을 막는다.
+ * 구버전 보존 데이터(siteId 없음)는 표시 유지 — 지우기 버튼으로 정리 가능.
+ */
+export function filterCstJourneysForLine(
+  line: ConveyorLine,
+  journeys: Record<string, SemiCnvCstJourney>,
+  comm: SemiCnvLineCommStatus | null,
+): SemiCnvCstJourney[] {
+  const siteId = lineV3SiteId(line, comm)
+  if (!siteId) return []
+  return Object.values(journeys).filter(
+    (j) =>
+      (j.siteId == null || j.siteId === siteId) &&
+      (line.semiCnvLineId == null || j.lineId === line.semiCnvLineId),
+  )
+}
+
+/**
+ * 선택 라인 소속 V3 송수신 트래픽만.
+ * 송신(tx) COMMAND는 전 연결에 브로드캐스트되므로 siteId가 없으면 모든 라인에 표시.
+ */
+export function filterV3TrafficForLine(
+  line: ConveyorLine,
+  traffic: SemiCnvTrafficEntry[],
+  comm: SemiCnvLineCommStatus | null,
+): SemiCnvTrafficEntry[] {
+  const siteId = lineV3SiteId(line, comm)
+  if (!siteId) return []
+  return traffic.filter(
+    (e) => e.siteId === siteId || (e.direction === 'tx' && e.siteId == null),
+  )
 }
 
 /** 선택 라인 V3 Online일 때만 IO 상태 반환 */

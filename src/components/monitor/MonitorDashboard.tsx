@@ -78,7 +78,7 @@ export function MonitorDashboard({
     () => computeLineStats(line, unitRuntime, lrt),
     [line, unitRuntime, lrt],
   )
-  const safetyOk = isSafetyOk(etherCatConnected, stats)
+  const safetyOk = isSafetyOk(etherCatConnected)
 
   // 전체 유닛이 모두 Power On일 때 파란불 — V3 미연결 시 라인 플래그가 아니라 유닛 실제 상태로 판정
   const allPowerOn = useMemo(() => {

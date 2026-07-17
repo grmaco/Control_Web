@@ -8,6 +8,7 @@ import { HistoryPage } from './pages/HistoryPage'
 import { HomePage } from './pages/HomePage'
 import { LineStatusPage } from './pages/LineStatusPage'
 import { LoginPage } from './pages/LoginPage'
+import { ProtocolReferencePage } from './pages/ProtocolReferencePage'
 import { V3AlarmReferencePage } from './pages/V3AlarmReferencePage'
 
 export default function App() {
@@ -20,6 +21,7 @@ export default function App() {
             <Route index element={<HomePage />} />
             <Route path="line-status" element={<LineStatusPage />} />
             <Route path="v3-alarms" element={<V3AlarmReferencePage />} />
+            <Route path="protocols" element={<ProtocolReferencePage />} />
             <Route path="cv-status" element={<CvStatusPage />} />
             <Route path="builder" element={<BuilderPage />} />
             <Route path="history" element={<HistoryPage />} />

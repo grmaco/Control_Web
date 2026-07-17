@@ -186,6 +186,13 @@ export interface OhtTarget {
   railNodeIds: string[]
   centerGridX: number
   centerGridY: number
+  /**
+   * 모듈의 물류 역할이 결정하는 OHT 작업 방향:
+   * - entry(투입점): OHT가 자재를 내려놓는(PLACE) 곳 — 적재 대차만 접근
+   * - exit(출고점): OHT가 자재를 집어가는(PICK) 곳 — 빈 대차만 접근
+   * - both: 역할 미지정 모듈 — 기존처럼 픽/플레이스 모두 허용
+   */
+  role: 'entry' | 'exit' | 'both'
 }
 
 function unitFootprintCells(unit: ConveyorUnit): Array<{ x: number; y: number }> {
@@ -237,6 +244,8 @@ export function resolveOhtTargets(line: ConveyorLine, graph: OhtRailGraph): OhtT
         railNodeIds: [...railNodeIds],
         centerGridX: unit.gridX + (fp.cols - 1) / 2,
         centerGridY: unit.gridY + (fp.rows - 1) / 2,
+        role:
+          unit.flowRole === 'entry' ? 'entry' : unit.flowRole === 'exit' ? 'exit' : 'both',
       })
     }
   }
@@ -435,6 +444,8 @@ export function initOhtVehicles(line: ConveyorLine, graph: OhtRailGraph): OhtVeh
 
 /**
  * 다음 목적지를 라운드로빈으로 골라 경로 설정.
+ * - 적재 상태 기반 목적지 필터: 빈 대차 → 출고점(PICK), 적재 대차 → 투입점(PLACE).
+ *   역할 미지정(both) 모듈은 양쪽 모두 허용 (기존 동작 유지).
  * - entryFromId 있음: 노드 기반 역주행 방지 (실제 이전 노드 차단)
  * - entryFromId 없음: forbidStartDir 방향 기반 역주행 방지 (레일 끝 배치 시 rotation 강제)
  * - 두 방법 모두 막히면 제한 없는 BFS로 폴백.
@@ -444,12 +455,16 @@ function assignNextTarget(
   graph: OhtRailGraph,
   targets: OhtTarget[],
 ): OhtVehicleState {
-  if (targets.length === 0 || vehicle.nodeId == null) {
+  // 적재 중이면 투입점(entry·both)에 PLACE, 빈 차면 출고점(exit·both)에서 PICK
+  const eligible = targets.filter((t) =>
+    vehicle.carrying ? t.role !== 'exit' : t.role !== 'entry',
+  )
+  if (eligible.length === 0 || vehicle.nodeId == null) {
     return { ...vehicle, phase: 'idle', path: [], pathIndex: 0, targetUnitId: null }
   }
-  for (let attempt = 0; attempt < targets.length; attempt += 1) {
-    const cursor = (vehicle.targetCursor + attempt) % targets.length
-    const target = targets[cursor]!
+  for (let attempt = 0; attempt < eligible.length; attempt += 1) {
+    const cursor = (vehicle.targetCursor + attempt) % eligible.length
+    const target = eligible[cursor]!
     const goalSet = new Set(target.railNodeIds)
 
     // 단방향 흐름 그래프 우선 — 레일 일방통행 강제
@@ -478,7 +493,7 @@ function assignNextTarget(
         // departGrid는 caller(interface 완료 시)가 설정 — 여기서 초기화하지 않음
         path,
         pathIndex: 0,
-        targetCursor: (cursor + 1) % targets.length,
+        targetCursor: (cursor + 1) % eligible.length,
       }
     }
   }

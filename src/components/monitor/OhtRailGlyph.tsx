@@ -222,11 +222,12 @@ function doubleBranchRPaths(w: number, h: number, rotation: number): string[] {
       ]
     } else {
       // rot=180: cell0(우)=N-S 직선 + N→internal-W 1/4호, cell1(좌)=W-E 직선 + S→W 1/4호
+      // 호는 개구부에서 레일과 접선(수직/수평)으로 만나야 함 — sweep 방향 주의
       return [
         `M ${w - r},0 L ${w - r},${h}`,
         `M 0,${r} L ${cs},${r}`,
-        `M ${w - r},0 A ${r},${r} 0 0 0 ${cs},${r}`,
-        `M ${r},${h} A ${r},${r} 0 0 1 0,${r}`,
+        `M ${w - r},0 A ${r},${r} 0 0 1 ${cs},${r}`,
+        `M ${r},${h} A ${r},${r} 0 0 0 0,${r}`,
       ]
     }
   } else {
@@ -235,20 +236,20 @@ function doubleBranchRPaths(w: number, h: number, rotation: number): string[] {
     const r = cs / 2
 
     if (rotation === 90) {
-      // rot=90: top cell = E-W 직선 + W→S 1/4호, bottom cell = N-S 직선 + E→S 1/4호
+      // rot=90: top cell = W-E 직선 + W→internal-S 1/4호, bottom cell = N-S 직선 + E→S 1/4호
       return [
         `M 0,${r} L ${w},${r}`,
         `M ${r},${cs} L ${r},${h}`,
-        `M 0,${r} A ${r},${r} 0 0 0 ${r},${cs}`,
-        `M ${w},${cs + r} A ${r},${r} 0 0 1 ${r},${h}`,
+        `M 0,${r} A ${r},${r} 0 0 1 ${r},${cs}`,
+        `M ${w},${cs + r} A ${r},${r} 0 0 0 ${r},${h}`,
       ]
     } else {
-      // rot=270: bottom cell = E-W 직선 + E→N 1/4호, top cell = N-S 직선 + W→N 1/4호
+      // rot=270: bottom cell = W-E 직선 + E→internal-N 1/4호, top cell = N-S 직선 + W→N 1/4호
       return [
         `M 0,${h - r} L ${w},${h - r}`,
         `M ${r},0 L ${r},${cs}`,
-        `M ${w},${h - r} A ${r},${r} 0 0 0 ${r},${cs}`,
-        `M 0,${r} A ${r},${r} 0 0 1 ${r},0`,
+        `M ${w},${h - r} A ${r},${r} 0 0 1 ${r},${cs}`,
+        `M 0,${r} A ${r},${r} 0 0 0 ${r},0`,
       ]
     }
   }
@@ -273,12 +274,12 @@ function doubleBranchLPaths(w: number, h: number, rotation: number): string[] {
         `M ${w - r},${h} A ${r},${r} 0 0 0 ${cs},${r}`,
       ]
     } else {
-      // rot=180: 왼 N-S + 오 W-E + N→E 호 + S→E 호
+      // rot=180: 왼 N-S 직선 + N→internal-E 호, 오 W-E 직선 + S→E 호
       return [
         `M ${cs},${r} L ${w},${r}`,
         `M ${r},0 L ${r},${h}`,
-        `M ${w - r},${h} A ${r},${r} 0 0 0 ${w},${r}`,
-        `M ${r},0 A ${r},${r} 0 0 1 ${cs},${r}`,
+        `M ${w - r},${h} A ${r},${r} 0 0 1 ${w},${r}`,
+        `M ${r},0 A ${r},${r} 0 0 0 ${cs},${r}`,
       ]
     }
   } else {
@@ -287,20 +288,20 @@ function doubleBranchLPaths(w: number, h: number, rotation: number): string[] {
     const r = cs / 2
 
     if (rotation === 90) {
-      // top cell: N-S 수직 + E→N 호 / bottom cell: E-W 수평 + W→S 호
-      return [
-        `M ${r},0 L ${r},${cs}`,
-        `M 0,${h - r} L ${w},${h - r}`,
-        `M ${w},${r} A ${r},${r} 0 0 0 ${r},0`,
-        `M 0,${h - r} A ${r},${r} 0 0 1 ${r},${cs}`,
-      ]
-    } else {
-      // rot=270: top cell: E-W 수평 + E→N 호 / bottom cell: N-S 수직 + W→S 호
+      // rot=90: top cell = N-S 직선 + E→N 호 / bottom cell = W-E 직선 + W→internal-N 호
       return [
         `M ${r},0 L ${r},${cs}`,
         `M 0,${h - r} L ${w},${h - r}`,
         `M ${w},${r} A ${r},${r} 0 0 1 ${r},0`,
         `M 0,${h - r} A ${r},${r} 0 0 0 ${r},${cs}`,
+      ]
+    } else {
+      // rot=270: top cell = W-E 직선 + E→internal-S 호 / bottom cell = N-S 직선 + W→S 호
+      return [
+        `M 0,${r} L ${w},${r}`,
+        `M ${r},${cs} L ${r},${h}`,
+        `M ${w},${r} A ${r},${r} 0 0 0 ${r},${cs}`,
+        `M 0,${cs + r} A ${r},${r} 0 0 1 ${r},${h}`,
       ]
     }
   }

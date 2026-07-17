@@ -38,11 +38,16 @@ export function computeLineStats(
 
     if (rt) {
       linkedUnits++
+      // 맵 색상(mapSemiCnvToConveyorStatus)과 동일 기준 — Auto 모드면 순간 정지(runStatus
+      // Stop, 자재 대기)여도 가동으로 센다. runStatus 기준으로 세면 화면은 파란 "가동"인데
+      // 가동률은 0%로 갈라진다.
       if (rt.alarm) {
         errorUnits++
+      } else if (rt.power === 'Off') {
+        idleUnits++
       } else if (rt.operationStatus === 'Manual') {
         manualUnits++
-      } else if (rt.runStatus === 'Run') {
+      } else if (rt.operationStatus === 'Auto') {
         autoUnits++
       } else {
         idleUnits++
@@ -55,8 +60,9 @@ export function computeLineStats(
     }
   }
 
-  // V3 LINE_STATUS — 가동 컨베이어 수 우선
-  if (lineRt) {
+  // V3 LINE_STATUS 요약은 유닛별 CONVEYOR_STATUS가 아직 없을 때만 사용 —
+  // 유닛별 데이터가 있으면 그쪽(맵과 동일 기준)이 우선
+  if (lineRt && linkedUnits === 0) {
     linkedUnits = totalUnits
     autoUnits = lineRt.runningConveyors
   }
@@ -88,11 +94,13 @@ export function resolveCurrentStatus(
   return 'Standby'
 }
 
-export function isSafetyOk(
-  etherCatConnected: boolean,
-  stats: LineMonitorStats,
-): boolean {
-  return etherCatConnected && stats.errorUnits === 0
+/**
+ * SAFETY CONDITION — 안전 회로(Main Power·EMO·EMS) 판정.
+ * 유닛 개별 알람은 설비 오류이지 안전 회로 이탈이 아니므로 여기 포함하지 않는다
+ * (오류는 AUTO CONDITION 차단 + CURRENT STATUS 'Error'로 표현).
+ */
+export function isSafetyOk(etherCatConnected: boolean): boolean {
+  return etherCatConnected
 }
 
 export function isAutoEnabled(
@@ -100,7 +108,8 @@ export function isAutoEnabled(
   powerOn: boolean,
   stats: LineMonitorStats,
 ): boolean {
-  return safetyOk && powerOn && stats.totalUnits > 0
+  // 활성 알람이 있으면 이상 복귀 전까지 Auto 재기동 불가
+  return safetyOk && powerOn && stats.totalUnits > 0 && stats.errorUnits === 0
 }
 
 /**

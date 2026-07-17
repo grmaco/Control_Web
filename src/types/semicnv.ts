@@ -237,6 +237,51 @@ export interface SemiCnvLogEntry {
   siteId?: string
 }
 
+/** CST 반송 여정 — CST_TRACKING/CONVEYOR_STATUS에서 집계 (localStorage 미저장) */
+export interface SemiCnvCstJourney {
+  cstId: string
+  /** V3 현장(Site) ID — 라인별 표시 스코핑용. 구버전 보존 데이터는 없을 수 있음 */
+  siteId?: string | null
+  /** V3 라인 ID */
+  lineId: number
+  /** 목적지 Conveyor.ID (0 = 미지정) */
+  destination: number
+  /** 최초 관측(투입) 시각 */
+  startAt: string
+  /** 투입점 Conveyor.ID */
+  entryConveyorId: number
+  /** 위치 변경 이력 (최초 위치 포함) */
+  hops: { conveyorId: number; at: string }[]
+  /** 목적지 도착 시각 (미도착 null) */
+  arrivedAt: string | null
+  /** 목적지 반출 시각 (대기 중/반송 중 null) */
+  departedAt: string | null
+  lastSeenAt: string
+  /** moving: 반송 중 · waiting: 목적지 대기 · done: 반출 완료 */
+  status: 'moving' | 'waiting' | 'done'
+  /**
+   * true = Web 접속 시점에 이미 목적지에 있던 CST — 실제 투입·도착 시각을 알 수 없어
+   * startAt/arrivedAt은 "최초 관측 시각"(하한값)일 뿐이다. UI는 투입/반송 소요를 표시하지 않는다.
+   */
+  incomplete?: boolean
+}
+
+/** V3 송수신 원본 트래픽 엔트리 — V3 데이터 조회 화면용 (localStorage 미저장) */
+export interface SemiCnvTrafficEntry {
+  id: string
+  /** rx: V3 → Web 수신 / tx: Web → V3 송신 */
+  direction: 'rx' | 'tx'
+  /** 메시지 타입 (COMMAND 포함) */
+  type: string
+  siteId: string | null
+  /** 메시지 자체 타임스탬프 (없으면 수신 시각) */
+  timestamp: string
+  /** 로컬 캡처 시각 */
+  capturedAt: string
+  /** 원본 JSON 전체 */
+  payload: unknown
+}
+
 export type SemiCnvMessage =
   | SemiCnvEnvelope<SemiCnvSiteConnectData>
   | SemiCnvEnvelope<SemiCnvConveyorStatusItem[]>

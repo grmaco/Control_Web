@@ -8,19 +8,23 @@ import {
   filterUnitAlarmsForLine,
   filterUnitRuntimeForLine,
   filterV3LogsForLine,
+  filterV3TrafficForLine,
 } from '../../utils/lineV3Scope'
 import { MonitorCanvas } from './MonitorCanvas'
 import { MonitorDashboard } from './MonitorDashboard'
 import { CvStatusPanel } from './CvStatusPanel'
+import { CstJourneyPanel } from './CstJourneyPanel'
 import { V3LogPanel } from './V3LogPanel'
 import { V3AlarmReferencePanel } from './V3AlarmReferencePanel'
+import { V3TrafficPanel } from './V3TrafficPanel'
 
-type Tab = 'canvas' | 'map' | 'cv' | 'v3log'
+type Tab = 'canvas' | 'map' | 'cv' | 'v3data' | 'v3log'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'canvas', label: '모니터링' },
   { key: 'map',    label: '설비 상태' },
   { key: 'cv',     label: 'CV 현황' },
+  { key: 'v3data', label: 'V3 데이터' },
   { key: 'v3log',  label: 'V3 이력' },
 ]
 
@@ -34,6 +38,8 @@ export function MonitorTabView({ line, lines, selectedLineId }: MonitorTabViewPr
   const [activeTab, setActiveTab] = useState<Tab>('canvas')
   const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
   const v3Logs = useSemiCnvStore((s) => s.v3Logs)
+  const v3Traffic = useSemiCnvStore((s) => s.v3Traffic)
+  const clearV3Traffic = useSemiCnvStore((s) => s.clearV3Traffic)
   const unitAlarms = useSemiCnvStore((s) => s.unitAlarms)
   const liveAlarms = useSemiCnvStore((s) => s.liveAlarms)
   const lineComm = useLineCommStatus(line)
@@ -52,6 +58,10 @@ export function MonitorTabView({ line, lines, selectedLineId }: MonitorTabViewPr
   const scopedV3Logs = useMemo(
     () => filterV3LogsForLine(line, v3Logs, lineComm),
     [line, v3Logs, lineComm],
+  )
+  const scopedV3Traffic = useMemo(
+    () => filterV3TrafficForLine(line, v3Traffic, lineComm),
+    [line, v3Traffic, lineComm],
   )
   const newLogCount = useMemo(() => scopedV3Logs.length, [scopedV3Logs])
 
@@ -108,8 +118,13 @@ export function MonitorTabView({ line, lines, selectedLineId }: MonitorTabViewPr
               liveAlarms={scopedLiveAlarms}
               selectedLine={line}
             />
+            <CstJourneyPanel line={line} />
             <V3AlarmReferencePanel activeOnlyMode scopeLine={line} lineComm={lineComm} />
           </div>
+        )}
+
+        {activeTab === 'v3data' && (
+          <V3TrafficPanel entries={scopedV3Traffic} onClear={clearV3Traffic} />
         )}
 
         {activeTab === 'v3log' && <V3LogPanel logs={scopedV3Logs} fullHeight lineName={line.name} />}

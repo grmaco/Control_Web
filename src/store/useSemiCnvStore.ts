@@ -1,8 +1,10 @@
 import { create } from 'zustand'
 import { DEFAULT_SEMICNV_SETTINGS } from '../constants/semicnv'
+import { STORAGE_KEYS } from '../constants/storage'
 import type { ConveyorStatus } from '../types/conveyor'
 import type {
   SemiCnvConnectionState,
+  SemiCnvCstJourney,
   SemiCnvIOStatus,
   SemiCnvLineCommRecord,
   SemiCnvLineRuntime,
@@ -10,8 +12,10 @@ import type {
   SemiCnvMonitorSettings,
   SemiCnvMessage,
   SemiCnvSiteStatus,
+  SemiCnvTrafficEntry,
   SemiCnvUnitRuntime,
 } from '../types/semicnv'
+import { updateCstJourneysFromMessage } from '../semicnv/cstJourney'
 import type { AlarmEntry } from '../utils/alarms'
 import {
   applySemiCnvMessage,
@@ -35,6 +39,57 @@ import { useConveyorStore } from './useConveyorStore'
 import { useMonitorStore } from './useMonitorStore'
 
 const V3_LOG_MAX = 2000
+const V3_TRAFFIC_MAX = 1000
+const JOURNEY_PERSIST_DELAY_MS = 3000
+
+/** 재접속해도 반송 이력이 유지되도록 localStorage 보존 */
+function readPersistedJourneys(): Record<string, SemiCnvCstJourney> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.cstJourneys)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    return parsed && typeof parsed === 'object'
+      ? (parsed as Record<string, SemiCnvCstJourney>)
+      : {}
+  } catch {
+    return {}
+  }
+}
+
+let journeyPersistTimer: ReturnType<typeof setTimeout> | null = null
+
+function persistJourneysThrottled(read: () => Record<string, SemiCnvCstJourney>): void {
+  if (journeyPersistTimer) return
+  journeyPersistTimer = setTimeout(() => {
+    journeyPersistTimer = null
+    try {
+      localStorage.setItem(STORAGE_KEYS.cstJourneys, JSON.stringify(read()))
+    } catch {
+      // 저장 실패(quota 등)는 무시 — 다음 변경 때 재시도
+    }
+  }, JOURNEY_PERSIST_DELAY_MS)
+}
+
+let trafficSeq = 0
+
+function newTrafficEntry(
+  direction: 'rx' | 'tx',
+  type: string,
+  siteId: string | null,
+  timestamp: string | undefined,
+  payload: unknown,
+): SemiCnvTrafficEntry {
+  const now = new Date().toISOString()
+  return {
+    id: `${direction}-${++trafficSeq}-${Date.now()}`,
+    direction,
+    type,
+    siteId,
+    timestamp: timestamp || now,
+    capturedAt: now,
+    payload,
+  }
+}
 
 interface SemiCnvState {
   settings: SemiCnvMonitorSettings
@@ -51,6 +106,10 @@ interface SemiCnvState {
   ioStatus: SemiCnvIOStatus | null
   liveAlarms: AlarmEntry[]
   v3Logs: SemiCnvLogEntry[]
+  /** V3 송수신 원본 트래픽 (최신순, 최대 V3_TRAFFIC_MAX건) */
+  v3Traffic: SemiCnvTrafficEntry[]
+  /** CST 반송 여정 집계 (cstId → 최신 여정) */
+  cstJourneys: Record<string, SemiCnvCstJourney>
   isLive: boolean
 
   configure: (settings: Partial<SemiCnvMonitorSettings>) => void
@@ -59,6 +118,8 @@ interface SemiCnvState {
   handleMessage: (message: SemiCnvMessage) => void
   refreshCommStale: () => void
   sendCommand: (cmd: string, extra?: Record<string, unknown>) => void
+  clearV3Traffic: () => void
+  clearCstJourneys: () => void
 }
 
 // url → 클라이언트 (라인별 다중 V3 연결 지원)
@@ -159,6 +220,21 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
   let commTrack: CommTrackState = createEmptyCommTrackState()
 
   const processMessage = (message: SemiCnvMessage, sourceUrl?: string) => {
+    // V3 데이터 조회용 — 가공 전 원본 그대로 보관 (HEARTBEAT 포함 전 타입)
+    set((s) => ({
+      v3Traffic: [
+        newTrafficEntry('rx', message.type, message.siteId ?? null, message.timestamp, message),
+        ...s.v3Traffic,
+      ].slice(0, V3_TRAFFIC_MAX),
+    }))
+
+    // CST 반송 여정 집계 (CV 현황 탭 — 투입→목적지 소요·대기 시간)
+    const journeyNext = updateCstJourneysFromMessage(get().cstJourneys, message)
+    if (journeyNext) {
+      set({ cstJourneys: journeyNext })
+      persistJourneysThrottled(() => get().cstJourneys)
+    }
+
     // LOG_EVENT는 applyBuffer와 무관 — 별도 처리 후 즉시 반환
     if (message.type === 'LOG_EVENT') {
       const d = message.data as import('../types/semicnv').SemiCnvLogEventData
@@ -268,6 +344,8 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
     ioStatus: null,
     liveAlarms: [],
     v3Logs: [],
+    v3Traffic: [],
+    cstJourneys: readPersistedJourneys(),
     isLive: false,
 
     configure: (partial) => {
@@ -372,8 +450,37 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
 
     sendCommand: (cmd, extra = {}) => {
       const payload = { data: { cmd, ...extra } }
+      // 송신도 트래픽 버퍼에 기록 — 실제 전송 프레임과 동일한 형태로 보관
+      set((s) => ({
+        v3Traffic: [
+          newTrafficEntry('tx', 'COMMAND', get().settings.siteId ?? null, undefined, {
+            type: 'COMMAND',
+            ...payload,
+          }),
+          ...s.v3Traffic,
+        ].slice(0, V3_TRAFFIC_MAX),
+      }))
       for (const c of clients.values()) {
         c.sendCommand(payload)
+      }
+    },
+
+    // 연결 해제(clearRuntime)에도 유지 — 통신 문제 분석용 블랙박스. 버튼으로만 비움.
+    clearV3Traffic: () => {
+      set({ v3Traffic: [] })
+    },
+
+    // 반송 이력도 연결 해제와 무관하게 유지 — 버튼으로만 비움
+    clearCstJourneys: () => {
+      if (journeyPersistTimer) {
+        clearTimeout(journeyPersistTimer)
+        journeyPersistTimer = null
+      }
+      set({ cstJourneys: {} })
+      try {
+        localStorage.removeItem(STORAGE_KEYS.cstJourneys)
+      } catch {
+        // 무시
       }
     },
   }
