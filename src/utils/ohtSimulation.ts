@@ -214,7 +214,15 @@ export function resolveOhtTargets(line: ConveyorLine, graph: OhtRailGraph): OhtT
     if (unit.status !== 'running') continue
     const railNodeIds = new Set<string>()
     for (const cell of unitFootprintCells(unit)) {
-      // 유닛 셀과 인접한 4방향 레일만 검사 (유닛 자체 셀 제외)
+      // 유닛 셀 위에 겹쳐 놓인 레일 — 모듈 바로 위에서 인터페이스 가능 (개구부 조건 불필요).
+      // 이걸 빼면 모듈 위에 배치된 OHT가 옆 노드까지 한 칸 지나쳤다가 모듈로
+      // 되돌아오는 시각적 역행이 생긴다.
+      const onCellRailId = graph.cellIndex.get(cellKey(cell.x, cell.y))
+      if (onCellRailId) {
+        const onCellAdj = graph.adjacency.get(onCellRailId) ?? []
+        if (onCellAdj.length > 0) railNodeIds.add(onCellRailId)
+      }
+      // 유닛 셀과 인접한 4방향 레일 검사
       const adjacentCells = [
         { cx: cell.x,     cy: cell.y - 1, dirToUnit: 'S' as OhtDir }, // 북쪽 레일 → 유닛이 남쪽
         { cx: cell.x,     cy: cell.y + 1, dirToUnit: 'N' as OhtDir }, // 남쪽 레일 → 유닛이 북쪽
@@ -459,9 +467,31 @@ function assignNextTarget(
   const eligible = targets.filter((t) =>
     vehicle.carrying ? t.role !== 'exit' : t.role !== 'entry',
   )
-  if (eligible.length === 0 || vehicle.nodeId == null) {
+  // 빈 대차는 내려놓을 곳(투입점·미지정)이 라인에 하나도 없으면 픽업하지 않는다 —
+  // 집고 나서 갈 곳이 없어 자재를 든 채 영영 멈추는 상황 방지 (출고점만 있는 라인)
+  const canDeliver = targets.some((t) => t.role !== 'exit')
+  if (eligible.length === 0 || vehicle.nodeId == null || (!vehicle.carrying && !canDeliver)) {
     return { ...vehicle, phase: 'idle', path: [], pathIndex: 0, targetUnitId: null }
   }
+  // 발밑 우선: 현재 노드에서 바로 인터페이스 가능한 모듈이 있으면 라운드로빈보다 먼저
+  // 그 모듈을 서비스한다. (BFS는 이 경우 빈 경로를 반환하는데, 이를 "도달 불가"로
+  // 오판해 건너뛰면 모듈 위에 배치된 대차가 한 칸 지나쳤다 돌아오거나 엉뚱한 곳으로
+  // 떠나는 버그가 된다.) 방금 인터페이스를 마친 유닛은 제외 — 제자리 픽↔플레이스 반복 방지.
+  const standingOn = eligible.find(
+    (t) => t.railNodeIds.includes(vehicle.nodeId!) && t.unitId !== vehicle.targetUnitId,
+  )
+  if (standingOn) {
+    return {
+      ...vehicle,
+      phase: 'moving',
+      targetUnitId: standingOn.unitId,
+      targetUnitCenter: { gridX: standingOn.centerGridX, gridY: standingOn.centerGridY },
+      path: [],
+      pathIndex: 0,
+      targetCursor: (eligible.indexOf(standingOn) + 1) % eligible.length,
+    }
+  }
+
   for (let attempt = 0; attempt < eligible.length; attempt += 1) {
     const cursor = (vehicle.targetCursor + attempt) % eligible.length
     const target = eligible[cursor]!

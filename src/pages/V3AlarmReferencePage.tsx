@@ -18,7 +18,7 @@ export function V3AlarmReferencePage() {
     <div className="flex min-h-[calc(100vh-8rem)] flex-col gap-4">
       <PageHeader
         title="알람 리스트"
-        subtitle="알람 코드·원인·조치 방법을 조회합니다. 왼쪽에서 라인·유닛별 현재 발생 알람을 확인할 수 있습니다."
+        subtitle="알람 코드·원인·조치 방법을 조회합니다."
         action={<SemiCnvConnectionBar />}
       />
 

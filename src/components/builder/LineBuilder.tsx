@@ -611,7 +611,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
 
         <section className="rounded-lg border border-slate-800 bg-slate-900 p-4">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm lg:mb-3">
-            <span className="max-w-[55%] truncate text-slate-300">{draft.name}</span>
+            <span className="max-w-[55%] truncate font-semibold text-slate-300">{draft.name}</span>
             <span className="text-xs text-slate-500 lg:text-sm">
               {viewport.cols}×{viewport.rows} · {draft.units.length}유닛
             </span>

@@ -76,7 +76,7 @@ interface LineSelectorPanelProps {
 export function LineSelectorPanel({ onCreateLine, selectOnly = false }: LineSelectorPanelProps) {
   if (selectOnly) {
     return (
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="w-full min-w-0 sm:w-80">
         <LineSelector selectOnly />
       </div>
     )
@@ -163,77 +163,141 @@ function LineSelectorPanelFull({ onCreateLine }: Pick<LineSelectorPanelProps, 'o
   }
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm text-slate-400">라인</span>
-        <LineSelector />
-        {selectedLine && (
-          <input
-            type="text"
-            value={draftName}
-            onChange={(e) => setDraftName(e.target.value)}
-            onBlur={() => commitRename()}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.currentTarget.blur()
-              }
-              if (e.key === 'Escape') {
-                setDraftName(selectedLine.name)
-                e.currentTarget.blur()
-              }
-            }}
-            placeholder="라인 이름"
-            className="app-input w-40 rounded-md px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-500"
-          />
-        )}
-        <button
-          type="button"
-          onClick={async () => {
-            const line = await createLine(`라인 ${Date.now().toString().slice(-4)}`)
-            void logApplication({
-              title: 'Button Click',
-              comment: `Line Create: ${line.name}`,
-              lineId: line.id,
-            })
-            onCreateLine?.()
-          }}
-          className="app-btn app-btn-secondary app-btn-sm"
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2">
+      <div className="flex w-full min-w-0 flex-col gap-1.5 sm:w-auto sm:contents">
+        <h3 className="shrink-0 text-sm font-medium text-slate-300 sm:mr-0">라인</h3>
+        <div
+          className={`grid w-full gap-2 sm:flex sm:w-auto sm:flex-wrap sm:items-center ${
+            selectedLine ? 'grid-cols-2' : 'grid-cols-1'
+          }`}
         >
-          + 새 라인
-        </button>
-        {selectedLine && (
+          <div className="min-w-0 sm:w-72">
+            <LineSelector />
+          </div>
+          {selectedLine && (
+            <div className="flex min-w-0 items-center gap-2 sm:contents">
+              <input
+                type="text"
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    void commitRename()
+                  }
+                  if (e.key === 'Escape') {
+                    setDraftName(selectedLine.name)
+                    e.currentTarget.blur()
+                  }
+                }}
+                placeholder="라인 이름"
+                title="라인 이름 입력 후 변경 버튼으로 적용"
+                className="app-input min-w-0 flex-1 rounded-md px-3 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 sm:w-36 sm:flex-none"
+              />
+              <button
+                type="button"
+                onClick={() => void commitRename()}
+                title="라인 이름 변경"
+                aria-label="라인 이름 변경"
+                className="app-btn app-btn-secondary app-btn-sm inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center p-0"
+              >
+                <svg
+                  className="h-4 w-4"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  aria-hidden
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"
+                  />
+                </svg>
+              </button>
+            </div>
+          )}
           <button
             type="button"
-            onClick={() => void handleDelete()}
-            className="app-btn app-btn-danger app-btn-sm"
+            onClick={async () => {
+              const line = await createLine(`라인 ${Date.now().toString().slice(-4)}`)
+              void logApplication({
+                title: 'Button Click',
+                comment: `Line Create: ${line.name}`,
+                lineId: line.id,
+              })
+              onCreateLine?.()
+            }}
+            className="app-btn app-btn-accent app-btn-sm w-full sm:w-auto"
           >
-            라인 삭제
+            라인 추가
           </button>
-        )}
+          {selectedLine && (
+            <button
+              type="button"
+              onClick={() => void handleDelete()}
+              className="app-btn app-btn-danger app-btn-sm w-full sm:w-auto"
+            >
+              라인 삭제
+            </button>
+          )}
+        </div>
       </div>
-      <div className="flex gap-2">
+      <span className="mx-0.5 hidden h-5 w-px bg-slate-700 sm:block" aria-hidden />
+      <div className="flex w-full justify-end gap-2 sm:w-auto">
         <button
           type="button"
           onClick={handleExport}
-          className="app-btn app-btn-secondary app-btn-sm"
+          title="내보내기"
+          aria-label="내보내기"
+          className="app-btn app-btn-secondary app-btn-sm inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center p-0"
         >
-          내보내기
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+            aria-hidden
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
+            />
+          </svg>
         </button>
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="app-btn app-btn-secondary app-btn-sm"
+          title="불러오기"
+          aria-label="불러오기"
+          className="app-btn app-btn-secondary app-btn-sm inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center p-0"
         >
-          불러오기
+          <svg
+            className="h-4 w-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+            aria-hidden
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3"
+            />
+          </svg>
         </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".json"
-          className="hidden"
-          onChange={handleImport}
-        />
       </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        className="hidden"
+        onChange={handleImport}
+      />
     </div>
   )
 }

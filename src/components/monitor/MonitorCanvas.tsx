@@ -21,6 +21,7 @@ import {
   lineWithAllPortsRunning,
   listNonRunningPorts,
   simulationCstUnitIds,
+  isCompletedLoadAwaitingOhtPickup,
 } from '../../utils/pathSimulation'
 import { unitTitle } from '../../constants/conveyorTypes'
 import { isCvUnit } from '../../utils/unitMaterial'
@@ -177,18 +178,45 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   // 컨베이어 시뮬 동시 실행 중일 때만 자재 유무 검사 — 없으면 OHT는 모듈 앞 대기
   const conveyorSimRunning =
     simulation.status !== 'idle' && simulation.status !== 'complete'
+  const ohtUnitMap = useMemo(
+    () => new Map(line.units.map((u) => [u.id, u])),
+    [line],
+  )
   const ohtHasMaterialAtUnit = useCallback(
     (unitId: string) =>
       simulation.loads.some((load) => {
-        if (!load.released || load.complete || load.pathUnitIds.length === 0) return false
+        if (!load.released || load.pathUnitIds.length === 0) return false
+        if (load.complete) {
+          // OHT 픽업을 기다리며 출고 유닛에 남아 있는 완료 자재도 픽업 대상
+          return (
+            isCompletedLoadAwaitingOhtPickup(load, ohtUnitMap) &&
+            load.pathUnitIds[load.pathUnitIds.length - 1] === unitId
+          )
+        }
         const step = Math.min(Math.max(0, load.stepIndex), load.pathUnitIds.length - 1)
         return load.pathUnitIds[step] === unitId
       }),
-    [simulation.loads],
+    [simulation.loads, ohtUnitMap],
   )
   const oht = useOhtSimulation(line, {
     hasMaterialAtUnit: conveyorSimRunning ? ohtHasMaterialAtUnit : undefined,
   })
+
+  // OHT 픽업 완료 → 컨베이어 시뮬에서 해당 유닛의 자재 제거 (자재가 OHT로 옮겨탐)
+  const prevOhtVehiclesRef = useRef(oht.vehicles)
+  useEffect(() => {
+    const prev = prevOhtVehiclesRef.current
+    prevOhtVehiclesRef.current = oht.vehicles
+    if (!conveyorSimRunning) return
+    const prevById = new Map(prev.map((v) => [v.id, v]))
+    for (const v of oht.vehicles) {
+      const p = prevById.get(v.id)
+      // 인터페이스 완료 순간: interfacing에서 벗어나며 carrying false→true = 픽업
+      if (p && p.phase === 'interfacing' && !p.carrying && v.carrying && p.targetUnitId) {
+        simulation.dischargeLoadAtPort(p.targetUnitId)
+      }
+    }
+  }, [oht.vehicles, conveyorSimRunning, simulation.dischargeLoadAtPort])
   const ohtMode = simMode === 'oht'
   const [ohtPoodleMode, setOhtPoodleMode] = useState(false)
   // 포트 ULD 감지용 — complete된 자재도 포함해야 포트 셀에 머문 자재가 ULD로 표시됨

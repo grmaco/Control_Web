@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+﻿import { useMemo, useState } from 'react'
 import { useTouchLayout } from '../../hooks/useTouchLayout'
 import type {
   ConveyorLine,
@@ -197,9 +197,24 @@ export function UnitPropertiesPanel({
 
         {showPropertyDetails ? (
           <>
-        <p className="text-sm text-slate-500">
-          유닛을 클릭해 선택하세요. 팔레트에서 그리드로 드래그해 배치할 수 있습니다.
-        </p>
+        {/* ── 빈 상태: 사용법 안내 ── */}
+        <div className="rounded border border-slate-800 bg-slate-950/50 p-3">
+          <p className="mb-2 text-sm font-medium text-slate-300">선택된 유닛 없음</p>
+          <ul className="space-y-1.5 text-xs text-slate-400">
+            <li className="flex items-center gap-2">
+              <span className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded border border-slate-700 bg-slate-800 px-1.5 font-mono text-[10px] text-slate-300">드래그</span>
+              팔레트 → 그리드로 유닛 배치
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded border border-slate-700 bg-slate-800 px-1.5 font-mono text-[10px] text-slate-300">클릭</span>
+              유닛 선택 → 여기서 속성 편집
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded border border-slate-700 bg-slate-800 px-1.5 font-mono text-[10px] text-slate-300">R</span>
+              선택한 유닛 90° 회전
+            </li>
+          </ul>
+        </div>
 
         {/* ── 라인 V3 연결 설정 ── */}
         <div className="rounded border border-slate-700 bg-slate-800/50 p-3 space-y-3">

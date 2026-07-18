@@ -39,7 +39,7 @@ export function LineV3UrlSetting({ line }: Props) {
       <button
         type="button"
         onClick={openPanel}
-        className="flex items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700"
+        className="flex w-full items-center gap-1.5 rounded border border-slate-700 bg-slate-800 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-700 sm:w-auto"
       >
         <span className={`h-2 w-2 rounded-full ${dotClass}`} />
         V3 연결 · {statusLabel}

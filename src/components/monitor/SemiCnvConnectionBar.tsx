@@ -5,7 +5,6 @@ import { formatLastReceived, COMM_STATE_DOT, COMM_STATE_LABEL } from '../../semi
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import type { SemiCnvConnectionState } from '../../types/semicnv'
-import { LineCommIndicator } from './LineCommIndicator'
 
 const SERVER_STATE_LABEL: Record<SemiCnvConnectionState, string> = {
   disconnected: '연결 끊김',
@@ -24,7 +23,6 @@ const SERVER_STATE_COLOR: Record<SemiCnvConnectionState, string> = {
 export function SemiCnvConnectionBar() {
   const settings = useSemiCnvStore((s) => s.settings)
   const connectionState = useSemiCnvStore((s) => s.connectionState)
-  const siteStatus = useSemiCnvStore((s) => s.siteStatus)
   const lines = useConveyorStore((s) => s.lines)
   const selectedLineId = useConveyorStore((s) => s.selectedLineId)
   const updateSettings = useConveyorStore((s) => s.updateSettings)
@@ -80,8 +78,6 @@ export function SemiCnvConnectionBar() {
     )
   }
 
-  const site = comm?.siteId ? siteStatus[comm.siteId] : null
-  const siteOnline = site?.online ?? false
   const lineScoped = Boolean(selectedLine && comm)
   const statusDotClass = lineScoped
     ? COMM_STATE_DOT[comm!.state]
@@ -90,7 +86,13 @@ export function SemiCnvConnectionBar() {
     ? `V3 · ${COMM_STATE_LABEL[comm!.state]}`
     : `서버 · ${SERVER_STATE_LABEL[connectionState]}`
   const statusTitle = lineScoped
-    ? `${selectedLine!.name} — ${COMM_STATE_LABEL[comm!.state]} (이 라인 V3 데이터 수신 상태)`
+    ? [
+        `${selectedLine!.name} — ${COMM_STATE_LABEL[comm!.state]} (이 라인 V3 데이터 수신 상태)`,
+        comm!.lastMessageAt ? `마지막 수신: ${formatLastReceived(comm!.lastMessageAt)}` : null,
+        comm!.siteName || comm!.siteId ? `현장: ${comm!.siteName ?? comm!.siteId}` : null,
+      ]
+        .filter(Boolean)
+        .join('\n')
     : `관제 서버 · ${settings.wsUrl ?? DEFAULT_SEMICNV_WS_URL}`
 
   return (
@@ -121,26 +123,7 @@ export function SemiCnvConnectionBar() {
       {!selectedLine ? (
         <span className="text-slate-500">라인 미선택</span>
       ) : comm ? (
-        <>
-          <span className="flex items-center gap-1.5 text-slate-300">
-            <span className="font-medium">{selectedLine.name}</span>
-            <LineCommIndicator comm={comm} compact />
-          </span>
-
-          {comm.siteId ? (
-            <span
-              className={siteOnline ? 'text-emerald-400' : 'text-red-400'}
-              title={
-                comm.lastMessageAt
-                  ? `마지막 수신: ${formatLastReceived(comm.lastMessageAt)}`
-                  : undefined
-              }
-            >
-              현장 {siteOnline ? 'Online' : 'Offline'}
-              {comm.siteName || comm.siteId ? ` · ${comm.siteName ?? comm.siteId}` : ''}
-            </span>
-          ) : null}
-        </>
+        <span className="font-medium text-slate-300">{selectedLine.name}</span>
       ) : null}
 
       {showConfig && (

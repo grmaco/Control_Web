@@ -1604,9 +1604,10 @@ export function isLoadFullyDischarged(
 ): boolean {
   if (load.pathUnitIds.length === 0) return false
   if (load.complete) {
-    // IN 포트에 남아 STK 회수를 기다리는 완료 자재는 물리적으로 아직 있는 것 —
-    // "출고 완료"로 간주하면 배치 상태가 조기에 complete로 넘어가 네온이 꺼짐
-    if (isCompletedLoadHoldingPort(load, unitMap)) return false
+    // IN 포트(STK 회수)나 OHT 연동 출고 유닛(OHT 픽업)에서 회수를 기다리는
+    // 완료 자재는 물리적으로 아직 있는 것 — "출고 완료"로 간주하면
+    // 배치 상태가 조기에 complete로 넘어가 네온이 꺼짐
+    if (isCompletedLoadAwaitingPickup(load, unitMap)) return false
     return load.stepIndex >= load.pathUnitIds.length - 1
   }
   return shouldRetainMaterialAtDestination(load, unitMap)
@@ -1724,6 +1725,32 @@ export function isCompletedLoadHoldingPort(
   const lastId = load.pathUnitIds[load.pathUnitIds.length - 1]
   const unit = lastId ? unitMap?.get(lastId) : undefined
   return unit != null && isPortUnit(unit)
+}
+
+/**
+ * 완료 자재가 OHT 연동 출고 유닛에 남아 OHT 픽업을 기다리는 중인지.
+ * 포트의 STK 회수 대기와 동일한 의미 — OHT가 인터페이스를 마치고
+ * dischargeLoadAtPort로 걷어가기 전까지 자재가 물리적으로 유닛 위에 존재한다.
+ */
+export function isCompletedLoadAwaitingOhtPickup(
+  load: PathSimulationLoad,
+  unitMap?: Map<string, ConveyorUnit>,
+): boolean {
+  if (!load.complete || load.pathUnitIds.length === 0) return false
+  const lastId = load.pathUnitIds[load.pathUnitIds.length - 1]
+  const unit = lastId ? unitMap?.get(lastId) : undefined
+  return unit != null && !isPortUnit(unit) && unit.interfaceUnit === 'OHT'
+}
+
+/** 완료 자재가 아직 물리적으로 회수 대기 중인지 (포트 STK 회수 · OHT 픽업 공통) */
+export function isCompletedLoadAwaitingPickup(
+  load: PathSimulationLoad,
+  unitMap?: Map<string, ConveyorUnit>,
+): boolean {
+  return (
+    isCompletedLoadHoldingPort(load, unitMap) ||
+    isCompletedLoadAwaitingOhtPickup(load, unitMap)
+  )
 }
 
 /** 한 틱 진행 — 앞(다음) 모듈에 자재 없을 때만 전진, 겹침·비가동 시 대기 */
@@ -1902,8 +1929,8 @@ export function advanceSimulationLoads(
       if (otherIndex === index) continue
       const other = next[otherIndex]!
       if (!other.released) continue
-      // 완료 자재도 IN 포트에서 회수 대기 중이면 점유 유지 — 후속 자재 겹침 방지
-      if (other.complete && !isCompletedLoadHoldingPort(other, unitMap)) continue
+      // 완료 자재도 회수 대기 중(IN 포트 STK·OHT 픽업)이면 점유 유지 — 후속 자재 겹침 방지
+      if (other.complete && !isCompletedLoadAwaitingPickup(other, unitMap)) continue
       const otherCurrent = posAt(otherIndex, next[otherIndex]!.stepIndex)
       if (otherCurrent !== to) continue
 
@@ -2055,9 +2082,9 @@ export function simulationCstUnitIds(
 
   for (const load of dedupeSimulationLoadsById(loads)) {
     if (!load.released || load.pathUnitIds.length === 0) continue
-    // 포트에 남아 회수 대기 중인 완료 자재는 includeCompleted와 무관하게 항상 표시
+    // 회수 대기 중(포트 STK·OHT 픽업)인 완료 자재는 includeCompleted와 무관하게 항상 표시
     // (일반 종료점의 "complete=출고 완료·소멸"과 달리 물리적으로 자재가 남아 있음)
-    if (!includeCompleted && load.complete && !isCompletedLoadHoldingPort(load, unitMap)) {
+    if (!includeCompleted && load.complete && !isCompletedLoadAwaitingPickup(load, unitMap)) {
       continue
     }
     const step = Math.min(
