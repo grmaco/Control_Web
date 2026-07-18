@@ -30,7 +30,7 @@ interface PlacedUnitProps {
   flow?: TurnFlowDisplay | null
   pickHighlight?: 'source' | 'target' | null
   onPanLock?: () => void
-  onSelect: () => void
+  onSelect: (options?: { additive?: boolean }) => void
 }
 
 function flowRoleBadgeClass(role: FlowRole): string {
@@ -103,7 +103,7 @@ export function PlacedUnit({
       }}
       onClick={(e) => {
         e.stopPropagation()
-        onSelect()
+        onSelect({ additive: e.ctrlKey || e.metaKey })
       }}
       style={{
         width: spanWidth,

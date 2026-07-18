@@ -53,7 +53,7 @@ interface UnitPropertiesPanelProps {
   unit: ConveyorUnit | null
   selectedUnitIds?: string[]
   onChange: (line: ConveyorLine) => void
-  onDelete: (unitId: string) => void
+  onDelete: (unitId: string | string[]) => void
   onRotate: (unitId: string) => void
 }
 
@@ -172,9 +172,17 @@ export function UnitPropertiesPanel({
         ) : null}
 
         <p className="text-xs leading-relaxed text-slate-500">
-          선택된 모듈을 드래그해 함께 이동할 수 있습니다. 상태·자재 설정은 선택된
-          모듈에 일괄 적용됩니다.
+          선택된 모듈을 드래그해 함께 이동할 수 있습니다. Ctrl(⌘)+클릭으로 선택에
+          추가·해제하고, 상태·자재 설정은 선택된 모듈에 일괄 적용됩니다.
         </p>
+
+        <button
+          type="button"
+          onClick={() => onDelete(selectedUnitIds)}
+          className="w-full rounded-md border border-red-900 px-2 py-1.5 text-xs text-red-300 hover:bg-red-950/40"
+        >
+          선택 삭제 (Del)
+        </button>
           </>
         ) : null}
       </div>
@@ -202,16 +210,20 @@ export function UnitPropertiesPanel({
           <p className="mb-2 text-sm font-medium text-slate-300">선택된 유닛 없음</p>
           <ul className="space-y-1.5 text-xs text-slate-400">
             <li className="flex items-center gap-2">
-              <span className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded border border-slate-700 bg-slate-800 px-1.5 font-mono text-[10px] text-slate-300">드래그</span>
-              팔레트 → 그리드로 유닛 배치
-            </li>
-            <li className="flex items-center gap-2">
-              <span className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded border border-slate-700 bg-slate-800 px-1.5 font-mono text-[10px] text-slate-300">클릭</span>
-              유닛 선택 → 여기서 속성 편집
+              <span className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded border border-slate-700 bg-slate-800 px-1.5 font-mono text-[10px] text-slate-300">Ctrl+클릭</span>
+              연속 선택 / 해제
             </li>
             <li className="flex items-center gap-2">
               <span className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded border border-slate-700 bg-slate-800 px-1.5 font-mono text-[10px] text-slate-300">R</span>
-              선택한 유닛 90° 회전
+              90° 회전
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded border border-slate-700 bg-slate-800 px-1.5 font-mono text-[10px] text-slate-300">Del</span>
+              유닛 삭제
+            </li>
+            <li className="flex items-center gap-2">
+              <span className="inline-flex h-5 shrink-0 items-center justify-center whitespace-nowrap rounded border border-slate-700 bg-slate-800 px-1.5 font-mono text-[10px] text-slate-300">Ctrl+Z</span>
+              이전 단계 되돌리기
             </li>
           </ul>
         </div>
@@ -688,7 +700,7 @@ export function UnitPropertiesPanel({
             canRotate ? 'flex-1' : 'w-full'
           }`}
         >
-          삭제
+          삭제 (Del)
         </button>
       </div>
     </div>

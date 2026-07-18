@@ -1,6 +1,6 @@
 import { useDraggable } from '@dnd-kit/core'
 import type { ConveyorType } from '../../types/conveyor'
-import { isDualModule, typeDescription, typeLabel } from '../../constants/conveyorTypes'
+import { typeDescription, typeLabel } from '../../constants/conveyorTypes'
 import { paletteId, type PaletteDragData } from './dnd'
 
 interface PaletteItemProps {
@@ -24,8 +24,7 @@ export function PaletteItem({ type }: PaletteItemProps) {
       }`}
     >
       <div className="text-sm font-medium text-slate-200">{typeLabel(type)}</div>
-      <div className="mt-0.5 hidden text-[11px] text-slate-500 lg:block">
-        {isDualModule(type) ? '2모듈 겹침 · ' : ''}
+      <div className="mt-0.5 hidden whitespace-pre-line text-[11px] text-slate-500 lg:block">
         {typeDescription(type)}
       </div>
     </li>

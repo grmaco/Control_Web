@@ -79,6 +79,11 @@ import {
 import { UnitPropertiesPanel } from './UnitPropertiesPanel'
 
 const PALETTE_TYPES = BUILDER_PALETTE_TYPES
+const MAX_UNDO_STEPS = 50
+
+function cloneLine(line: ConveyorLine): ConveyorLine {
+  return structuredClone(line)
+}
 
 interface LineBuilderProps {
   line: ConveyorLine
@@ -102,12 +107,15 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   draftRef.current = draft
   const selectedUnitIdsRef = useRef(selectedUnitIds)
   selectedUnitIdsRef.current = selectedUnitIds
+  const undoStackRef = useRef<ConveyorLine[]>([])
+  const isUndoingRef = useRef(false)
 
   useEffect(() => {
     setDraft(line)
     setSelectedUnitIds([])
     setCompletionMessage(null)
     setOhtSelection(null)
+    undoStackRef.current = []
   }, [line.id])
 
   useEffect(() => {
@@ -128,11 +136,37 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
 
   const persist = useCallback(
     async (next: ConveyorLine) => {
+      if (!isUndoingRef.current) {
+        const prev = draftRef.current
+        undoStackRef.current = [
+          ...undoStackRef.current.slice(-(MAX_UNDO_STEPS - 1)),
+          cloneLine(prev),
+        ]
+      }
       setDraft(next)
       await onSave(next)
     },
     [onSave],
   )
+
+  const handleUndo = useCallback(async () => {
+    const stack = undoStackRef.current
+    if (stack.length === 0) return
+
+    const prev = stack[stack.length - 1]!
+    undoStackRef.current = stack.slice(0, -1)
+    isUndoingRef.current = true
+    try {
+      draftRef.current = prev
+      setDraft(prev)
+      setSelectedUnitIds([])
+      setOhtSelection(null)
+      setCompletionMessage(null)
+      await onSave(prev)
+    } finally {
+      isUndoingRef.current = false
+    }
+  }, [onSave])
 
   const selectedUnitIdsSet = useMemo(
     () => new Set(selectedUnitIds),
@@ -366,15 +400,21 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
   )
 
   const handleDelete = useCallback(
-    async (unitId: string) => {
-      const next = removeUnitFromLine(draft, unitId)
+    async (unitIdOrIds: string | string[]) => {
+      const ids = Array.isArray(unitIdOrIds) ? unitIdOrIds : [unitIdOrIds]
+      if (ids.length === 0) return
+
+      let next = draftRef.current
+      for (const id of ids) {
+        next = removeUnitFromLine(next, id)
+      }
       await persist({
         ...next,
         updatedAt: new Date().toISOString(),
       })
       setSelectedUnitIds([])
     },
-    [draft, persist],
+    [persist],
   )
 
   const handleOhtRotate = useCallback(async () => {
@@ -485,7 +525,17 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLSelectElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return
+      }
+      // Ctrl/⌘+Z — 바로 이전 편집 단계로 되돌리기
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        void handleUndo()
         return
       }
       // OHT 레이어 선택 시 R 회전 · Delete 삭제
@@ -501,6 +551,16 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
           return
         }
       }
+      // 컨베이어 모듈 선택 시 Delete 삭제
+      if (
+        !ohtSelection &&
+        selectedUnitIdsRef.current.length > 0 &&
+        (e.key === 'Delete' || e.key === 'Backspace')
+      ) {
+        e.preventDefault()
+        void handleDelete(selectedUnitIdsRef.current)
+        return
+      }
       if (e.key.toLowerCase() !== 'r' || selectedCount !== 1 || !selectedUnit) return
       if (!showsRotation(selectedUnit.type)) return
       e.preventDefault()
@@ -512,6 +572,8 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
     selectedCount,
     selectedUnit,
     handleRotate,
+    handleDelete,
+    handleUndo,
     ohtSelection,
     handleOhtRotate,
     handleOhtDelete,
@@ -684,9 +746,10 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                         selectedCount <= 1 || selectedUnitIdsSet.has(unit.id)
                       }
                       onPanLock={handleUnitPointerDown}
-                      onSelect={() => {
+                      onSelect={({ additive } = {}) => {
+                        setOhtSelection(null)
                         setSelectedUnitIds((prev) => {
-                          if (prev.length > 1) {
+                          if (additive) {
                             if (prev.includes(unit.id)) {
                               return prev.filter((id) => id !== unit.id)
                             }

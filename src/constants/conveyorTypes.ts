@@ -65,22 +65,22 @@ const TYPE_META: Record<
   junction: {
     showsRotation: true,
     isDualModule: true,
-    description: '직교 분기 — 평시 직진, 분기 요청 CV 지정 시 수직 전환',
+    description: '직교 분기 컨베이어',
   },
   lift: {
     showsRotation: true,
     isDualModule: false,
-    description: '수직 이송 리프트',
+    description: '수직 이송 컨베이어',
   },
   port: {
     showsRotation: false,
     isDualModule: false,
-    description: 'IN/OUT 방향 · 레시피 · 연동 유닛(OHT/STK/AGV)',
+    description: '적재창고 종속포트\nIN/OUT 방향\n연동 유닛 인터페이스',
   },
   storage: {
     showsRotation: true,
     isDualModule: false,
-    description: '3(세로 고정)×가로 가변(최소 3) · 90° 회전 · 형상 · ROBOT 수량 · 유지보수 영역',
+    description: 'Min 3*3 / Max 3*8\n내부 ROBOT 포함',
   },
 }
 
