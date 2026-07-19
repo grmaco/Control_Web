@@ -37,6 +37,8 @@ interface FlowCalloutOverlayProps {
   simDestinationByUnitId?: Record<string, string>
   /** 증가 시 선택 해제 (시뮬레이션 초기화 등) */
   deselectToken?: number
+  /** 증가 시 콜아웃 배치를 분기별 기본 위치로 완전 초기화 (사용자 드래그 위치 폐기) */
+  layoutResetToken?: number
   /** 맵 클릭으로 핀된 유닛 집합 — 강조 표시 */
   peekUnitIds?: ReadonlySet<string>
   /** 경로 시뮬 — LD/ULD/BUSY 판별용 */
@@ -46,9 +48,9 @@ interface FlowCalloutOverlayProps {
   dischargeIntervalSec?: number
   continuousInputActive?: boolean
   /** 포트/창고 핸드쉐이크 시뮬 — READY/BUSY 콜아웃 오버라이드 */
-  portSimStates?: Record<string, import('../hooks/usePortStorageSimulation').PortSimState>
+  portSimStates?: Record<string, import('../../hooks/usePortStorageSimulation').PortSimState>
   /** 적재창고 시뮬 상태 — STATUS/SLOTS/ROLE 표시용 */
-  storageSimStates?: Record<string, import('../hooks/usePortStorageSimulation').StorageSimState>
+  storageSimStates?: Record<string, import('../../hooks/usePortStorageSimulation').StorageSimState>
   /** 콜아웃 패널 더블클릭 → 해당 유닛 콜아웃 닫기 */
   onHideCallout?: (unitId: string) => void
 }
@@ -69,6 +71,7 @@ export function FlowCalloutOverlay({
   simulating = false,
   simDestinationByUnitId = {},
   deselectToken = 0,
+  layoutResetToken = 0,
   peekUnitIds,
   simulationLoads = [],
   inputIntervalSec,
@@ -126,6 +129,24 @@ export function FlowCalloutOverlay({
   useEffect(() => {
     if (deselectToken > 0) setSelectedId(null)
   }, [deselectToken])
+
+  // 배치 완전 초기화 — 사용자 드래그 기록을 버리고 분기별 기본 위치로 재계산
+  useEffect(() => {
+    if (layoutResetToken <= 0) return
+    userMovedIdsRef.current = new Set()
+    setPositions(() => {
+      const next: Record<string, FlowCalloutPosition> = {}
+      for (const callout of callouts) {
+        next[callout.unitId] = { panelX: callout.panelX, panelY: callout.panelY }
+      }
+      positionsRef.current = next
+      return next
+    })
+    setPanelSizes({})
+    setSelectedId(null)
+    // callouts는 토큰 증가 시점의 클로저 사용 — 토큰 변경 시에만 실행
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutResetToken])
 
   const updatePosition = useCallback((unitId: string, panelX: number, panelY: number) => {
     userMovedIdsRef.current.add(unitId)

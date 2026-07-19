@@ -21,6 +21,7 @@ import {
   areAllSimulationLoadsFinished,
   countIncompleteSimulationLoads,
   initializeParallelLoads,
+  isCompletedLoadAwaitingPickup,
   isLoadFullyDischarged,
   isLoadAtBlockedPortDestination,
   listSimulatableEntries,
@@ -44,6 +45,7 @@ import {
   roundTackTimeSec,
   simulationCstUnitIds,
   simulationRevealUnitIds,
+  spawnContinuousInjectLoad,
   spawnOutboundDischargeLoad,
   staticTestMaterialOriginUnitIds,
   unionSimulationConveyorPathUnitIds,
@@ -470,6 +472,9 @@ export function usePathSimulation(
       if (frozenLoadTackSecRef.current[load.id] != null) continue
       if (
         isLoadFullyDischarged(load, unitMapRef.current) ||
+        // 목적지 도착 후 회수 대기(포트 STK·OHT 픽업) 중인 자재 — 반송은 끝났으므로
+        // 대기 시간이 Tack Time에 계속 누적되지 않도록 도착 시점에 동결
+        isCompletedLoadAwaitingPickup(load, unitMapRef.current) ||
         isLoadAtBlockedPortDestination(load, unitMapRef.current)
       ) {
         frozenLoadTackSecRef.current[load.id] = liveSec
@@ -1533,6 +1538,42 @@ export function usePathSimulation(
     )
   }, [])
 
+  /**
+   * OHT PLACE 완료 시 호출 — 투입점(연동 유닛)에 자재를 생성해 경로 계획대로 출발.
+   * 투입점이 이미 점유 중이면 스폰하지 않고 false 반환.
+   */
+  const ohtInjectSeqRef = useRef(0)
+  const spawnInboundLoadAtEntry = useCallback(
+    (entryUnitId: string): boolean => {
+      ohtInjectSeqRef.current += 1
+      const load = spawnContinuousInjectLoad(
+        simulationLine,
+        entryUnitId,
+        // 프로브(continuous inject) 시퀀스와 load ID 충돌 방지 오프셋
+        100000 + ohtInjectSeqRef.current,
+        inboundDestinationByEntryId[entryUnitId] ?? null,
+      )
+      if (!load) return false
+      let spawned = false
+      setLoads((prev) => {
+        const occupied = prev.some((item) => {
+          if (item.pathUnitIds.length === 0) return false
+          if (item.complete) return false
+          const step = Math.min(
+            Math.max(0, item.stepIndex),
+            item.pathUnitIds.length - 1,
+          )
+          return item.pathUnitIds[step] === entryUnitId
+        })
+        if (occupied) return prev
+        spawned = true
+        return [...prev, load]
+      })
+      return spawned
+    },
+    [simulationLine, inboundDestinationByEntryId],
+  )
+
   // STK 출고 반송 — OUT 포트에서 자재를 받은 뒤 앞 CV→종료점까지 이동할 load 투입
   const outboundSpawnSeqRef = useRef(0)
   const spawnOutboundLoadAtPort = useCallback(
@@ -1608,6 +1649,7 @@ export function usePathSimulation(
     turn270Sec,
     setTurn270Sec,
     dischargeLoadAtPort,
+    spawnInboundLoadAtEntry,
     spawnOutboundLoadAtPort,
     incompleteLoadCount,
     tackTimeSummaries,

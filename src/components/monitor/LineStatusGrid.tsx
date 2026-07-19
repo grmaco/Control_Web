@@ -80,6 +80,8 @@ interface LineStatusGridProps {
   onCalloutPanLockChange?: (locked: boolean) => void
   /** 증가 시 콜아웃 선택 해제 */
   calloutDeselectToken?: number
+  /** 증가 시 콜아웃 배치·숨김·저장 위치를 분기별 기본으로 완전 초기화 */
+  calloutLayoutResetToken?: number
   /** 투입점별 시뮬 목적지 이름 (콜아웃 표시) */
   simDestinationByUnitId?: Record<string, string>
   /** 모니터링 2.5D 시점 표현 */
@@ -88,6 +90,8 @@ interface LineStatusGridProps {
   showOhtRails?: boolean
   /** OHT 시뮬 대차 (애니메이션) */
   ohtVehicles?: OhtVehicleState[]
+  /** OHT 애니메이션 구동 여부 — 일시정지 시 false (표시는 ohtSimActive로 유지) */
+  ohtSimAnimating?: boolean
   ohtGraph?: OhtRailGraph
   ohtSimActive?: boolean
   ohtStepMs?: number
@@ -192,6 +196,7 @@ export function LineStatusGrid({
   simulationPathUnitIds = [],
   onCalloutPanLockChange,
   calloutDeselectToken = 0,
+  calloutLayoutResetToken = 0,
   simDestinationByUnitId = {},
   is25DView = false,
   continuousGatherProbes = [],
@@ -202,6 +207,7 @@ export function LineStatusGrid({
   warehouseFillCounts = {},
   showOhtRails = false,
   ohtVehicles = [],
+  ohtSimAnimating,
   ohtGraph,
   ohtSimActive = false,
   ohtStepMs = 600,
@@ -317,6 +323,22 @@ export function LineStatusGrid({
       updateHiddenCalloutIds(() => new Set())
     }
   }, [calloutDeselectToken, updateHiddenCalloutIds])
+
+  // 콜아웃 배치 완전 초기화 — 저장된 드래그 위치 폐기 + 숨김·핀 해제
+  useEffect(() => {
+    if (calloutLayoutResetToken > 0) {
+      hiddenSyncedRef.current = true
+      setPinnedUnitIds(new Set())
+      updateHiddenCalloutIds(() => new Set())
+      saveCalloutPositions(line.id, layoutSignature, {})
+    }
+  }, [
+    calloutLayoutResetToken,
+    layoutSignature,
+    line.id,
+    saveCalloutPositions,
+    updateHiddenCalloutIds,
+  ])
 
   const handleUnitPointerDown = useCallback(
     (event: React.PointerEvent<HTMLDivElement>, unitId: string) => {
@@ -770,6 +792,7 @@ export function LineStatusGrid({
           viewport={{ minX, minY, cols, rows }}
           cellSize={cellSize}
           active={ohtSimActive}
+          animating={ohtSimAnimating ?? ohtSimActive}
           stepMs={ohtStepMs}
           poodleMode={ohtPoodleMode}
         />
@@ -802,6 +825,7 @@ export function LineStatusGrid({
           onSavePositions={handleSaveCalloutPositions}
           onPanLockChange={onCalloutPanLockChange}
           deselectToken={calloutDeselectToken}
+          layoutResetToken={calloutLayoutResetToken}
           activeUnitIds={simulationActiveSet}
           staticTestMaterialUnitIds={staticTestMaterialSet}
           simulating={simulationInProgress}

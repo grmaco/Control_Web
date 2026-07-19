@@ -212,7 +212,8 @@ export function resolveOhtTargets(line: ConveyorLine, graph: OhtRailGraph): OhtT
   for (const unit of line.units) {
     if (unit.interfaceUnit !== 'OHT') continue
     if (unit.status !== 'running') continue
-    const railNodeIds = new Set<string>()
+    const onCellIds = new Set<string>()
+    const flankIds = new Set<string>()
     for (const cell of unitFootprintCells(unit)) {
       // 유닛 셀 위에 겹쳐 놓인 레일 — 모듈 바로 위에서 인터페이스 가능 (개구부 조건 불필요).
       // 이걸 빼면 모듈 위에 배치된 OHT가 옆 노드까지 한 칸 지나쳤다가 모듈로
@@ -220,7 +221,7 @@ export function resolveOhtTargets(line: ConveyorLine, graph: OhtRailGraph): OhtT
       const onCellRailId = graph.cellIndex.get(cellKey(cell.x, cell.y))
       if (onCellRailId) {
         const onCellAdj = graph.adjacency.get(onCellRailId) ?? []
-        if (onCellAdj.length > 0) railNodeIds.add(onCellRailId)
+        if (onCellAdj.length > 0) onCellIds.add(onCellRailId)
       }
       // 유닛 셀과 인접한 4방향 레일 검사
       const adjacentCells = [
@@ -240,9 +241,14 @@ export function resolveOhtTargets(line: ConveyorLine, graph: OhtRailGraph): OhtT
         // 고립 노드(이웃 없음)는 도달 불가 → 제외
         const adj = graph.adjacency.get(railId) ?? []
         if (adj.length === 0) continue
-        railNodeIds.add(railId)
+        flankIds.add(railId)
       }
     }
+
+    // 모듈 위에 레일이 있으면 그 노드에서만 인터페이스 — 옆 노드는 폴백 전용.
+    // 옆 노드를 항상 포함하면 두 칸 거리의 두 모듈이 사이 노드를 공유해,
+    // OHT가 이동 없이 제자리에서 픽→플레이스하는(역주행처럼 보이는) 버그가 된다.
+    const railNodeIds = onCellIds.size > 0 ? onCellIds : flankIds
 
     if (railNodeIds.size > 0) {
       const fp = getUnitFootprint(unit)
@@ -261,6 +267,16 @@ export function resolveOhtTargets(line: ConveyorLine, graph: OhtRailGraph): OhtT
 }
 
 // ── 경로 탐색 (BFS) ───────────────────────────────────────────────────────────
+
+/**
+ * from→to 이동이 배정된 흐름 방향을 거스르는지.
+ * to→from만 배정되어 있으면 역주행. 양쪽 다 미배정이면 고립 구간 → 통행 허용.
+ */
+function isEdgeAgainstFlow(graph: OhtRailGraph, fromId: string, toId: string): boolean {
+  const forward = graph.directed.get(fromId)?.includes(toId) ?? false
+  if (forward) return false
+  return graph.directed.get(toId)?.includes(fromId) ?? false
+}
 
 /**
  * from → goalIds 최단 경로 (from 제외, goal 포함).
@@ -283,6 +299,8 @@ export function bfsRailPath(
     const cur = queue.shift()!
     for (const next of graph.adjacency.get(cur) ?? []) {
       if (prev.has(next)) continue
+      // 흐름 방향이 배정된 엣지는 역방향 통행 금지 — 방향 미배정(고립) 구간만 양방향 허용
+      if (isEdgeAgainstFlow(graph, cur, next)) continue
       if (cur === fromId) {
         if (forbidFirstStep && next === forbidFirstStep) continue
         if (forbidFirstDir && fromRail) {
@@ -473,12 +491,32 @@ function assignNextTarget(
   if (eligible.length === 0 || vehicle.nodeId == null || (!vehicle.carrying && !canDeliver)) {
     return { ...vehicle, phase: 'idle', path: [], pathIndex: 0, targetUnitId: null }
   }
+  // 픽업 후 배송 가능성 검사: 빈 대차가 어떤 모듈에서 PICK하려면, 그 모듈 위치에서
+  // 흐름 방향을 지키며 투입점(entry·both)까지 도달할 수 있어야 한다.
+  // 직선(비순환) 레일에서 투입점이 출고점 상류에 있으면 역주행으로만 복귀 가능 →
+  // 픽업하지 않는다 (집고 나서 역주행하는 버그 방지).
+  const canDeliverFrom = (pickTarget: OhtTarget, fromNodeId: string): boolean => {
+    if (vehicle.carrying) return true
+    const deliverGoal = new Set<string>()
+    for (const t of targets) {
+      if (t.role === 'exit' || t.unitId === pickTarget.unitId) continue
+      for (const nid of t.railNodeIds) deliverGoal.add(nid)
+    }
+    if (deliverGoal.size === 0) return false
+    return (
+      bfsDirectedRailPath(graph, fromNodeId, deliverGoal) != null ||
+      bfsRailPath(graph, fromNodeId, deliverGoal) != null
+    )
+  }
   // 발밑 우선: 현재 노드에서 바로 인터페이스 가능한 모듈이 있으면 라운드로빈보다 먼저
   // 그 모듈을 서비스한다. (BFS는 이 경우 빈 경로를 반환하는데, 이를 "도달 불가"로
   // 오판해 건너뛰면 모듈 위에 배치된 대차가 한 칸 지나쳤다 돌아오거나 엉뚱한 곳으로
   // 떠나는 버그가 된다.) 방금 인터페이스를 마친 유닛은 제외 — 제자리 픽↔플레이스 반복 방지.
   const standingOn = eligible.find(
-    (t) => t.railNodeIds.includes(vehicle.nodeId!) && t.unitId !== vehicle.targetUnitId,
+    (t) =>
+      t.railNodeIds.includes(vehicle.nodeId!) &&
+      t.unitId !== vehicle.targetUnitId &&
+      canDeliverFrom(t, vehicle.nodeId!),
   )
   if (standingOn) {
     return {
@@ -515,6 +553,9 @@ function assignNextTarget(
     }
 
     if (path && path.length > 0) {
+      // 빈 대차: 이 목적지에서 픽업하면 이후 흐름 방향으로 투입점까지 갈 수 있는지 확인
+      const arrivalNodeId = path[path.length - 1]!
+      if (!canDeliverFrom(target, arrivalNodeId)) continue
       return {
         ...vehicle,
         phase: 'moving',

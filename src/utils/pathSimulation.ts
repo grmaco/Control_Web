@@ -35,6 +35,7 @@ import {
   isOwnPlannedJunctionTraversal,
 } from './junctionSimulation'
 import { isStkAtCapacity } from './warehouseSlots'
+import { getFootprintCells, getUnitFootprint } from './unitFootprint'
 import { SIM_STK_IO_ENABLED } from '../constants/simStkIo'
 import {
   findJunctionAdjacentPort,
@@ -173,6 +174,11 @@ export function bfsPath(
     conveyorLineOnly?: boolean
     /** CV 사이 브릿지 — 적재창고 통과 허용 */
     allowStorageTransit?: boolean
+    /**
+     * true면 connections 유령 링크를 무시하고 현재 격자 직교 인접만 사용.
+     * (이동 후 재동기화 누락으로 끊긴 모듈이 경로에 남는 문제 방지)
+     */
+    physicalAdjacencyOnly?: boolean
   },
 ): string[] | null {
   if (startId === targetId) return [startId]
@@ -213,6 +219,21 @@ export function bfsPath(
     return isSimulationTransitPassable(unit)
   }
 
+  const allUnits = [...unitMap.values()]
+
+  const listNeighborIds = (unit: ConveyorUnit): string[] => {
+    if (options?.physicalAdjacencyOnly) {
+      // gridSize 경계에 의존하지 않고 footprint 맞닿음만 본다
+      return allUnits
+        .filter(
+          (other) =>
+            other.id !== unit.id && unitsTouchOrthogonally(unit, other),
+        )
+        .map((other) => other.id)
+    }
+    return unit.connections
+  }
+
   const queue: { id: string; path: string[] }[] = [{ id: startId, path: [startId] }]
   const visited = new Set<string>([startId])
 
@@ -221,7 +242,7 @@ export function bfsPath(
     const unit = unitMap.get(current.id)
     if (!unit) continue
 
-    for (const neighborId of unit.connections) {
+    for (const neighborId of listNeighborIds(unit)) {
       if (visited.has(neighborId)) continue
       if (!canVisit(neighborId)) continue
       const nextPath = [...current.path, neighborId]
@@ -232,6 +253,26 @@ export function bfsPath(
   }
 
   return null
+}
+
+/** 두 유닛 footprint가 직교로 맞닿는지 (connections·gridSize 무시) */
+function unitsTouchOrthogonally(a: ConveyorUnit, b: ConveyorUnit): boolean {
+  const bCells = new Set(
+    getFootprintCells(b.gridX, b.gridY, getUnitFootprint(b)).map(
+      (cell) => `${cell.gridX},${cell.gridY}`,
+    ),
+  )
+  for (const cell of getFootprintCells(a.gridX, a.gridY, getUnitFootprint(a))) {
+    for (const [dx, dy] of [
+      [0, 1],
+      [0, -1],
+      [1, 0],
+      [-1, 0],
+    ] as const) {
+      if (bCells.has(`${cell.gridX + dx},${cell.gridY + dy}`)) return true
+    }
+  }
+  return false
 }
 
 function unitsAreGraphNeighbors(
@@ -425,7 +466,12 @@ function findLinkedInputPort(
   return null
 }
 
-/** EXIT 유닛에 연동된 OUT 포트 반환 — 없으면 null */
+/**
+ * EXIT 유닛에 연동된 OUT 포트 반환 — 없으면 null.
+ * 명시 연결(포트 속성 LOAD/UNLOAD UNIT)이 우선. 명시 연결이 없으면
+ * 격자상 인접(연결)된 OUT 포트로 자동 인계 — 분기 인접 포트와 동일한 관대함.
+ * 단, 다른 유닛에 명시 연결된 포트는 자동 인계 대상에서 제외.
+ */
 function findLinkedOutPort(
   line: ConveyorLine,
   exitUnitId: string,
@@ -434,6 +480,17 @@ function findLinkedOutPort(
     if (!isPortUnit(unit)) continue
     if ((unit.portDirection ?? 'IN') !== 'OUT') continue
     if (getPortProperties(unit)?.linkedUnitId === exitUnitId) return unit
+  }
+  const exit = line.units.find((u) => u.id === exitUnitId)
+  if (!exit) return null
+  for (const unit of line.units) {
+    if (!isPortUnit(unit)) continue
+    if ((unit.portDirection ?? 'IN') !== 'OUT') continue
+    const linkedId = getPortProperties(unit)?.linkedUnitId
+    if (linkedId != null && linkedId !== exitUnitId) continue
+    if (exit.connections.includes(unit.id) || unit.connections.includes(exit.id)) {
+      return unit
+    }
   }
   return null
 }
@@ -530,13 +587,37 @@ function resolvePathExitId(
   return isSimulationEndUnit(last, flow) ? lastId : null
 }
 
+function exitPathBfsOptions() {
+  return {
+    forSimulationPlan: true as const,
+    /** 출고 후보·경로는 기하 연결만 본다 (상태와 무관) */
+    allowIdleTransit: true as const,
+    forbidOutPorts: true as const,
+    conveyorLineOnly: true as const,
+    physicalAdjacencyOnly: true as const,
+  }
+}
+
+function isExitReachableFromEntry(
+  entryUnitId: string,
+  exitId: string,
+  unitMap: Map<string, ConveyorUnit>,
+): boolean {
+  return bfsPath(entryUnitId, exitId, unitMap, exitPathBfsOptions()) != null
+}
+
 function resolveExitTargetIds(
   line: ConveyorLine,
   entryUnitId: string,
   unitMap: Map<string, ConveyorUnit>,
 ): string[] {
   const explicit = getExitUnits(line).map((unit) => unit.id)
-  if (explicit.length > 0) return explicit
+  if (explicit.length > 0) {
+    // 종료점 지정은 유지하되, 격자상 실제로 이어진 exit만 출고 후보로 사용
+    return explicit.filter((exitId) =>
+      isExitReachableFromEntry(entryUnitId, exitId, unitMap),
+    )
+  }
 
   const { orderedUnitIds, disconnectedUnitIds } = computeFlowOrder(line, entryUnitId)
   const disconnected = new Set(disconnectedUnitIds)
@@ -631,7 +712,8 @@ function sliceFlowPathToExit(
 ): { pathUnitIds: string[]; exitId: string | null } {
   for (const exitId of exitIds) {
     const index = orderedUnitIds.indexOf(exitId)
-    if (index > 0) {
+    // index === 0: 출발점이 이미 출고점인 경우
+    if (index >= 0) {
       return {
         pathUnitIds: orderedUnitIds.slice(0, index + 1),
         exitId,
@@ -646,7 +728,7 @@ function sliceFlowPathToExit(
   }
 }
 
-/** STK 없는 라인 — 투입점 → 출고점 (BFS 우선, 없으면 물류 순서) */
+/** STK 없는 라인 — 투입점 → 출고점 (BFS 우선, 없으면 연결 구간의 물류 순서) */
 function buildEntryToExitPath(
   entryUnitId: string,
   line: ConveyorLine,
@@ -665,16 +747,22 @@ function buildEntryToExitPath(
     }
   }
 
+  // 이미 출고점에 있는 테스트 자재 — 역방향 물류순서(종료→시작)로 목적지를 잡지 않음
+  if (entry.flowRole === 'exit') {
+    return {
+      pathUnitIds: [entryUnitId],
+      exitId: entryUnitId,
+      message: `${unitDisplayCode(entry)} (출고점)`,
+    }
+  }
+
   const exitIds = resolveExitTargetIds(line, entryUnitId, unitMap)
+  const bfsOptions = exitPathBfsOptions()
 
   for (const exitId of exitIds) {
     // BFS 최단 인접 경로 — DFS 물류순서 슬라이스는 backtrack 순서를 경로로 오인해
     // 역주행·비인접 점프가 생길 수 있음 (중간 유닛에서 출발하는 테스트 자재에서 발생)
-    const path = bfsPath(entryUnitId, exitId, unitMap, {
-      forSimulationPlan: true,
-      forbidOutPorts: true,
-      conveyorLineOnly: true,
-    })
+    const path = bfsPath(entryUnitId, exitId, unitMap, bfsOptions)
     if (path && path.length > 1) {
       const exit = unitMap.get(exitId)!
       return {
@@ -685,14 +773,31 @@ function buildEntryToExitPath(
     }
   }
 
-  const { orderedUnitIds } = computeFlowOrder(line, entryUnitId)
-  if (orderedUnitIds.length > 1) {
-    const sliced = sliceFlowPathToExit(orderedUnitIds, exitIds)
+  // fallback: connections 기반 물류순서 — 끊긴 유닛(disconnected)은 절대 포함하지 않음
+  const { orderedUnitIds, disconnectedUnitIds } = computeFlowOrder(line, entryUnitId)
+  const disconnected = new Set(disconnectedUnitIds)
+  const connectedOrderedIds = orderedUnitIds.filter((id) => !disconnected.has(id))
+  if (connectedOrderedIds.length > 1) {
+    const reachableExitIds =
+      exitIds.length > 0
+        ? exitIds
+        : connectedOrderedIds.filter((id) => {
+            const unit = unitMap.get(id)
+            return unit?.flowRole === 'exit'
+          })
+    const sliced = sliceFlowPathToExit(
+      connectedOrderedIds,
+      reachableExitIds.length > 0
+        ? reachableExitIds
+        : [connectedOrderedIds[connectedOrderedIds.length - 1]!],
+    )
     const conveyorSlice = sliced.pathUnitIds.filter((unitId) => {
       const unit = unitMap.get(unitId)
       return unit != null && isConveyorLineTransitUnit(unit)
     })
-    const exit = unitMap.get(sliced.exitId ?? conveyorSlice[conveyorSlice.length - 1] ?? entryUnitId)!
+    const exit = unitMap.get(
+      sliced.exitId ?? conveyorSlice[conveyorSlice.length - 1] ?? entryUnitId,
+    )!
     return {
       pathUnitIds: conveyorSlice.length > 1 ? conveyorSlice : sliced.pathUnitIds,
       exitId: sliced.exitId,

@@ -24,6 +24,7 @@ import {
   isCompletedLoadAwaitingOhtPickup,
 } from '../../utils/pathSimulation'
 import { unitTitle } from '../../constants/conveyorTypes'
+import { updateUnitsTestMaterialInLine } from '../../utils/units'
 import { isCvUnit } from '../../utils/unitMaterial'
 import type { PathSimulationStartOptions } from '../../hooks/usePathSimulation'
 import { LineStatusGrid } from './LineStatusGrid'
@@ -202,7 +203,9 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
     hasMaterialAtUnit: conveyorSimRunning ? ohtHasMaterialAtUnit : undefined,
   })
 
-  // OHT 픽업 완료 → 컨베이어 시뮬에서 해당 유닛의 자재 제거 (자재가 OHT로 옮겨탐)
+  // OHT 인터페이스 완료 → 컨베이어 시뮬 연동
+  // - 픽업(carrying false→true): 해당 유닛의 자재 제거 (자재가 OHT로 옮겨탐)
+  // - 플레이스(carrying true→false): 투입점에 자재 생성 → 경로 계획대로 출발
   const prevOhtVehiclesRef = useRef(oht.vehicles)
   useEffect(() => {
     const prev = prevOhtVehiclesRef.current
@@ -211,12 +214,64 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
     const prevById = new Map(prev.map((v) => [v.id, v]))
     for (const v of oht.vehicles) {
       const p = prevById.get(v.id)
-      // 인터페이스 완료 순간: interfacing에서 벗어나며 carrying false→true = 픽업
-      if (p && p.phase === 'interfacing' && !p.carrying && v.carrying && p.targetUnitId) {
+      if (!p || p.phase !== 'interfacing' || !p.targetUnitId) continue
+      if (!p.carrying && v.carrying) {
         simulation.dischargeLoadAtPort(p.targetUnitId)
+      } else if (p.carrying && !v.carrying) {
+        simulation.spawnInboundLoadAtEntry(p.targetUnitId)
       }
     }
-  }, [oht.vehicles, conveyorSimRunning, simulation.dischargeLoadAtPort])
+  }, [
+    oht.vehicles,
+    conveyorSimRunning,
+    simulation.dischargeLoadAtPort,
+    simulation.spawnInboundLoadAtEntry,
+  ])
+
+  // 테스트 자재 시뮬 반영 — 테스트 자재를 올리고 시작한 시뮬이 완료되면
+  // 유닛들의 테스트 자재 속성을 최종 자재 위치에 맞춰 갱신 (출고된 자재는 무로)
+  const testMaterialSyncRef = useRef<{ armed: boolean; done: boolean }>({
+    armed: false,
+    done: false,
+  })
+  useEffect(() => {
+    const sync = testMaterialSyncRef.current
+    if (simulation.status === 'idle') {
+      sync.armed = false
+      sync.done = false
+      return
+    }
+    if (!sync.armed && !sync.done) {
+      // 시뮬 시작 시점에 테스트 자재가 하나라도 있었을 때만 동기화 대상
+      sync.armed = line.units.some((u) => (u.testMaterial ?? 0) === 1)
+      if (!sync.armed) sync.done = true
+    }
+    if (simulation.status !== 'complete' || !sync.armed || sync.done) return
+    sync.done = true
+
+    // 남은 자재 = 미출고 load의 현재 위치 (출고 완료 load는 라인을 떠난 것)
+    const remaining = new Set<string>()
+    for (const load of simulation.loads) {
+      if (load.pathUnitIds.length === 0 || load.complete) continue
+      const step = Math.min(Math.max(0, load.stepIndex), load.pathUnitIds.length - 1)
+      const unitId = load.pathUnitIds[step]
+      if (unitId) remaining.add(unitId)
+    }
+    const materialUnitIds = line.units
+      .filter((u) => !isStorageUnit(u))
+      .map((u) => u.id)
+    let next = updateUnitsTestMaterialInLine(
+      line,
+      materialUnitIds.filter((id) => !remaining.has(id)),
+      0,
+    )
+    next = updateUnitsTestMaterialInLine(
+      next,
+      materialUnitIds.filter((id) => remaining.has(id)),
+      1,
+    )
+    void saveLine(next)
+  }, [simulation.status, simulation.loads, line, saveLine])
   const ohtMode = simMode === 'oht'
   const [ohtPoodleMode, setOhtPoodleMode] = useState(false)
   // 포트 ULD 감지용 — complete된 자재도 포함해야 포트 셀에 머문 자재가 ULD로 표시됨
@@ -292,9 +347,12 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
   }, [simulation.status])
   const [calloutPanLock, setCalloutPanLock] = useState(false)
   const [calloutDeselectToken, setCalloutDeselectToken] = useState(0)
+  const [calloutLayoutResetToken, setCalloutLayoutResetToken] = useState(0)
+  const [resetConfirmPopupOpen, setResetConfirmPopupOpen] = useState(false)
   const [simBlockPopupOpen, setSimBlockPopupOpen] = useState(false)
   const [runConfirmPopupOpen, setRunConfirmPopupOpen] = useState(false)
   const [portConfirmPopupOpen, setPortConfirmPopupOpen] = useState(false)
+  const [noManualEntryPopupOpen, setNoManualEntryPopupOpen] = useState(false)
   const pendingStartModeRef = useRef<'normal' | 'continuous' | null>(null)
   const preserveStatusOnStartRef = useRef(false)
   const portConfirmRequestedRef = useRef(false)
@@ -358,6 +416,22 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
         return
       }
 
+      // 연속 투입은 프로브(수동 투입)가 자재를 공급 — 연동 유닛 없는 투입점이
+      // 하나도 없으면 프로브가 넣을 곳이 없어 무한 대기처럼 보임 → 안내 팝업
+      if (startMode === 'continuous') {
+        const candidates =
+          simulation.selectedSourceUnitIds.length > 0
+            ? simulation.sources.filter((u) =>
+                simulation.selectedSourceUnitIds.includes(u.id),
+              )
+            : simulation.sources
+        const hasManualEntry = candidates.some((u) => u.interfaceUnit == null)
+        if (!hasManualEntry) {
+          setNoManualEntryPopupOpen(true)
+          return
+        }
+      }
+
       pendingStartModeRef.current = startMode
       portConfirmRequestedRef.current = false
 
@@ -379,12 +453,33 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
       allPortsRunning,
       isLineV3Connected,
       startPendingSimulation,
+      simulation.selectedSourceUnitIds,
+      simulation.sources,
     ],
   )
 
   const handleSimulationStart = useCallback(() => {
     requestSimulationStart('normal')
   }, [requestSimulationStart])
+
+  /** 시뮬 초기화 실행 — resetCallouts=true면 콜아웃 배치도 분기별 기본으로 재표현 */
+  const performSimulationReset = useCallback(
+    (resetCallouts: boolean) => {
+      setResetConfirmPopupOpen(false)
+      simulation.reset()
+      if (resetCallouts) {
+        setCalloutDeselectToken((token) => token + 1)
+        setCalloutLayoutResetToken((token) => token + 1)
+      }
+      logButton(
+        resetCallouts
+          ? 'Path Simulation Reset (콜아웃 초기화)'
+          : 'Path Simulation Reset (콜아웃 유지)',
+      )
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- logButton은 렌더마다 재생성
+    [simulation],
+  )
 
   const handleSimulationStartContinuous = useCallback(() => {
     requestSimulationStart('continuous')
@@ -644,12 +739,14 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
                 warehouseFillCounts={simulation.warehouseFillCounts}
                 onCalloutPanLockChange={setCalloutPanLock}
                 calloutDeselectToken={calloutDeselectToken}
+                calloutLayoutResetToken={calloutLayoutResetToken}
                 simDestinationByUnitId={simulation.simDestinationByUnitId}
                 is25DView={is25DView}
                 showOhtRails={ohtMode}
                 ohtVehicles={ohtMode ? oht.vehicles : []}
                 ohtGraph={oht.graph}
-                ohtSimActive={ohtMode && oht.status === 'playing'}
+                ohtSimActive={ohtMode && oht.status !== 'idle'}
+                ohtSimAnimating={ohtMode && oht.status === 'playing'}
                 ohtStepMs={oht.stepMs}
                 ohtPoodleMode={ohtPoodleMode}
                 portStorageSimActive={portStorageSim.isRunning}
@@ -752,12 +849,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
               simulation.resume()
               logButton('Path Simulation Resume')
             }}
-            onReset={() => {
-              simulation.reset()
-              setCalloutDeselectToken((token) => token + 1)
-              setHiddenStorageCalloutIds(new Set())
-              logButton('Path Simulation Reset')
-            }}
+            onReset={() => setResetConfirmPopupOpen(true)}
             onStepForward={() => {
               if (isLineV3Connected) {
                 setSimBlockPopupOpen(true)
@@ -863,11 +955,7 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
           simulation.resume()
           logButton('Path Simulation Resume')
         }}
-        onReset={() => {
-          simulation.reset()
-          setCalloutDeselectToken((token) => token + 1)
-          logButton('Path Simulation Reset')
-        }}
+        onReset={() => setResetConfirmPopupOpen(true)}
         onStepForward={() => {
           if (isLineV3Connected) {
             setSimBlockPopupOpen(true)
@@ -939,12 +1027,14 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
             warehouseFillCounts={simulation.warehouseFillCounts}
             onCalloutPanLockChange={setCalloutPanLock}
             calloutDeselectToken={calloutDeselectToken}
+            calloutLayoutResetToken={calloutLayoutResetToken}
             simDestinationByUnitId={simulation.simDestinationByUnitId}
             is25DView={is25DView}
             showOhtRails={ohtMode}
             ohtVehicles={ohtMode ? oht.vehicles : []}
             ohtGraph={oht.graph}
-            ohtSimActive={ohtMode && oht.status === 'playing'}
+            ohtSimActive={ohtMode && oht.status !== 'idle'}
+            ohtSimAnimating={ohtMode && oht.status === 'playing'}
             ohtStepMs={oht.stepMs}
             ohtPoodleMode={ohtPoodleMode}
             portStorageSimActive={portStorageSim.isRunning}
@@ -1138,6 +1228,83 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
               <button
                 type="button"
                 onClick={() => setSimBlockPopupOpen(false)}
+                className="rounded border border-slate-600 bg-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-600"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 시뮬 초기화 — 콜아웃 배치 처리 선택 */}
+      {resetConfirmPopupOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setResetConfirmPopupOpen(false)}
+        >
+          <div
+            className="mx-4 w-full max-w-xs rounded-lg border border-slate-600 bg-slate-800 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mb-1 text-base font-bold text-slate-100">시뮬레이션 초기화</p>
+            <p className="mb-5 text-sm text-slate-300">
+              콜아웃 배치를 초기화할까요?
+              <br />
+              <span className="text-xs text-slate-500">
+                예: 분기별 기본 위치로 다시 표현 · 아니오: 직접 옮긴 배치 유지
+              </span>
+            </p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => performSimulationReset(true)}
+                className="flex-1 rounded border border-blue-600 bg-blue-700 py-2.5 text-sm font-semibold text-white hover:bg-blue-600"
+              >
+                예
+              </button>
+              <button
+                type="button"
+                onClick={() => performSimulationReset(false)}
+                className="flex-1 rounded border border-slate-500 bg-slate-700 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-600"
+              >
+                아니오
+              </button>
+            </div>
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setResetConfirmPopupOpen(false)}
+                className="text-xs text-slate-500 hover:text-slate-400"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {noManualEntryPopupOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={() => setNoManualEntryPopupOpen(false)}
+        >
+          <div
+            className="mx-4 w-full max-w-xs rounded-lg border border-amber-500/60 bg-slate-800 p-6 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="mb-1 text-base font-bold text-amber-400">
+              투입가능한 Manual Unit이 없습니다
+            </p>
+            <p className="mb-5 text-sm text-slate-300">
+              연속 투입은 프로브가 수동 투입점에 자재를 넣는 방식입니다.
+              <br />
+              라인빌더에서 연동유닛이 없는 투입점을 만드세요.
+            </p>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setNoManualEntryPopupOpen(false)}
                 className="rounded border border-slate-600 bg-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-600"
               >
                 확인

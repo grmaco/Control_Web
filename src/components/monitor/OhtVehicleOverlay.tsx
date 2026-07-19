@@ -16,6 +16,8 @@ interface OhtVehicleOverlayProps {
   viewport: OhtViewport
   cellSize: number
   active: boolean
+  /** 애니메이션 루프 구동 여부 — 일시정지 시 false로 표시는 유지하되 RAF만 중단 */
+  animating?: boolean
   stepMs: number
   poodleMode?: boolean
 }
@@ -30,6 +32,7 @@ export function OhtVehicleOverlay({
   viewport,
   cellSize,
   active,
+  animating = active,
   stepMs,
   poodleMode = false,
 }: OhtVehicleOverlayProps) {
@@ -46,7 +49,7 @@ export function OhtVehicleOverlay({
   }
 
   useEffect(() => {
-    if (!active) return
+    if (!animating) return
     let raf = 0
     const loop = () => {
       setFrame((v) => v + 1)
@@ -54,7 +57,7 @@ export function OhtVehicleOverlay({
     }
     raf = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(raf)
-  }, [active])
+  }, [animating])
 
   if (!active || vehicles.length === 0) return null
 
