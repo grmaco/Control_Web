@@ -468,9 +468,11 @@ function findLinkedInputPort(
 
 /**
  * EXIT 유닛에 연동된 OUT 포트 반환 — 없으면 null.
- * 명시 연결(포트 속성 LOAD/UNLOAD UNIT)이 우선. 명시 연결이 없으면
- * 격자상 인접(연결)된 OUT 포트로 자동 인계 — 분기 인접 포트와 동일한 관대함.
- * 단, 다른 유닛에 명시 연결된 포트는 자동 인계 대상에서 제외.
+ * 1) 포트 속성(linkedUnitId) 명시 연결 우선
+ * 2) 없으면 인접 OUT 포트 자동 인계(Handover)
+ *    - Port.connections에 Exit가 있거나, Exit.connections에 Port가 있거나,
+ *      footprint가 직교로 맞닿은 경우
+ *    - linkedUnitId가 비었거나 Exit 자신인 포트만 후보 (다른 유닛 연결 포트 제외)
  */
 function findLinkedOutPort(
   line: ConveyorLine,
@@ -481,16 +483,22 @@ function findLinkedOutPort(
     if ((unit.portDirection ?? 'IN') !== 'OUT') continue
     if (getPortProperties(unit)?.linkedUnitId === exitUnitId) return unit
   }
+
   const exit = line.units.find((u) => u.id === exitUnitId)
   if (!exit) return null
+
   for (const unit of line.units) {
     if (!isPortUnit(unit)) continue
     if ((unit.portDirection ?? 'IN') !== 'OUT') continue
     const linkedId = getPortProperties(unit)?.linkedUnitId
-    if (linkedId != null && linkedId !== exitUnitId) continue
-    if (exit.connections.includes(unit.id) || unit.connections.includes(exit.id)) {
-      return unit
-    }
+    // 다른 유닛에 이미 명시 연결된 포트는 자동 인계 대상에서 제외
+    if (linkedId && linkedId !== exitUnitId) continue
+
+    const adjacent =
+      unit.connections.includes(exitUnitId) ||
+      exit.connections.includes(unit.id) ||
+      unitsTouchOrthogonally(exit, unit)
+    if (adjacent) return unit
   }
   return null
 }
@@ -834,13 +842,14 @@ function buildFlowChain(
   return [entryId]
 }
 
-/** 직선 출고점에 연동된 포트 유닛이 있는지 — 있으면 자재 유지, 없으면 출고 후 사라짐 */
+/**
+ * 직선 출고점에 인계 가능한 OUT 포트가 있는지.
+ * 명시 연결 + 인접 자동 인계(findLinkedOutPort)를 포함.
+ * 경로 끝에 포트가 append되면 isCompletedLoadHoldingPort가 유지 처리를 담당하므로
+ * 이 함수는 출고점 단독 종료 여부 판별 등 보조 용도.
+ */
 function exitUnitHasLinkedPort(line: ConveyorLine, unitId: string): boolean {
-  for (const u of line.units) {
-    if (!isPortUnit(u)) continue
-    if (getPortProperties(u)?.linkedUnitId === unitId) return true
-  }
-  return false
+  return findLinkedOutPort(line, unitId) != null
 }
 
 /** 투입점 → 선택 목적지(분기) 또는 최원 분기 목적지 */
@@ -888,8 +897,9 @@ export function planInboundLoadPath(
     const isExitDest = destUnit.flowRole === 'exit'
     const autoDest = !destinationUnitId || destinationUnitId !== traversal.destinationUnitId
 
-    // EXIT 목적지에 연동된 포트 처리:
-    // OUT 포트(출고구) → 자재를 외부로 줌, IN 포트(투입고) → 자재를 수령
+    // EXIT 목적지(직선 출고점 등) — 명시 연결 또는 인접 OUT/IN 포트를 경로 끝에 append.
+    // targetExitId·path 마지막 유닛 모두 linkedExitPort(또는 분기 인접 포트)로 맞춘다.
+    // 포트가 append되면 isCompletedLoadHoldingPort가 STK 핸드셰이크까지 자재를 유지한다.
     const linkedOutPort = isExitDest ? findLinkedOutPort(line, destUnit.id) : null
     const linkedInPort = isExitDest ? findLinkedInPortAtExit(line, destUnit.id) : null
     const linkedExitPort = linkedOutPort ?? linkedInPort
@@ -915,7 +925,7 @@ export function planInboundLoadPath(
     // 투입점에 연동된 IN 포트를 경로 앞에 추가 (포트가 자재 공급) → ensureTransitWaypoints 포함
     const pathWithEntry = prependLinkedInputPort(line, entryUnitId, basePath)
 
-    // EXIT 포트 또는 분기 인접 포트를 경로 끝에 추가
+    // linkedExitPort(명시·인접 OUT/IN) 또는 분기 인접 포트를 경로 끝에 추가
     const pathUnitIds = linkedExitPort
       ? [...pathWithEntry, linkedExitPort.id]
       : junctionAdjacentPort
@@ -1318,11 +1328,12 @@ function canDischargeLoadAtCurrentStep(
   if (load.targetStkId) {
     return currentId === load.targetStkId
   }
-  if (load.routingUnitId) {
-    return currentId === load.routingUnitId
-  }
+  // 경로 끝 포트(자동 인계 포함)가 targetExitId일 때 — routingUnitId(출고 CV)보다 우선
   if (load.targetExitId) {
     return currentId === load.targetExitId
+  }
+  if (load.routingUnitId) {
+    return currentId === load.routingUnitId
   }
   return false
 }
