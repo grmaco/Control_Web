@@ -16,6 +16,7 @@ import type {
   SemiCnvUnitRuntime,
 } from '../types/semicnv'
 import { updateCstJourneysFromMessage } from '../semicnv/cstJourney'
+import { findUnitBySemiCnvId } from '../semicnv/matchUnit'
 import type { AlarmEntry } from '../utils/alarms'
 import {
   applySemiCnvMessage,
@@ -229,7 +230,17 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
     }))
 
     // CST 반송 여정 집계 (CV 현황 탭 — 투입→목적지 소요·대기 시간)
-    const journeyNext = updateCstJourneysFromMessage(get().cstJourneys, message)
+    // isKnownExit: V3가 destination을 안 주는 위치라도, Web에서 물리적 종료점
+    // (flowRole=exit)으로 지정된 유닛이면 그 자체를 목적지로 보고 도착 판정에 쓴다.
+    const isKnownExit = (conveyorId: number, lineId: number, siteId: string | null): boolean => {
+      const lines = useConveyorStore.getState().lines
+      const found = findUnitBySemiCnvId(lines, conveyorId, lineId)
+      if (!found || found.unit.flowRole !== 'exit') return false
+      if (siteId == null) return true
+      const lineSiteId = get().lineCommRecords[found.line.id]?.siteId ?? found.line.semiCnvSiteId ?? null
+      return lineSiteId == null || lineSiteId === siteId
+    }
+    const journeyNext = updateCstJourneysFromMessage(get().cstJourneys, message, isKnownExit)
     if (journeyNext) {
       set({ cstJourneys: journeyNext })
       persistJourneysThrottled(() => get().cstJourneys)

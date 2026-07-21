@@ -264,6 +264,12 @@ export interface SemiCnvCstJourney {
    * startAt/arrivedAt은 "최초 관측 시각"(하한값)일 뿐이다. UI는 투입/반송 소요를 표시하지 않는다.
    */
   incomplete?: boolean
+  /**
+   * true = 정상 반출 신호(목적지에서 다른/빈 cstId 관측) 없이, V3가 이 CST를 더 이상
+   * 어디에서도 보고하지 않아 타임아웃으로 강제 종료됨 — 수동 반출·핸드셰이크 누락 등
+   * 실제 위치는 알 수 없음. UI는 "완료"가 아닌 "유실"로 구분 표시한다.
+   */
+  lost?: boolean
 }
 
 /** V3 송수신 원본 트래픽 엔트리 — V3 데이터 조회 화면용 (localStorage 미저장) */

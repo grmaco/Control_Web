@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { v4 as uuidv4 } from 'uuid'
 
 export interface AssistantMessage {
   id: string
@@ -11,6 +12,16 @@ export interface AssistantMessage {
   timestamp: string
 }
 
+/** 이상 탐지 시 코비가 먼저 말 거는 말풍선 (질문 없이 자동 표시) */
+export interface ProactiveBubble {
+  id: string
+  text: string
+  level: 'info' | 'warn' | 'error'
+  /** "자세히 분석" 클릭 시 AI에 보낼 질문 — 없으면 버튼 숨김 */
+  followupQuery?: string
+  timestamp: string
+}
+
 interface AssistantPosition {
   x: number
   y: number
@@ -19,6 +30,7 @@ interface AssistantPosition {
 const POSITION_KEY = 'assistant-position'
 const API_KEY_STORAGE = 'assistant-api-key'
 const GEMINI_KEY_STORAGE = 'assistant-gemini-key'
+const PROACTIVE_MUTED_KEY = 'assistant-proactive-muted'
 
 function loadPosition(): AssistantPosition | null {
   try {
@@ -40,6 +52,14 @@ function loadStoredKey(storageKey: string): string {
   }
 }
 
+function loadProactiveMuted(): boolean {
+  try {
+    return localStorage.getItem(PROACTIVE_MUTED_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 /** 어떤 AI 백엔드가 답변하는지 — 헤더 표시·라우팅에 사용 */
 export type AssistantProvider = 'claude' | 'gemini' | 'local'
 
@@ -51,6 +71,10 @@ interface AssistantState {
   geminiKey: string
   busy: boolean
   settingsOpen: boolean
+  /** 이상 탐지 자동 말풍선 (질문 없이 코비가 먼저 알림) — null이면 표시 안 함 */
+  proactiveBubble: ProactiveBubble | null
+  /** 자동 말풍선 음소거 (사용자 설정, localStorage 보존) */
+  proactiveMuted: boolean
 
   setOpen: (open: boolean) => void
   toggleOpen: () => void
@@ -63,6 +87,11 @@ interface AssistantState {
   updateMessage: (id: string, patch: Partial<AssistantMessage>) => void
   appendToMessage: (id: string, delta: string) => void
   clearMessages: () => void
+  /** 이상 알림 말풍선 표시 — 생성된 id 반환 (TTL 타이머가 이 id로만 닫도록) */
+  pushProactiveBubble: (bubble: Omit<ProactiveBubble, 'id' | 'timestamp'>) => string
+  /** 말풍선 닫기 — id 지정 시 현재 말풍선이 그 id일 때만 닫음(경합 방지) */
+  dismissProactiveBubble: (id?: string) => void
+  setProactiveMuted: (muted: boolean) => void
 }
 
 /** Claude 키 우선, 없으면 Gemini, 둘 다 없으면 로컬 분석 */
@@ -83,6 +112,8 @@ export const useAssistantStore = create<AssistantState>((set) => ({
   geminiKey: loadStoredKey(GEMINI_KEY_STORAGE),
   busy: false,
   settingsOpen: false,
+  proactiveBubble: null,
+  proactiveMuted: loadProactiveMuted(),
 
   setOpen: (open) => set({ open }),
   toggleOpen: () => set((s) => ({ open: !s.open })),
@@ -126,4 +157,25 @@ export const useAssistantStore = create<AssistantState>((set) => ({
       ),
     })),
   clearMessages: () => set({ messages: [] }),
+  pushProactiveBubble: (bubble) => {
+    const id = uuidv4()
+    set({ proactiveBubble: { ...bubble, id, timestamp: new Date().toISOString() } })
+    return id
+  },
+  dismissProactiveBubble: (id) =>
+    set((s) => {
+      // id 지정 시 현재 말풍선이 그 id가 아니면(이미 새 말풍선으로 교체됨) 무시
+      if (id && s.proactiveBubble && s.proactiveBubble.id !== id) return s
+      return { proactiveBubble: null }
+    }),
+  setProactiveMuted: (proactiveMuted) => {
+    try {
+      if (proactiveMuted) localStorage.setItem(PROACTIVE_MUTED_KEY, '1')
+      else localStorage.removeItem(PROACTIVE_MUTED_KEY)
+    } catch {
+      /* ignore */
+    }
+    // 음소거 켜면 현재 떠 있는 말풍선도 즉시 정리
+    set((s) => ({ proactiveMuted, proactiveBubble: proactiveMuted ? null : s.proactiveBubble }))
+  },
 }))

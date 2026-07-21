@@ -15,20 +15,31 @@ const STATUS_META: Record<SemiCnvCstJourney['status'], { label: string; cls: str
   waiting: { label: '목적지 대기', cls: 'bg-amber-900/60 text-amber-300 border-amber-700/60' },
   done: { label: '완료', cls: 'bg-emerald-900/60 text-emerald-300 border-emerald-700/60' },
 }
+const LOST_META = { label: '유실', cls: 'bg-rose-900/60 text-rose-300 border-rose-700/60' }
 
+/**
+ * V3 메시지의 timestamp(envelope)는 UTC(Z) — 문자열을 그대로 슬라이스하면
+ * 로컬(KST 등) 대비 시간이 어긋난다(예: 17시가 08시대로 표시). Date 객체의
+ * 로컬 getter로 변환해야 실제 벽시계 시각과 일치한다.
+ */
 function formatClock(iso: string | null): string {
   if (!iso) return '—'
-  return iso.slice(11, 19)
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return '—'
+  const hh = String(date.getHours()).padStart(2, '0')
+  const mm = String(date.getMinutes()).padStart(2, '0')
+  const ss = String(date.getSeconds()).padStart(2, '0')
+  return `${hh}:${mm}:${ss}`
 }
 
 function formatDuration(fromIso: string | null, toIso: string | null): string {
   if (!fromIso || !toIso) return '—'
   const ms = new Date(toIso).getTime() - new Date(fromIso).getTime()
   if (ms < 0) return '—'
-  const sec = ms / 1000
-  if (sec < 60) return `${sec.toFixed(1)}초`
+  const sec = Math.round(ms / 1000)
+  if (sec < 60) return `${sec}초`
   const totalMin = Math.floor(sec / 60)
-  if (totalMin < 60) return `${totalMin}분 ${Math.round(sec % 60)}초`
+  if (totalMin < 60) return `${totalMin}분 ${sec % 60}초`
   const h = Math.floor(totalMin / 60)
   return `${h}시간 ${totalMin % 60}분`
 }
@@ -50,7 +61,7 @@ export function CstJourneyPanel({ line }: Props) {
   // 진행 중(반송/대기) 여정이 있으면 1초마다 경과시간 갱신
   const [, setNowTick] = useState(0)
   const hasLive = useMemo(
-    () => journeys.some((j) => j.status !== 'done'),
+    () => journeys.some((j) => j.status !== 'done' && !j.lost),
     [journeys],
   )
   useEffect(() => {
@@ -108,13 +119,13 @@ export function CstJourneyPanel({ line }: Props) {
               </thead>
               <tbody className="divide-y divide-slate-800/80 bg-slate-950/60">
                 {journeys.map((j) => {
-                  const meta = STATUS_META[j.status]
+                  const meta = j.lost ? LOST_META : STATUS_META[j.status]
                   const currentId = j.hops[j.hops.length - 1].conveyorId
                   const destLabel =
                     j.destination > 0 ? unitName(j.destination, j.lineId) : '미지정'
-                  // 진행 중이면 현재 시각 기준 경과시간
-                  const transitEnd = j.arrivedAt ?? (j.status === 'moving' ? nowIso : null)
-                  const waitEnd = j.departedAt ?? (j.status === 'waiting' ? nowIso : null)
+                  // 진행 중이면 현재 시각 기준 경과시간. 유실 확정 시 마지막 관측 시각에서 멈춤
+                  const transitEnd = j.arrivedAt ?? (j.status === 'moving' ? (j.lost ? j.lastSeenAt : nowIso) : null)
+                  const waitEnd = j.departedAt ?? (j.status === 'waiting' ? (j.lost ? j.lastSeenAt : nowIso) : null)
                   // 접속 전 투입 CST — 투입/도착 시각을 알 수 없어 하한값(최초 관측)만 표시
                   const incomplete = j.incomplete === true
                   return (
@@ -125,6 +136,11 @@ export function CstJourneyPanel({ line }: Props) {
                       <td className="whitespace-nowrap px-3 py-2">
                         <span
                           className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${meta.cls}`}
+                          title={
+                            j.lost
+                              ? 'V3가 이 CST를 더 이상 어디에서도 보고하지 않아 자동 종료됨 — 정상 반출 핸드셰이크 없이(수동 반출 등) 사라진 것으로 추정. 실제 반출 시각은 알 수 없음'
+                              : undefined
+                          }
                         >
                           {meta.label}
                         </span>
@@ -152,14 +168,11 @@ export function CstJourneyPanel({ line }: Props) {
                           <>
                             {unitName(j.entryConveyorId, j.lineId)}
                             {' → '}
-                            {j.status === 'moving' ? (
-                              <>
-                                <span className="text-sky-300">{unitName(currentId, j.lineId)}</span>
-                                <span className="text-slate-500"> ⋯ {destLabel}</span>
-                              </>
-                            ) : (
-                              destLabel
-                            )}
+                            <span className={j.status === 'moving' ? 'text-sky-300' : undefined}>
+                              {unitName(currentId, j.lineId)}
+                            </span>
+                            {' → '}
+                            {destLabel}
                             <span className="ml-1 text-slate-500">({j.hops.length}홉)</span>
                           </>
                         )}
@@ -173,17 +186,19 @@ export function CstJourneyPanel({ line }: Props) {
                         ) : (
                           <>
                             {formatDuration(j.startAt, transitEnd)}
-                            {j.status === 'moving' && ' ⋯'}
+                            {j.status === 'moving' && !j.lost && ' ⋯'}
                           </>
                         )}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 font-semibold text-amber-300">
                         {incomplete && '≥ '}
                         {formatDuration(j.arrivedAt, waitEnd)}
-                        {j.status === 'waiting' && ' ⋯'}
+                        {j.status === 'waiting' && !j.lost && ' ⋯'}
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 font-mono text-slate-400">
-                        {formatClock(j.departedAt)}
+                        {j.lost
+                          ? <span className="text-rose-400/80">~{formatClock(j.lastSeenAt)}</span>
+                          : formatClock(j.departedAt)}
                       </td>
                     </tr>
                   )

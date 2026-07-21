@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { useAssistantStore, resolveAssistantProvider } from '../../store/useAssistantStore'
+import { useAssistantStore, resolveAssistantProvider, type ProactiveBubble } from '../../store/useAssistantStore'
 import { useAssistantChat } from '../../hooks/useAssistantChat'
+import { useAssistantWatcher } from '../../hooks/useAssistantWatcher'
 import { useTouchLayout } from '../../hooks/useTouchLayout'
 
 const AVATAR_SIZE_DESKTOP = 48
@@ -102,6 +103,8 @@ function AssistantChatPanel({
   const setGeminiKey = useAssistantStore((s) => s.setGeminiKey)
   const setOpen = useAssistantStore((s) => s.setOpen)
   const clearMessages = useAssistantStore((s) => s.clearMessages)
+  const proactiveMuted = useAssistantStore((s) => s.proactiveMuted)
+  const setProactiveMuted = useAssistantStore((s) => s.setProactiveMuted)
   const { send } = useAssistantChat()
 
   const provider = resolveAssistantProvider({ apiKey, geminiKey })
@@ -289,6 +292,17 @@ function AssistantChatPanel({
           <p className="text-[9.5px] leading-relaxed text-slate-500">
             키가 없으면 <b className="text-slate-400">로컬 분석 모드</b>로 동작합니다 — 실제 알람·로그 데이터를 규칙 기반으로 분석해 답변합니다.
           </p>
+          <label className="flex cursor-pointer items-center justify-between gap-2 border-t border-slate-700/60 pt-2">
+            <span className="text-[10px] text-slate-400">
+              <b className="text-cyan-300">이상 자동 알림</b> — 알람·핸드셰이크 오류 감지 시 코비가 먼저 말풍선을 띄웁니다
+            </span>
+            <input
+              type="checkbox"
+              checked={!proactiveMuted}
+              onChange={(e) => setProactiveMuted(!e.target.checked)}
+              className="h-3.5 w-3.5 shrink-0 accent-cyan-500"
+            />
+          </label>
         </div>
       )}
 
@@ -361,15 +375,116 @@ function AssistantChatPanel({
   )
 }
 
+const BUBBLE_LEVEL_CLASS: Record<ProactiveBubble['level'], string> = {
+  error: 'border-rose-500/60 bg-rose-950/95 text-rose-100 shadow-[0_0_22px_rgba(244,63,94,0.35)]',
+  warn: 'border-amber-500/60 bg-amber-950/95 text-amber-100 shadow-[0_0_22px_rgba(245,158,11,0.3)]',
+  info: 'border-cyan-500/50 bg-slate-950/95 text-cyan-100 shadow-[0_0_22px_rgba(34,211,238,0.28)]',
+}
+
+/** 이상 탐지 시 아바타 옆에 자동으로 뜨는 코비 말풍선 */
+function ProactiveSpeechBubble({
+  bubble,
+  anchorX,
+  anchorY,
+  avatarSize,
+  isMobile,
+  onOpenDetail,
+  onDismiss,
+  onMute,
+}: {
+  bubble: ProactiveBubble
+  anchorX: number
+  anchorY: number
+  avatarSize: number
+  isMobile: boolean
+  onOpenDetail: (query: string) => void
+  onDismiss: () => void
+  onMute: () => void
+}) {
+  const BUBBLE_W = isMobile ? 220 : 250
+
+  const style = useMemo<React.CSSProperties>(() => {
+    const s: React.CSSProperties = { position: 'fixed', width: BUBBLE_W, zIndex: 62 }
+    const rightHalf = anchorX + avatarSize / 2 > window.innerWidth / 2
+    const bottomHalf = anchorY + avatarSize / 2 > window.innerHeight / 2
+    // 가로: 아바타가 우측이면 오른쪽 끝을 아바타에 맞추고 왼쪽으로 펼침
+    if (rightHalf) s.left = Math.max(8, anchorX + avatarSize - BUBBLE_W)
+    else s.left = Math.min(anchorX, window.innerWidth - BUBBLE_W - 8)
+    // 세로: 아바타가 하단이면 위쪽에, 상단이면 아래쪽에 배치
+    if (bottomHalf) s.bottom = Math.max(8, window.innerHeight - anchorY + 10)
+    else s.top = Math.min(anchorY + avatarSize + 10, window.innerHeight - 8)
+    return s
+  }, [anchorX, anchorY, avatarSize, BUBBLE_W])
+
+  return (
+    <div
+      style={style}
+      className={`assistant-proactive-bubble rounded-xl border px-3 py-2.5 backdrop-blur-md ${BUBBLE_LEVEL_CLASS[bubble.level]}`}
+    >
+      <div className="flex items-start gap-2">
+        <span className="mt-px shrink-0 text-sm">
+          {bubble.level === 'error' ? '🔴' : bubble.level === 'warn' ? '🟠' : '🟢'}
+        </span>
+        <p className="flex-1 text-[11.5px] leading-relaxed">{bubble.text}</p>
+        <button
+          type="button"
+          aria-label="닫기"
+          onClick={onDismiss}
+          className="-mr-1 -mt-1 shrink-0 rounded p-0.5 opacity-70 hover:bg-white/10 hover:opacity-100"
+        >
+          <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6">
+            <path d="M3 3l10 10M13 3L3 13" strokeLinecap="round" />
+          </svg>
+        </button>
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        {bubble.followupQuery && (
+          <button
+            type="button"
+            onClick={() => onOpenDetail(bubble.followupQuery!)}
+            className="rounded-full border border-white/30 bg-white/10 px-2.5 py-0.5 text-[10.5px] font-semibold hover:bg-white/20"
+          >
+            자세히 분석
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={onMute}
+          title="자동 알림 끄기"
+          className="ml-auto rounded-full px-2 py-0.5 text-[10px] opacity-60 hover:bg-white/10 hover:opacity-100"
+        >
+          알림 끄기
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function HumanoidAssistant() {
   const isMobile = useTouchLayout()
   const avatarSize = isMobile ? AVATAR_SIZE_MOBILE : AVATAR_SIZE_DESKTOP
+
+  useAssistantWatcher()
 
   const open = useAssistantStore((s) => s.open)
   const toggleOpen = useAssistantStore((s) => s.toggleOpen)
   const busy = useAssistantStore((s) => s.busy)
   const savedPosition = useAssistantStore((s) => s.position)
   const setPosition = useAssistantStore((s) => s.setPosition)
+  const setOpen = useAssistantStore((s) => s.setOpen)
+  const proactiveBubble = useAssistantStore((s) => s.proactiveBubble)
+  const dismissProactiveBubble = useAssistantStore((s) => s.dismissProactiveBubble)
+  const setProactiveMuted = useAssistantStore((s) => s.setProactiveMuted)
+  const { send } = useAssistantChat()
+
+  const handleOpenDetail = useCallback(
+    (query: string) => {
+      dismissProactiveBubble()
+      setOpen(true)
+      void send(query)
+    },
+    [dismissProactiveBubble, setOpen, send],
+  )
 
   // 기본 위치: 우하단
   const [pos, setPos] = useState(() => {
@@ -491,12 +606,39 @@ export function HumanoidAssistant() {
         }}
         className={`assistant-avatar select-none rounded-full ${
           dragging ? 'cursor-grabbing scale-110' : 'cursor-grab'
-        } ${open ? 'assistant-avatar-active' : ''}`}
+        } ${open ? 'assistant-avatar-active' : ''} ${
+          !open && proactiveBubble ? 'assistant-avatar-alert' : ''
+        }`}
       >
         <HumanoidAvatar size={avatarSize} busy={busy} />
         {/* 미읽음/대기 알림 점 대신 busy 링 */}
         {busy && <span className="assistant-busy-ring absolute inset-0 rounded-full border-2 border-fuchsia-400/70" />}
+        {/* 이상 탐지 알림 점 (채팅 닫힘 + 말풍선 활성 시) */}
+        {!open && proactiveBubble && (
+          <span
+            className={`assistant-alert-dot absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-slate-950 ${
+              proactiveBubble.level === 'error'
+                ? 'bg-rose-500'
+                : proactiveBubble.level === 'warn'
+                  ? 'bg-amber-400'
+                  : 'bg-cyan-400'
+            }`}
+          />
+        )}
       </button>
+
+      {!open && proactiveBubble && (
+        <ProactiveSpeechBubble
+          bubble={proactiveBubble}
+          anchorX={pos.x}
+          anchorY={pos.y}
+          avatarSize={avatarSize}
+          isMobile={isMobile}
+          onOpenDetail={handleOpenDetail}
+          onDismiss={() => dismissProactiveBubble()}
+          onMute={() => setProactiveMuted(true)}
+        />
+      )}
 
       {open && (
         <AssistantChatPanel

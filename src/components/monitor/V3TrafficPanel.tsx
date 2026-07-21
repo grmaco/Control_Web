@@ -6,6 +6,23 @@ interface Props {
   onClear: () => void
 }
 
+/**
+ * V3 envelope timestamp는 UTC(Z) — 문자열 슬라이스는 로컬(KST 등) 벽시계와
+ * 어긋나므로 Date의 로컬 getter로 변환 후 두 줄(날짜/시각)로 나눈다.
+ */
+function formatLocalDateTime(iso: string): { date: string; time: string } {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return { date: '—', time: '—' }
+  const yyyy = d.getFullYear()
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const hh = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  const ss = String(d.getSeconds()).padStart(2, '0')
+  const ms = String(d.getMilliseconds()).padStart(3, '0')
+  return { date: `${yyyy}-${mm}-${dd}`, time: `${hh}:${min}:${ss}.${ms}` }
+}
+
 function directionBadge(direction: 'rx' | 'tx') {
   return direction === 'rx'
     ? { label: '수신', cls: 'bg-emerald-900/60 text-emerald-300 border-emerald-700/60' }
@@ -137,6 +154,7 @@ export function V3TrafficPanel({ entries, onClear }: Props) {
               {filtered.map((entry) => {
                 const badge = directionBadge(entry.direction)
                 const expanded = expandedId === entry.id
+                const { date: entryDate, time: entryTime } = formatLocalDateTime(entry.timestamp)
                 return (
                   <Fragment key={entry.id}>
                     <tr
@@ -146,8 +164,8 @@ export function V3TrafficPanel({ entries, onClear }: Props) {
                       }`}
                     >
                       <td className="whitespace-nowrap px-3 py-2 font-mono text-slate-400">
-                        <span className="block">{entry.timestamp.slice(0, 10)}</span>
-                        <span className="block">{entry.timestamp.slice(11, 23)}</span>
+                        <span className="block">{entryDate}</span>
+                        <span className="block">{entryTime}</span>
                       </td>
                       <td className="whitespace-nowrap px-3 py-2">
                         <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${badge.cls}`}>
