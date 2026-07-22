@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
+import { useAuthStore } from '../../store/useAuthStore'
 import { useConveyorStore } from '../../store/useConveyorStore'
 
 type NavAccent = 'cyan' | 'teal' | 'amber' | 'violet' | 'sky' | 'rose' | 'emerald'
@@ -11,15 +12,23 @@ const navItems: {
   end?: boolean
   accent: NavAccent
   icon: NavIconName
+  /** true면 개발자 로그인에서만 표시 */
+  developerOnly?: boolean
 }[] = [
   { to: '/', label: '주화면', end: true, accent: 'cyan', icon: 'home' },
   { to: '/line-status', label: '라인 현황', accent: 'teal', icon: 'status' },
   { to: '/v3-alarms', label: '알람 리스트', accent: 'amber', icon: 'alarm' },
-  { to: '/protocols', label: '데이터', accent: 'emerald', icon: 'data' },
-  { to: '/builder', label: '라인 빌더', accent: 'violet', icon: 'builder' },
+  { to: '/protocols', label: '데이터', accent: 'emerald', icon: 'data', developerOnly: true },
+  { to: '/builder', label: '라인 빌더', accent: 'violet', icon: 'builder', developerOnly: true },
   { to: '/history', label: '이력', accent: 'sky', icon: 'history' },
-  { to: '/charts', label: '차트', accent: 'rose', icon: 'chart' },
+  { to: '/charts', label: '차트', accent: 'rose', icon: 'chart', developerOnly: true },
 ]
+
+/** 역할에 맞는 메뉴 목록 — 개발자 이외에는 developerOnly 항목 숨김 */
+function useVisibleNavItems() {
+  const role = useAuthStore((s) => s.role)
+  return navItems.filter((item) => !item.developerOnly || role === 'developer')
+}
 
 function NavIcon({ name, className }: { name: NavIconName; className?: string }) {
   const cn = className ?? 'h-4 w-4 shrink-0'
@@ -98,6 +107,7 @@ function navLinkClass(isActive: boolean, accent: NavAccent, mobile = false) {
 
 export function Navigation() {
   const logApplication = useConveyorStore((s) => s.logApplication)
+  const visibleItems = useVisibleNavItems()
 
   const handleClick = (label: string) => {
     void logApplication({
@@ -108,7 +118,7 @@ export function Navigation() {
 
   return (
     <nav className="nav-menu hidden gap-0.5 md:flex">
-      {navItems.map(({ to, label, end, accent, icon }) => (
+      {visibleItems.map(({ to, label, end, accent, icon }) => (
         <NavLink
           key={to}
           to={to}
@@ -126,6 +136,7 @@ export function Navigation() {
 
 export function MobileNavigation() {
   const logApplication = useConveyorStore((s) => s.logApplication)
+  const visibleItems = useVisibleNavItems()
   const [mobileOpen, setMobileOpen] = useState(false)
 
   const handleClick = (label: string) => {
@@ -168,7 +179,7 @@ export function MobileNavigation() {
           />
           <div className="nav-menu-mobile fixed inset-x-0 top-[69px] z-50 border-b border-cyan-500/20 bg-slate-900/95 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur-xl md:hidden">
             <nav className="mx-auto flex max-w-7xl flex-col gap-1 px-4 py-3">
-              {navItems.map(({ to, label, end, accent, icon }) => (
+              {visibleItems.map(({ to, label, end, accent, icon }) => (
                 <NavLink
                   key={to}
                   to={to}

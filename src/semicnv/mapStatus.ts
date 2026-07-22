@@ -45,6 +45,7 @@ export function toUnitRuntime(item: SemiCnvConveyorStatusItem): {
       alarmMessage: item.alarmMessage ?? null,
       homeDone: item.axis?.homeDone ?? null,
       currentDegree: item.currentDegree ?? null,
+      sensors: item.sensors,
       updatedAt,
     },
   }

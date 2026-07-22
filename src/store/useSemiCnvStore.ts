@@ -309,11 +309,13 @@ export const useSemiCnvStore = create<SemiCnvState>((set, get) => {
 
     for (const [unitId, timestamp] of Object.entries(applyBuffer.unitAlarmAt)) {
       if (prevUnitAlarmAt[unitId]) continue
+      const actualAlarmCode = applyBuffer.unitRuntime[unitId]?.alarmCode
       persistUnitAlarmHistory(
         allLines,
         unitId,
         timestamp,
         applyBuffer.unitAlarms[unitId] ?? 'ALARM',
+        actualAlarmCode != null ? String(actualAlarmCode) : undefined,
       )
     }
 

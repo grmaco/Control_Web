@@ -221,8 +221,8 @@ function AssistantChatPanel({
         <div className="space-y-2.5 border-b border-cyan-500/25 bg-slate-900/80 px-3 py-2.5">
           <div>
             <p className="mb-1 text-[10px] text-slate-400">
-              <span className="font-semibold text-emerald-300">Claude</span> API 키{' '}
-              {apiKey ? '(등록됨)' : '(미등록)'} — 가장 정확한 분석
+              <span className="font-semibold text-emerald-300">Bentely</span> API 키{' '}
+              {apiKey ? '(등록됨)' : ''} — 기가막힌 분석
             </p>
             <div className="flex gap-1.5">
               <input
@@ -256,8 +256,8 @@ function AssistantChatPanel({
           </div>
           <div>
             <p className="mb-1 text-[10px] text-slate-400">
-              <span className="font-semibold text-sky-300">Gemini</span> 무료 API 키{' '}
-              {geminiKey ? '(등록됨)' : '(미등록)'} — Google AI Studio에서 무료 발급
+              <span className="font-semibold text-sky-300">장과장</span> API 키{' '}
+              {geminiKey ? '(등록됨)' : ''} — 정확한 분석
             </p>
             <div className="flex gap-1.5">
               <input

@@ -34,11 +34,9 @@ import { FLOW_CALLOUT_PANEL_CLASS, FLOW_UNIT_PEEK_HIT_CLASS } from './FlowCallou
 import { OhtSimulationBar } from './OhtSimulationBar'
 import { useOhtSimulation } from '../../hooks/useOhtSimulation'
 import { usePioPathSimBridge } from '../../hooks/usePioPathSimBridge'
-import { useV3PioBridge } from '../../hooks/useV3PioBridge'
 import { usePortStorageSimulation } from '../../hooks/usePortStorageSimulation'
 import { PortSelectModal } from './PortStorageSimOverlay'
 import { isStorageUnit } from '../../constants/conveyorTypes'
-import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 
 const CELL_SIZE = MONITOR_CELL_SIZE
 const LABELS_MIN_EFFECTIVE_CELL = 32
@@ -302,14 +300,8 @@ export function MonitorCanvas({ line }: MonitorCanvasProps) {
     },
   })
 
-  // PIO 타임차트: 실제 V3 연동 반송 → CST_TRACKING 위치 변화 기반 핸드셰이크 기록
-  const v3UnitRuntime = useSemiCnvStore((s) => s.unitRuntime)
-  const v3IsLive = useSemiCnvStore((s) => s.isLive)
-  useV3PioBridge({
-    enabled: v3IsLive,
-    unitRuntime: v3UnitRuntime,
-    line,
-  })
+  // PIO 타임차트 V3 브리지는 AppLayout에서 전역 상시 동작(모든 라인·모든 페이지)으로
+  // 마운트된다 — 여기서 다시 돌리면 이중 기록되므로 마운트하지 않는다.
 
   // 시뮬 완료 후에도 자재가 있던 셀을 시각적으로 유지 (glow 지속)
   const visualCstIds = useMemo(() => {

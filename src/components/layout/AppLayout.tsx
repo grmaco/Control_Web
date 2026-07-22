@@ -1,10 +1,12 @@
 import { useEffect, useRef } from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
 import { useSemiCnvMonitor } from '../../hooks/useSemiCnvMonitor'
+import { useV3PioBridge } from '../../hooks/useV3PioBridge'
 import { USER_ROLE_LABELS } from '../../constants/auth'
 import { useAuthStore } from '../../store/useAuthStore'
 import { useConveyorStore } from '../../store/useConveyorStore'
 import { useMonitorStore } from '../../store/useMonitorStore'
+import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import type { UserRole } from '../../types/auth'
 import { Navigation, MobileNavigation } from './Navigation'
 import { HumanoidAssistant } from '../assistant/HumanoidAssistant'
@@ -51,6 +53,13 @@ export function AppLayout() {
   const hasLoggedStart = useRef(false)
 
   useSemiCnvMonitor()
+
+  // PIO 타임차트 V3 브리지 — 전역 상시 동작. 어느 페이지·어느 라인을 보든
+  // 실제 V3 반송(cstId 위치 변화)을 감지해 핸드셰이크로 기록한다.
+  const lines = useConveyorStore((s) => s.lines)
+  const v3UnitRuntime = useSemiCnvStore((s) => s.unitRuntime)
+  const v3IsLive = useSemiCnvStore((s) => s.isLive)
+  useV3PioBridge({ enabled: v3IsLive, unitRuntime: v3UnitRuntime, lines })
 
   useEffect(() => {
     initializeMonitor()

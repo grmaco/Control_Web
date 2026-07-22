@@ -2305,12 +2305,20 @@ export function resolveSimulationUnitTransferStatus(
   let hasTransitMaterial = false
 
   for (const load of loads) {
-    if (!load.released || load.complete || load.pathUnitIds.length === 0) continue
+    if (!load.released || load.pathUnitIds.length === 0) continue
     const step = Math.min(Math.max(0, load.stepIndex), load.pathUnitIds.length - 1)
     const currentId = load.pathUnitIds[step]
     if (currentId !== unitId) continue
 
     hasMaterial = true
+    if (load.complete) {
+      // 종료점(또는 포트·OHT 회수 대기)에 도달해 그 유닛에 물리적으로 남은 완료 자재 —
+      // 자재를 실은 채 반출 대기 중이므로 ULD. (완료 자재를 건너뛰면 자재가 보이는데도
+      // 빈 칸=LD로 오표시되어, endHold 단계에서 ULD→LD로 뒤집히는 버그가 된다.)
+      // 실제로 걷어간(discharge/pickup) 자재는 loads 배열에서 제거되므로 여기 남지 않는다.
+      hasStableMaterial = true
+      continue
+    }
     if (isSimulationLoadInTransit(load, transitRequired)) hasTransitMaterial = true
     else hasStableMaterial = true
   }

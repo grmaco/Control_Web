@@ -149,9 +149,15 @@ export function ProtocolReferencePage() {
 
       <ProgramSummary program={program} />
 
-      {program.status === 'planned' ? (
-        <div className="rounded-lg border border-slate-800 bg-slate-900 p-12 text-center text-sm text-slate-400">
+      {program.status === 'planned' && program.plannedNote && (
+        <div className="rounded-lg border border-amber-800/40 bg-amber-950/20 px-4 py-3 text-xs text-amber-200/90">
           {program.plannedNote}
+        </div>
+      )}
+
+      {program.messages.length === 0 ? (
+        <div className="rounded-lg border border-slate-800 bg-slate-900 p-12 text-center text-sm text-slate-400">
+          프로토콜 메시지가 아직 정의되지 않았습니다.
         </div>
       ) : (
         <>

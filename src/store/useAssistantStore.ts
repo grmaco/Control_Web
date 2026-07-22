@@ -115,8 +115,10 @@ export const useAssistantStore = create<AssistantState>((set) => ({
   proactiveBubble: null,
   proactiveMuted: loadProactiveMuted(),
 
-  setOpen: (open) => set({ open }),
-  toggleOpen: () => set((s) => ({ open: !s.open })),
+  // 창을 닫으면 API 설정 패널도 접어, 다음에 열 때 설정창이 열려 있지 않게 함
+  setOpen: (open) => set(open ? { open } : { open, settingsOpen: false }),
+  toggleOpen: () =>
+    set((s) => (s.open ? { open: false, settingsOpen: false } : { open: true })),
   setPosition: (position) => {
     try {
       localStorage.setItem(POSITION_KEY, JSON.stringify(position))

@@ -82,9 +82,6 @@ export function CstJourneyPanel({ line }: Props) {
       <div className="mb-3 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-200">CST 반송 이력</h3>
-          <p className="mt-0.5 text-xs text-slate-500">
-            V3 CST_TRACKING 기반 — 투입→목적지 소요시간과 목적지 대기시간
-          </p>
         </div>
         {journeys.length > 0 && (
           <button

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ConveyorLine } from '../../types/conveyor'
 import { useLineCommStatus } from '../../hooks/useLineCommStatus'
+import { useAuthStore } from '../../store/useAuthStore'
 import { useSemiCnvStore } from '../../store/useSemiCnvStore'
 import { STATUS_COLORS } from '../../constants/statusColors'
 import {
@@ -14,17 +15,19 @@ import { MonitorCanvas } from './MonitorCanvas'
 import { MonitorDashboard } from './MonitorDashboard'
 import { CvStatusPanel } from './CvStatusPanel'
 import { CstJourneyPanel } from './CstJourneyPanel'
+import { V3IoPanel } from './V3IoPanel'
 import { V3LogPanel } from './V3LogPanel'
 import { V3AlarmReferencePanel } from './V3AlarmReferencePanel'
 import { V3TrafficPanel } from './V3TrafficPanel'
 
-type Tab = 'canvas' | 'map' | 'cv' | 'v3data' | 'v3log'
+type Tab = 'canvas' | 'map' | 'cv' | 'v3io' | 'v3data' | 'v3log'
 
-const TABS: { key: Tab; label: string }[] = [
+const TABS: { key: Tab; label: string; developerOnly?: boolean }[] = [
   { key: 'canvas', label: '모니터링' },
   { key: 'map',    label: '설비 상태' },
   { key: 'cv',     label: 'CV 현황' },
-  { key: 'v3data', label: 'V3 데이터' },
+  { key: 'v3io',   label: 'V3 I/O' },
+  { key: 'v3data', label: 'V3 데이터', developerOnly: true },
   { key: 'v3log',  label: 'V3 이력' },
 ]
 
@@ -36,6 +39,11 @@ interface MonitorTabViewProps {
 
 export function MonitorTabView({ line, lines, selectedLineId }: MonitorTabViewProps) {
   const [activeTab, setActiveTab] = useState<Tab>('canvas')
+  const role = useAuthStore((s) => s.role)
+  const visibleTabs = useMemo(
+    () => TABS.filter((tab) => !tab.developerOnly || role === 'developer'),
+    [role],
+  )
   const unitRuntime = useSemiCnvStore((s) => s.unitRuntime)
   const v3Logs = useSemiCnvStore((s) => s.v3Logs)
   const v3Traffic = useSemiCnvStore((s) => s.v3Traffic)
@@ -69,7 +77,7 @@ export function MonitorTabView({ line, lines, selectedLineId }: MonitorTabViewPr
     <div className="space-y-0">
       {/* 탭 헤더 — 모바일에서 가로 스크롤 */}
       <div className="app-tab-bar">
-        {TABS.map(({ key, label }) => (
+        {visibleTabs.map(({ key, label }) => (
           <button
             key={key}
             type="button"
@@ -123,7 +131,11 @@ export function MonitorTabView({ line, lines, selectedLineId }: MonitorTabViewPr
           </div>
         )}
 
-        {activeTab === 'v3data' && (
+        {activeTab === 'v3io' && (
+          <V3IoPanel line={line} unitRuntime={scopedUnitRuntime} />
+        )}
+
+        {activeTab === 'v3data' && role === 'developer' && (
           <V3TrafficPanel entries={scopedV3Traffic} onClear={clearV3Traffic} />
         )}
 

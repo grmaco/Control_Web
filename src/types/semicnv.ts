@@ -38,6 +38,12 @@ export type SemiCnvAutoCondition = 'Possible' | 'Impossible'
 export type SemiCnvAlarmEventType = 'OCCUR' | 'CLEAR'
 export type SemiCnvAlarmLevel = 'Error' | 'Warning' | 'Info'
 
+/** 컨베이어·설비 개별 I/O 센서 (입구/출구 광센서, 스토퍼, POT/NOT 등) */
+export interface SemiCnvSensorItem {
+  name: string
+  status: boolean
+}
+
 export interface SemiCnvConveyorStatusItem {
   id: number
   lineId: number
@@ -56,6 +62,8 @@ export interface SemiCnvConveyorStatusItem {
   axis?: { torque: number; homeDone: string }
   alarmCode?: number
   alarmMessage?: string
+  /** 이 컨베이어의 I/O 센서 상태 배열 — V3가 보낼 때만 존재 (V3 I/O 탭 표시용) */
+  sensors?: SemiCnvSensorItem[]
 }
 
 export interface SemiCnvLineStatusItem {
@@ -200,6 +208,8 @@ export interface SemiCnvUnitRuntime {
   homeDone: string | null
   /** 회전 유닛 현재 각도 (V3 currentDegree) */
   currentDegree: string | null
+  /** 이 컨베이어의 I/O 센서 상태 — V3가 보낼 때만 존재 (V3 I/O 탭 표시용) */
+  sensors?: SemiCnvSensorItem[]
   updatedAt: string
 }
 

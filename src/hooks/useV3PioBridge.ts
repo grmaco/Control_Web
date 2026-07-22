@@ -23,20 +23,24 @@ interface CstLocation {
  * cstId 위치 변화를 관찰해서 실제 자재 이동(A유닛→B유닛)을 감지하고, 그 시점에 STATUS
  * 프로토콜 시퀀스를 기록한다. 실제 신호 엣지가 없으므로 cstId가 한 유닛에서 사라지고
  * 다른 유닛에 동시에 나타나는 것을 "홉"으로 간주한다.
+ *
+ * 전역 상시 동작 — AppLayout에서 한 번 마운트해 모든 라인을 대상으로 관찰한다.
+ * (특정 라인 현황 페이지에서만 돌면, 차트·다른 페이지를 보는 동안 발생한 V3 반송이
+ *  기록되지 않는다. 그래서 라인 스코프를 두지 않고 전체 유닛을 본다.)
  */
 export function useV3PioBridge(options: {
   enabled: boolean
   unitRuntime: Record<string, SemiCnvUnitRuntime>
-  line: ConveyorLine
+  lines: ConveyorLine[]
 }): void {
-  const { enabled, unitRuntime, line } = options
+  const { enabled, unitRuntime, lines } = options
   // cstId → 마지막으로 관찰된 위치(unitId)와 관찰 시각
   const cstLocationRef = useRef<Map<string, CstLocation>>(new Map())
-  const lineRef = useRef(line)
+  const linesRef = useRef(lines)
 
   useEffect(() => {
-    lineRef.current = line
-  }, [line])
+    linesRef.current = lines
+  }, [lines])
 
   useEffect(() => {
     if (!enabled) {
@@ -45,8 +49,9 @@ export function useV3PioBridge(options: {
     }
 
     const tracked = cstLocationRef.current
-    const currentLine = lineRef.current
-    const unitById = new Map(currentLine.units.map((u) => [u.id, u]))
+    const unitById = new Map(
+      linesRef.current.flatMap((line) => line.units.map((u) => [u.id, u] as const)),
+    )
     const now = Date.now()
 
     // 이번 스냅샷의 cstId → unitId

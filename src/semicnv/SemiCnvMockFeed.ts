@@ -80,6 +80,11 @@ function buildConveyorStatus(tick: number): SemiCnvMessage {
         alarm: false,
         cstId: busy === 0 ? 'FOUP00231' : null,
         destination: busy === 0 ? 45 : 0,
+        sensors: [
+          { name: 'IN Photo', status: busy === 0 },
+          { name: 'OUT Photo', status: busy === 1 },
+          { name: 'Stopper Up', status: busy !== 0 },
+        ],
       },
       {
         id: 2,
@@ -96,6 +101,13 @@ function buildConveyorStatus(tick: number): SemiCnvMessage {
         cstId: null,
         destination: 0,
         currentDegree: 'Degree90_Pos',
+        sensors: [
+          { name: 'IN Photo', status: busy === 1 },
+          { name: 'OUT Photo', status: false },
+          { name: 'Rotate Home', status: true },
+          { name: 'POT', status: false },
+          { name: 'NOT', status: false },
+        ],
       },
       {
         id: 3,
@@ -111,6 +123,11 @@ function buildConveyorStatus(tick: number): SemiCnvMessage {
         alarm: false,
         cstId: null,
         destination: 0,
+        sensors: [
+          { name: 'IN Photo', status: false },
+          { name: 'OUT Photo', status: false },
+          { name: 'Stopper Up', status: true },
+        ],
       },
       {
         id: 4,
@@ -126,6 +143,12 @@ function buildConveyorStatus(tick: number): SemiCnvMessage {
         alarm: busy === 3,
         cstId: null,
         destination: 0,
+        sensors: [
+          { name: 'IN Photo', status: false },
+          { name: 'OUT Photo', status: false },
+          { name: 'Lift Up', status: busy === 2 },
+          { name: 'Lift Down', status: busy !== 2 },
+        ],
       },
     ],
   }
