@@ -36,6 +36,7 @@ interface ConveyorState {
   fetchAlarmHistory: (lineId?: string) => Promise<void>
   appendAlarmHistory: (entry: StoredAlarmEntry) => Promise<void>
   addHistory: (record: Omit<HistoryRecord, 'id' | 'timestamp'>) => Promise<void>
+  clearHistory: () => Promise<void>
   logApplication: (input: ApplicationLogInput) => Promise<void>
   updateSettings: (settings: AppSettings) => Promise<void>
   reorderLines: (activeId: string, overId: string) => Promise<void>
@@ -180,6 +181,11 @@ export const useConveyorStore = create<ConveyorState>((set, get) => ({
     }
     await storage.addHistory(fullRecord)
     await get().fetchHistory()
+  },
+
+  clearHistory: async () => {
+    await storage.clearHistory()
+    set({ history: [] })
   },
 
   logApplication: async ({ title, comment, lineId }) => {

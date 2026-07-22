@@ -17,6 +17,7 @@ export function HistoryPage() {
   const lines = useConveyorStore((s) => s.lines)
   const history = useConveyorStore((s) => s.history)
   const fetchHistory = useConveyorStore((s) => s.fetchHistory)
+  const clearHistory = useConveyorStore((s) => s.clearHistory)
 
   // 화면 전환 후 재진입해도 유지되도록 스토어에 보관(컴포넌트 로컬 state 아님)
   const lineFilter = useHistoryFilterStore((s) => s.lineFilter)
@@ -131,13 +132,55 @@ export function HistoryPage() {
             />
           </FilterField>
 
-          <div className="flex items-end">
+          <div className="flex w-full items-end justify-end gap-2">
             <button
               type="button"
               onClick={resetHistoryFilters}
-              className="app-btn app-btn-secondary app-btn-md w-full min-h-[44px]"
+              title="필터 초기화"
+              aria-label="필터 초기화"
+              className="app-btn app-btn-secondary app-btn-md inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center p-0"
             >
-              필터 초기화
+              <svg
+                className="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.75}
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (history.length === 0) return
+                if (!window.confirm('저장된 로그를 모두 삭제할까요?')) return
+                void clearHistory()
+              }}
+              disabled={history.length === 0}
+              title="로그 전체 삭제"
+              aria-label="로그 전체 삭제"
+              className="app-btn app-btn-danger app-btn-md inline-flex h-[44px] w-[44px] shrink-0 items-center justify-center p-0 disabled:opacity-40"
+            >
+              <svg
+                className="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.75}
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0V4.375c0-.621-.504-1.125-1.125-1.125h-4.5c-.621 0-1.125.504-1.125 1.125v.976m7.5 0H6.75"
+                />
+              </svg>
             </button>
           </div>
         </div>

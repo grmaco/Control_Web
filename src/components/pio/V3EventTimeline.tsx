@@ -59,8 +59,7 @@ export function V3EventTimeline() {
               isLive ? 'bg-emerald-400 shadow-[0_0_5px_#34d399]' : 'bg-slate-600'
             }`}
           />
-          V3 {connectionState}
-          {isLive ? ' · 실시간 수신 중' : ''}
+          {isLive ? 'V3 * 실시간 수신 중' : `V3 ${connectionState}`}
         </span>
         {[...counts.entries()].map(([label, n]) => (
           <span key={label} className="text-slate-400">

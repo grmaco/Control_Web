@@ -11,7 +11,11 @@ import {
   type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
-import { TransformComponent, TransformWrapper } from 'react-zoom-pan-pinch'
+import {
+  TransformComponent,
+  TransformWrapper,
+  type ReactZoomPanPinchRef,
+} from 'react-zoom-pan-pinch'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTouchLayout } from '../../hooks/useTouchLayout'
 import {
@@ -586,6 +590,41 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
 
   const computedViewport = useMemo(() => getBuilderViewport(draft), [draft])
   const viewport = frozenViewport ?? computedViewport
+
+  // 모바일에서 빌더 진입 시 라인 전체가 보이도록 맵을 자동 맞춤(fit).
+  // draft가 늦게 로드돼 뷰포트가 커질 수 있으므로 뷰포트 변화마다 재시도하되,
+  // 사용자가 맵을 한 번이라도 만지면(팬·핀치줌) 자동 맞춤을 멈춰 조작을 방해하지 않는다.
+  const transformRef = useRef<ReactZoomPanPinchRef | null>(null)
+  const userMovedMapRef = useRef(false)
+  const fitMapToLine = useCallback(() => {
+    if (!touchLayout || userMovedMapRef.current) return
+    const ref = transformRef.current
+    if (!ref) return
+    // setTimeout(0)로 다음 틱에 실행 — 레이아웃 확정 후 측정. (rAF는 백그라운드
+    // 탭에서 멈추므로 사용하지 않는다.)
+    window.setTimeout(() => {
+      if (userMovedMapRef.current) return
+      const wrapper = ref.instance.wrapperComponent
+      const content = ref.instance.contentComponent
+      if (!wrapper || !content) return
+      const availW = wrapper.offsetWidth
+      const availH = wrapper.offsetHeight
+      // 실제 렌더된 콘텐츠 크기(변환 미적용 레이아웃 크기) — 뷰포트 로드 여부와 무관하게 정확
+      const contentW = content.offsetWidth
+      const contentH = content.offsetHeight
+      if (!availW || !availH || !contentW || !contentH) return
+      const raw = Math.min(availW / contentW, availH / contentH) * 0.95
+      const scale = Math.min(4, Math.max(0.2, raw))
+      const posX = (availW - contentW * scale) / 2
+      const posY = (availH - contentH * scale) / 2
+      ref.setTransform(posX, posY, scale, 0)
+    }, 0)
+  }, [touchLayout])
+
+  // 빌더 진입/뷰포트 변화 시 맞춤 (사용자 조작 전까지)
+  useEffect(() => {
+    fitMapToLine()
+  }, [fitMapToLine, viewport.cols, viewport.rows])
   const unitFlowMap = useMemo(() => computeMinimapFlowMap(draft), [draft])
   const canCompletePlacement = draft.units.length > 0 && hasFlowEntries(draft)
   const mobileEntryLabel = useMemo(() => {
@@ -622,7 +661,7 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                   : 'text-slate-400 hover:bg-slate-800'
               }`}
             >
-              컨베이어
+              물류설비
             </button>
             <button
               type="button"
@@ -692,6 +731,16 @@ export function LineBuilder({ line, onSave }: LineBuilderProps) {
                 minScale={0.2}
                 maxScale={4}
                 smooth
+                onInit={(ref) => {
+                  transformRef.current = ref
+                  fitMapToLine()
+                }}
+                onPanningStart={() => {
+                  userMovedMapRef.current = true
+                }}
+                onZoomStart={() => {
+                  userMovedMapRef.current = true
+                }}
                 wheel={{ step: 0.004 }}
                 panning={{
                   velocityDisabled: true,

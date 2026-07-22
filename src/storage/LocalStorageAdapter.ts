@@ -70,6 +70,10 @@ export class LocalStorageAdapter implements StorageAdapter {
     writeJson(STORAGE_KEYS.history, next)
   }
 
+  async clearHistory(): Promise<void> {
+    writeJson(STORAGE_KEYS.history, [])
+  }
+
   async getAlarmHistory(lineId?: string): Promise<StoredAlarmEntry[]> {
     const history = readJson<StoredAlarmEntry[]>(STORAGE_KEYS.alarmHistory, [])
     return history

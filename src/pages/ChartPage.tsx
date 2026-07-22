@@ -232,7 +232,7 @@ export function ChartPage() {
               </span>
             )}
           </h3>
-          <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <div className="ml-auto flex w-full flex-wrap items-center gap-1.5 sm:w-auto">
             <select
               value={demoPair}
               onChange={(e) => setDemoPair(e.target.value as PioPairKind)}
@@ -245,6 +245,8 @@ export function ChartPage() {
                 </option>
               ))}
             </select>
+            {/* 모바일: 정상/지연/오류 데모를 아랫줄로 */}
+            <div className="basis-full sm:hidden" aria-hidden />
             <button
               type="button"
               onClick={() => runDemo('normal')}
@@ -266,7 +268,7 @@ export function ChartPage() {
             >
               오류 데모
             </button>
-            <span className="mx-1 h-4 w-px bg-slate-700" />
+            <span className="mx-1 hidden h-4 w-px bg-slate-700 sm:block" />
             <button
               type="button"
               onClick={handleCovyAnalyze}
