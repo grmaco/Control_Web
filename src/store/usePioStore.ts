@@ -25,6 +25,7 @@ const BASELINE_STORAGE_KEY = 'conveyor.pio.baselines'
 function defaultBaselines(): Record<PioPairKind, PioBaseline> {
   return {
     CNV_CNV: buildDefaultBaseline('CNV_CNV', 1000, 'CV↔CV 1.0s'),
+    CNV_TURN: buildDefaultBaseline('CNV_TURN', 2000, 'CV↔TCV 2.0s'),
     CNV_PORT: buildDefaultBaseline('CNV_PORT', 1000, 'CV↔PORT 1.0s'),
     PORT_STK: buildDefaultBaseline('PORT_STK', 4000, 'PORT↔STK 4.0s'),
     MODULE_OHT: buildDefaultBaseline('MODULE_OHT', 1400, 'MODULE↔OHT 1.4s'),

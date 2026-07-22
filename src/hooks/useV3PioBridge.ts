@@ -85,7 +85,9 @@ export function useV3PioBridge(options: {
           ? 'PORT_STK'
           : isPortUnit(fromUnit) || isPortUnit(toUnit)
             ? 'CNV_PORT'
-            : 'CNV_CNV'
+            : fromUnit.type === 'turn' || toUnit.type === 'turn'
+              ? 'CNV_TURN' // 회전 컨베이어가 끼면 별도 기준선 (통과 시간 다름)
+              : 'CNV_CNV'
 
       const elapsedMs = Math.min(Math.max(now - prev.seenAt, MIN_HOP_MS), MAX_HOP_MS)
 

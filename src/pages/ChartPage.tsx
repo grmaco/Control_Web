@@ -16,6 +16,7 @@ const REPLAY_SPEEDS = [0.5, 1, 2, 4]
 
 const DEMO_PAIR_KINDS: PioPairKind[] = [
   'CNV_CNV',
+  'CNV_TURN',
   'CNV_PORT',
   'PORT_STK',
   'MODULE_OHT',
@@ -45,6 +46,8 @@ function demoParticipants(kind: PioPairKind): {
   switch (kind) {
     case 'CNV_CNV':
       return { activeName: 'DEMO-CV', activeType: '직선', passiveName: 'DEMO-CV', passiveType: '직선' }
+    case 'CNV_TURN':
+      return { activeName: 'DEMO-CV', activeType: '직선', passiveName: 'DEMO-TCV', passiveType: '회전' }
     case 'CNV_PORT':
       return { activeName: 'DEMO-CV', activeType: '직선', passiveName: 'DEMO-PORT', passiveType: '포트' }
     case 'PORT_STK':

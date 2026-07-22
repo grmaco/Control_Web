@@ -14,7 +14,8 @@ export type PioSide = 'active' | 'passive'
 
 /** 핸드셰이크 쌍 유형 */
 export type PioPairKind =
-  | 'CNV_CNV' // 컨베이어 ↔ 컨베이어
+  | 'CNV_CNV' // 직선 컨베이어 ↔ 직선 컨베이어
+  | 'CNV_TURN' // 컨베이어 ↔ 회전 컨베이어 (회전은 통과 시간이 달라 기준선 분리)
   | 'CNV_PORT' // 컨베이어 ↔ 포트
   | 'PORT_STK' // 포트 ↔ 적재창고
   | 'MODULE_OHT' // 모듈 ↔ OHT

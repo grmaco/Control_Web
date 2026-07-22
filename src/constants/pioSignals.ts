@@ -11,6 +11,7 @@ import type {
 
 export const PIO_PAIR_LABELS: Record<PioPairKind, string> = {
   CNV_CNV: 'CV↔CV',
+  CNV_TURN: 'CV↔TCV',
   CNV_PORT: 'CV↔PORT',
   PORT_STK: 'PORT↔STK',
   MODULE_OHT: 'MODULE↔OHT',
@@ -195,6 +196,15 @@ const CNV_STEP_DEFS: Record<string, PioStepDef> = {
   },
 }
 
+/** 회전 컨베이어(TCV) — 회전각·정렬 시간이 더해져 직선보다 통과 시간이 길다 */
+const TURN_STEP_DEFS: Record<string, PioStepDef> = {
+  S1_TRANSFER: {
+    id: 'S1_TRANSFER',
+    label: 'BUSY 구간 (회전 이송)',
+    cause: '회전판 회전각·정렬·구동 부하·상하류 정체 여부 점검',
+  },
+}
+
 /** PORT↔STK — 포트는 PortSimStatus, 창고는 StorageSimStatus (usePortStorageSimulation과 동일 enum) */
 export const PORT_STK_ACTIVE_SIGNALS: PioSignalDef[] = [
   { name: 'IDLE', side: 'active', initial: 1, description: '대기 (반송 명령 없음)' },
@@ -234,6 +244,7 @@ export function pioSignalSetForPair(
     case 'PORT_STK':
       return { active: PORT_STK_ACTIVE_SIGNALS, passive: PORT_STK_PASSIVE_SIGNALS }
     case 'CNV_CNV':
+    case 'CNV_TURN':
     case 'CNV_PORT':
       return { active: CNV_STATUS_SIGNALS, passive: CNV_STATUS_SIGNALS_PASSIVE }
   }
@@ -246,7 +257,8 @@ function stepOrderForPair(kind: PioPairKind): PioStepId[] {
 
 function stepDefsForPair(kind: PioPairKind): Record<string, PioStepDef> {
   if (pioProtocolForPair(kind) === 'E84') return E84_STEP_DEFS
-  return kind === 'PORT_STK' ? PORT_STK_STEP_DEFS : CNV_STEP_DEFS
+  if (kind === 'PORT_STK') return PORT_STK_STEP_DEFS
+  return kind === 'CNV_TURN' ? TURN_STEP_DEFS : CNV_STEP_DEFS
 }
 
 export function pioSignalInitial(kind: PioPairKind, name: string): 0 | 1 {

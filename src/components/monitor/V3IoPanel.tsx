@@ -17,14 +17,31 @@ interface IoRow {
   sensors: Map<string, boolean>
 }
 
+/** ON / OFF / 미보유(—) 셀 — 방향(행열 전환)과 무관하게 공용 */
+function IoCell({ has, on }: { has: boolean; on: boolean }) {
+  if (!has) return <span className="text-slate-700">—</span>
+  return (
+    <span
+      className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold ${
+        on ? 'bg-emerald-700/80 text-emerald-100' : 'bg-slate-700/80 text-slate-400'
+      }`}
+    >
+      {on ? 'ON' : 'OFF'}
+    </span>
+  )
+}
+
 /**
  * V3 I/O — V3가 보내는 컨베이어별 I/O 센서(입구/출구 광센서·스토퍼·POT/NOT 등)를
- * 컨베이어(행) × 센서명(열) 매트릭스로 표시. CONVEYOR_STATUS.sensors 필드 기반.
+ * 매트릭스로 표시. CONVEYOR_STATUS.sensors 필드 기반.
+ * - 기본: 컨베이어(행) × 센서명(열)
+ * - 행열 전환: 센서명(행) × 컨베이어(열) — 센서가 많은 라인은 모바일에서 세로로 보기 편함
  * V3가 센서를 아직 보내지 않으면 안내 문구를 표시한다.
  */
 export function V3IoPanel({ line, unitRuntime }: Props) {
   const [search, setSearch] = useState('')
   const [onlyWithSensors, setOnlyWithSensors] = useState(true)
+  const [transposed, setTransposed] = useState(false)
 
   // 이 라인의 유닛 중 V3 런타임이 있는 것 → 행. 센서 배열을 Map으로.
   const rows = useMemo<IoRow[]>(() => {
@@ -68,6 +85,7 @@ export function V3IoPanel({ line, unitRuntime }: Props) {
   )
 
   const hasAnySensors = sensorNames.length > 0
+  const noResults = filteredRows.length === 0
 
   return (
     <div className="rounded-lg border border-slate-800 bg-slate-900/60 p-4">
@@ -79,6 +97,15 @@ export function V3IoPanel({ line, unitRuntime }: Props) {
           </p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setTransposed((t) => !t)}
+            title="행/열 전환 (컨베이어 ↔ 센서)"
+            className="flex items-center gap-1 rounded border border-slate-700 bg-slate-800 px-2.5 py-1 text-[11px] text-slate-300 hover:border-cyan-600 hover:text-cyan-300"
+          >
+            <span aria-hidden>⇄</span>
+            {transposed ? '센서 × 컨베이어' : '컨베이어 × 센서'}
+          </button>
           <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-400">
             <input
               type="checkbox"
@@ -121,61 +148,95 @@ export function V3IoPanel({ line, unitRuntime }: Props) {
               {filteredRows.length}개 컨베이어 · 센서 {sensorNames.length}종 · ON {totalSensorsOn}개
             </span>
           </div>
+
           <div className="overflow-auto rounded border border-slate-700">
-            <table className="w-full min-w-[640px] text-xs">
-              <thead className="sticky top-0 z-10 border-b border-slate-700 bg-slate-800 text-slate-400">
-                <tr>
-                  <th className="sticky left-0 z-20 whitespace-nowrap bg-slate-800 px-3 py-2 text-left font-medium">
-                    ID
-                  </th>
-                  <th className="whitespace-nowrap px-3 py-2 text-left font-medium">이름</th>
-                  {sensorNames.map((name) => (
-                    <th key={name} className="whitespace-nowrap px-3 py-2 text-center font-medium">
-                      {name}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.length === 0 ? (
+            {!transposed ? (
+              // ── 기본: 컨베이어(행) × 센서명(열) ──
+              <table className="w-full min-w-[640px] text-xs">
+                <thead className="sticky top-0 z-10 border-b border-slate-700 bg-slate-800 text-slate-400">
                   <tr>
-                    <td colSpan={2 + sensorNames.length} className="py-8 text-center text-slate-500">
-                      검색 결과 없음
-                    </td>
+                    <th className="sticky left-0 z-20 whitespace-nowrap bg-slate-800 px-3 py-2 text-left font-medium">
+                      ID
+                    </th>
+                    <th className="whitespace-nowrap px-3 py-2 text-left font-medium">이름</th>
+                    {sensorNames.map((name) => (
+                      <th key={name} className="whitespace-nowrap px-3 py-2 text-center font-medium">
+                        {name}
+                      </th>
+                    ))}
                   </tr>
-                ) : (
-                  filteredRows.map((row) => (
-                    <tr key={row.unitId} className="border-b border-slate-800 hover:bg-slate-800/50">
-                      <td className="sticky left-0 z-10 whitespace-nowrap bg-slate-900/95 px-3 py-2 font-mono text-cyan-400">
-                        {row.cvId}
+                </thead>
+                <tbody>
+                  {noResults ? (
+                    <tr>
+                      <td colSpan={2 + sensorNames.length} className="py-8 text-center text-slate-500">
+                        검색 결과 없음
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-slate-200">{row.name}</td>
-                      {sensorNames.map((name) => {
-                        const has = row.sensors.has(name)
-                        const on = row.sensors.get(name) === true
-                        return (
-                          <td key={name} className="px-3 py-2 text-center">
-                            {!has ? (
-                              <span className="text-slate-700">—</span>
-                            ) : (
-                              <span
-                                className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                                  on
-                                    ? 'bg-emerald-700/80 text-emerald-100'
-                                    : 'bg-slate-700/80 text-slate-400'
-                                }`}
-                              >
-                                {on ? 'ON' : 'OFF'}
-                              </span>
-                            )}
-                          </td>
-                        )
-                      })}
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    filteredRows.map((row) => (
+                      <tr key={row.unitId} className="border-b border-slate-800 hover:bg-slate-800/50">
+                        <td className="sticky left-0 z-10 whitespace-nowrap bg-slate-900/95 px-3 py-2 font-mono text-cyan-400">
+                          {row.cvId}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-slate-200">{row.name}</td>
+                        {sensorNames.map((name) => (
+                          <td key={name} className="px-3 py-2 text-center">
+                            <IoCell has={row.sensors.has(name)} on={row.sensors.get(name) === true} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            ) : (
+              // ── 전환: 센서명(행) × 컨베이어(열) ──
+              <table className="w-full min-w-[480px] text-xs">
+                <thead className="sticky top-0 z-10 border-b border-slate-700 bg-slate-800 text-slate-400">
+                  <tr>
+                    <th className="sticky left-0 z-20 whitespace-nowrap bg-slate-800 px-3 py-2 text-left font-medium">
+                      센서
+                    </th>
+                    {noResults ? (
+                      <th className="px-3 py-2 text-center font-medium">—</th>
+                    ) : (
+                      filteredRows.map((row) => (
+                        <th
+                          key={row.unitId}
+                          className="whitespace-nowrap px-3 py-2 text-center font-medium"
+                          title={`CV ID ${row.cvId}`}
+                        >
+                          {row.name}
+                        </th>
+                      ))
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {noResults ? (
+                    <tr>
+                      <td colSpan={2} className="py-8 text-center text-slate-500">
+                        검색 결과 없음
+                      </td>
+                    </tr>
+                  ) : (
+                    sensorNames.map((name) => (
+                      <tr key={name} className="border-b border-slate-800 hover:bg-slate-800/50">
+                        <td className="sticky left-0 z-10 whitespace-nowrap bg-slate-900/95 px-3 py-2 font-medium text-slate-200">
+                          {name}
+                        </td>
+                        {filteredRows.map((row) => (
+                          <td key={row.unitId} className="px-3 py-2 text-center">
+                            <IoCell has={row.sensors.has(name)} on={row.sensors.get(name) === true} />
+                          </td>
+                        ))}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            )}
           </div>
         </>
       )}

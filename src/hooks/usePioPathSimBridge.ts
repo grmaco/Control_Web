@@ -86,7 +86,11 @@ export function usePioPathSimBridge(options: {
       if (running.length >= MAX_CONCURRENT_PATH_TX) continue
 
       const pairKind: PioPairKind =
-        isPortUnit(fromUnit) || isPortUnit(toUnit) ? 'CNV_PORT' : 'CNV_CNV'
+        isPortUnit(fromUnit) || isPortUnit(toUnit)
+          ? 'CNV_PORT'
+          : fromUnit.type === 'turn' || toUnit.type === 'turn'
+            ? 'CNV_TURN' // 회전 컨베이어가 끼면 별도 기준선 (통과 시간 다름)
+            : 'CNV_CNV'
 
       // 실제 소요시간 — 회전 유닛에서 나가는 홉은 회전각별 실측시간(1.0/1.6/2.2s),
       // 그 외(직선↔직선, 직선↔포트)는 기본 전송시간(transitIntervalSec)

@@ -25,10 +25,10 @@ type Tab = 'canvas' | 'map' | 'cv' | 'v3io' | 'v3data' | 'v3log'
 const TABS: { key: Tab; label: string; developerOnly?: boolean }[] = [
   { key: 'canvas', label: '모니터링' },
   { key: 'map',    label: '설비 상태' },
-  { key: 'cv',     label: 'CV 현황' },
-  { key: 'v3io',   label: 'V3 I/O' },
-  { key: 'v3data', label: 'V3 데이터', developerOnly: true },
-  { key: 'v3log',  label: 'V3 이력' },
+  { key: 'cv',     label: '상세 현황' },
+  { key: 'v3io',   label: 'Digital I/O' },
+  { key: 'v3data', label: '상세 데이터', developerOnly: true },
+  { key: 'v3log',  label: '로그 이력' },
 ]
 
 interface MonitorTabViewProps {
